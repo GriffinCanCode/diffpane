@@ -2,8 +2,7 @@
 /dist/
 /release/
 /target/
+/resources/howmany/
 /.DS_Store
 /test-results/
 /.gist/
-
-/resources/howmany/

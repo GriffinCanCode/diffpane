@@ -6,4 +6,4 @@ test:
 install:
 	npm run install:app
 lint-doc-radar:
-	node --test tests/docs.test.mjs
+	npm run test:docs

@@ -1,0 +1,1 @@
+Move the development toolchain to Vite+ with bundled Vitest, Oxlint, Oxfmt, cached renderer builds, staged commit checks and macOS CI verification.
