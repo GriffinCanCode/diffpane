@@ -1,0 +1,29 @@
+{
+  "name": "Amadeus",
+  "scopeName": "source.amadeus",
+  "patterns": [
+    {
+      "match": "(?<space>\\s+)|(?<comment>\\#[^\\n]*|//[^\\n]*)|(?<string>\"(?:[^\"\\\\\\n]|\\\\[^\\n])*\")|(?<word>[A-Za-z_][A-Za-z_0-9#./-]*)|(?<number>[+-]?\\d+(?:/\\d+|\\.\\d+)?)|(?<symbol>[{}\\[\\],;|@:])",
+      "captures": {
+        "1": {
+          "name": "text.whitespace.amadeus"
+        },
+        "2": {
+          "name": "comment.line.amadeus"
+        },
+        "3": {
+          "name": "string.quoted.double.amadeus"
+        },
+        "4": {
+          "name": "variable.other.amadeus"
+        },
+        "5": {
+          "name": "constant.numeric.amadeus"
+        },
+        "6": {
+          "name": "punctuation.separator.amadeus"
+        }
+      }
+    }
+  ]
+}

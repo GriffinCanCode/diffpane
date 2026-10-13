@@ -1,0 +1,1 @@
+Add the diffpane terminal launcher and desktop review feed. Show only current file contents in Monaco, preserve scroll positions during live edits, and release offscreen editors. Cover Git edge cases and real Electron scrolling, saves, and resizing.

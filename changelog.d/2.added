@@ -1,0 +1,1 @@
+Add a full-window file viewer and searchable Open file picker (Cmd+P). Read unchanged tracked and nonignored untracked files, preserve the open file across saves and commits, and support direct file paths in the terminal launcher.

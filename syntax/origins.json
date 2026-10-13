@@ -1,0 +1,24 @@
+{
+  "cedar": {
+    "commit": "e592133f33e4e9d2dd93ea7ee2e003e7e4e28e66",
+    "source": "https://raw.githubusercontent.com/cedar-policy/vscode-cedar/e592133f33e4e9d2dd93ea7ee2e003e7e4e28e66/syntaxes/cedar.tmLanguage.json"
+  },
+  "cedarschema": {
+    "commit": "e592133f33e4e9d2dd93ea7ee2e003e7e4e28e66",
+    "source": "https://raw.githubusercontent.com/cedar-policy/vscode-cedar/e592133f33e4e9d2dd93ea7ee2e003e7e4e28e66/syntaxes/cedarschema.tmLanguage.json"
+  },
+  "zoning": {
+    "commit": "a288ac56274d0587831edb529916486e479a4f71",
+    "source": "https://github.com/The-Billy-Company/zoning/tree/main/editors/vscode"
+  },
+  "amadeus": {
+    "source": "libs/runtime/amadeus/amadeus/parser.py",
+    "token_sha256": "48929804f028373aa459cfc0a8efe534a6f20d17745c1c2144f5afb56c03532a"
+  },
+  "metrics": {
+    "source": "https://prometheus.io/docs/instrumenting/exposition_formats/"
+  },
+  "designcraft-script": {
+    "source": "quality/foundation/fixtures/creative-editorial/author.dcs"
+  }
+}

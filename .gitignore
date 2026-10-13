@@ -1,0 +1,7 @@
+/node_modules/
+/dist/
+/release/
+/target/
+/.DS_Store
+/test-results/
+/.gist/

@@ -1,0 +1,38 @@
+{
+  "name": "Metrics",
+  "scopeName": "source.metrics",
+  "patterns": [
+    {
+      "match": "^\\s*[#;].*$",
+      "name": "comment.line.config"
+    },
+    {
+      "begin": "\"",
+      "end": "\"",
+      "name": "string.quoted.double.config",
+      "patterns": [
+        {
+          "match": "\\\\.",
+          "name": "constant.character.escape.config"
+        }
+      ]
+    },
+    {
+      "begin": "'",
+      "end": "'",
+      "name": "string.quoted.single.config"
+    },
+    {
+      "match": "(?<![\\w.])[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?(?![\\w.])",
+      "name": "constant.numeric.config"
+    },
+    {
+      "match": "[A-Za-z_:][A-Za-z0-9_:]*",
+      "name": "variable.other.metric"
+    },
+    {
+      "match": "[{}=,]",
+      "name": "punctuation.separator.metrics"
+    }
+  ]
+}

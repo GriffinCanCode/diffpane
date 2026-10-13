@@ -1,0 +1,1 @@
+Load a pinned upstream syntax catalog on demand, preserve config source layout, cover Billy-specific formats, and retain TypeScript services for JSX/TSX. Verify real config files and Billy’s tracked text inventory in Electron.

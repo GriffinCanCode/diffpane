@@ -1,0 +1,42 @@
+{
+  "name": "Directive Config",
+  "scopeName": "source.directives",
+  "patterns": [
+    {
+      "match": "^\\s*[#;].*$",
+      "name": "comment.line.config"
+    },
+    {
+      "begin": "\"",
+      "end": "\"",
+      "name": "string.quoted.double.config",
+      "patterns": [
+        {
+          "match": "\\\\.",
+          "name": "constant.character.escape.config"
+        }
+      ]
+    },
+    {
+      "begin": "'",
+      "end": "'",
+      "name": "string.quoted.single.config"
+    },
+    {
+      "match": "(?<![\\w.])[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?(?![\\w.])",
+      "name": "constant.numeric.config"
+    },
+    {
+      "match": "^\\s*(\\S+)",
+      "captures": {
+        "1": {
+          "name": "entity.name.function.config"
+        }
+      }
+    },
+    {
+      "match": "[-+=>~&$@{}(),]+",
+      "name": "keyword.operator.config"
+    }
+  ]
+}

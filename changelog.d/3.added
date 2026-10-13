@@ -1,0 +1,1 @@
+Add a virtualized IDE explorer and lazy language services for Python, Rust, Elixir, Go, Swift, and TypeScript, with semantic colors, hints, hover, symbols, folding, and diagnostics where supported. Bound language processes and release them when idle or when a window closes.
