@@ -5,21 +5,45 @@ import path from 'node:path';
 import os from 'node:os';
 import { setupHowMany } from './setup-howmany.ts';
 
-const { version } = JSON.parse(await readFile(new URL('./package.json', import.meta.url), 'utf8'));
+const { version } = JSON.parse(
+  await readFile(new URL('./package.json', import.meta.url), 'utf8'),
+) as {
+  version: string;
+};
 
-if (process.platform !== 'darwin') throw new Error('The terminal launcher installer currently targets macOS. Use npm start on other platforms.');
+if (process.platform !== 'darwin')
+  throw new Error(
+    'The terminal launcher installer currently targets macOS. Use npm start on other platforms.',
+  );
 execFileSync('npm', ['run', 'build'], { stdio: 'inherit' });
 await setupHowMany();
 const [bundle] = await packager({
-  dir: '.', out: 'release', name: 'Diffpane', appBundleId: 'com.diffpane.app',
-  appVersion: version, overwrite: true, asar: { unpack: '**/*.node', unpackDir: '{node_modules/{basedpyright,typescript,typescript-language-server},resources/howmany}' },
-  ignore: [/^\/(release|target|tests|renderer)(\/|$)/, /^\/\./, /README\.md$/, /\.test\.mjs$/],
+  dir: '.',
+  out: 'release',
+  name: 'Diffpane',
+  appBundleId: 'com.diffpane.app',
+  icon: 'assets/diffpane.icns',
+  appVersion: version,
+  overwrite: true,
+  asar: {
+    unpack: '**/*.node',
+    unpackDir:
+      '{node_modules/{basedpyright,typescript,typescript-language-server},resources/howmany}',
+  },
+  ignore: [/^\/(release|target|tests|renderer)(\/|$)/, /^\/\./, /README\.md$/, /\.test\.(mjs|ts)$/],
 });
 const home = os.homedir();
 const destination = path.join(home, 'Applications/Diffpane.app');
-try { await rename(destination, path.join(os.tmpdir(), `Diffpane-previous-${Date.now()}.app`)); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+try {
+  await rename(destination, path.join(os.tmpdir(), `Diffpane-previous-${Date.now()}.app`));
+} catch (error) {
+  if ((error as { code?: string }).code !== 'ENOENT') throw error;
+}
 await mkdir(path.dirname(destination), { recursive: true });
-await cp(path.join(bundle, 'Diffpane.app'), destination, { recursive: true, verbatimSymlinks: true });
+await cp(path.join(bundle, 'Diffpane.app'), destination, {
+  recursive: true,
+  verbatimSymlinks: true,
+});
 execFileSync('codesign', ['--force', '--deep', '--sign', '-', destination], { stdio: 'inherit' });
 await mkdir(path.join(home, '.local/bin'), { recursive: true });
 const launcher = `#!/bin/sh
