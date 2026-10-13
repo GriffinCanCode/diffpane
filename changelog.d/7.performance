@@ -1,0 +1,1 @@
+Keep large repositories responsive with selective cache invalidation, shared and bounded document reads, cached Git blobs, background diff and search workers, coalesced live updates, and retained file view positions. Add a 50,000-file concurrent-edit performance check.

@@ -1,41 +1,39 @@
-const { contextBridge, ipcRenderer } = require('electron');
-contextBridge.exposeInMainWorld('diffpane', {
+const electron_1 = require('electron');
+const listen = (channel, callback) => {
+  const listener = (_event, value) => callback(value);
+  electron_1.ipcRenderer.on(channel, listener);
+  return () => electron_1.ipcRenderer.removeListener(channel, listener);
+};
+electron_1.contextBridge.exposeInMainWorld('diffpane', {
   howmany: {
-    export: () => ipcRenderer.invoke('howmany-export'),
-    analyze: force => ipcRenderer.invoke('howmany-analyze', force),
-    file: path => ipcRenderer.invoke('howmany-file', path),
-    close: path => ipcRenderer.invoke('howmany-close', path),
-    onEvent: callback => {
-      const listener = (_event, value) => callback(value);
-      ipcRenderer.on('howmany-event', listener);
-      return () => ipcRenderer.removeListener('howmany-event', listener);
-    },
+    export: () => electron_1.ipcRenderer.invoke('howmany-export'),
+    analyze: force => electron_1.ipcRenderer.invoke('howmany-analyze', force),
+    file: path => electron_1.ipcRenderer.invoke('howmany-file', path),
+    close: path => electron_1.ipcRenderer.invoke('howmany-close', path),
+    onEvent: callback => listen('howmany-event', callback),
   },
   language: {
-    open: input => ipcRenderer.invoke('language-open', input),
-    request: input => ipcRenderer.invoke('language-request', input),
-    cancel: id => ipcRenderer.invoke('language-cancel', id),
-    close: path => ipcRenderer.invoke('language-close', path),
-    status: () => ipcRenderer.invoke('language-status'),
-    onEvent: callback => {
-      const listener = (_event, value) => callback(value);
-      ipcRenderer.on('language-event', listener);
-      return () => ipcRenderer.removeListener('language-event', listener);
-    },
+    open: input => electron_1.ipcRenderer.invoke('language-open', input),
+    request: input => electron_1.ipcRenderer.invoke('language-request', input),
+    cancel: id => electron_1.ipcRenderer.invoke('language-cancel', id),
+    close: path => electron_1.ipcRenderer.invoke('language-close', path),
+    status: () => electron_1.ipcRenderer.invoke('language-status'),
+    onEvent: callback => listen('language-event', callback),
   },
-  snapshot: () => ipcRenderer.invoke('snapshot'),
-  files: () => ipcRenderer.invoke('files'),
-  document: (path, comparison = 'head') => ipcRenderer.invoke('document', path, comparison),
-  refresh: () => ipcRenderer.invoke('refresh'),
-  openFolder: () => ipcRenderer.invoke('open-folder'),
-  onChange: callback => {
-    const listener = (_event, value) => callback(value);
-    ipcRenderer.on('change', listener);
-    return () => ipcRenderer.removeListener('change', listener);
-  },
-  onError: callback => {
-    const listener = (_event, value) => callback(value);
-    ipcRenderer.on('backend-error', listener);
-    return () => ipcRenderer.removeListener('backend-error', listener);
-  },
+  snapshot: () => electron_1.ipcRenderer.invoke('snapshot'),
+  files: () => electron_1.ipcRenderer.invoke('files'),
+  filesDelta: revision => electron_1.ipcRenderer.invoke('files-delta', revision),
+  document: (path, comparison = 'head') =>
+    electron_1.ipcRenderer.invoke('document', path, comparison),
+  save: (path, text, expected) => electron_1.ipcRenderer.invoke('save', path, text, expected),
+  onFlushSaves: callback => listen('flush-saves', callback),
+  onResumeEditing: callback => listen('resume-editing', callback),
+  savesFlushed: success => electron_1.ipcRenderer.send('saves-flushed', success),
+  media: path => electron_1.ipcRenderer.invoke('media', path),
+  refresh: () => electron_1.ipcRenderer.invoke('refresh'),
+  openFolder: () => electron_1.ipcRenderer.invoke('open-folder'),
+  openExternal: url => electron_1.ipcRenderer.invoke('open-external', url),
+  onChange: callback => listen('change', callback),
+  onPaths: callback => listen('paths', callback),
+  onError: callback => listen('backend-error', callback),
 });
