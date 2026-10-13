@@ -1,19 +1,34 @@
+import { applyNavigationDelta, reconcileNavigationTree } from './navigation-reconcile.ts';
+
 const ROW_HEIGHT = 22;
 const OVERSCAN = 4;
 const compare = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' }).compare;
 let instance = 0;
 
 const icons = {
-  openFile: '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8.5 1.5H2v13h5m1.5-13L12 5H8.5V1.5ZM12 8v7m-3.5-3.5h7" stroke="currentColor" stroke-linejoin="round"/></svg>',
-  openFolder: '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M7 13.5H1.5v-11h4L7 4h7.5v3M1.5 6.5h13M12 9v6m-3-3h6" stroke="currentColor" stroke-linejoin="round"/></svg>',
-  collapse: '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M5 3H3v8h2m1-6h7v8H6V5Zm2 4h3" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-  refresh: '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M12.8 6.3A5 5 0 1 0 12.4 11m.4-4.7V3.4m0 2.9H9.9" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-  search: '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="6.9" cy="6.9" r="4" stroke="currentColor" stroke-width="1.2"/><path d="m10 10 3 3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>',
+  openFile:
+    '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8.5 1.5H2v13h5m1.5-13L12 5H8.5V1.5ZM12 8v7m-3.5-3.5h7" stroke="currentColor" stroke-linejoin="round"/></svg>',
+  openFolder:
+    '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M7 13.5H1.5v-11h4L7 4h7.5v3M1.5 6.5h13M12 9v6m-3-3h6" stroke="currentColor" stroke-linejoin="round"/></svg>',
+  collapse:
+    '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M5 3H3v8h2m1-6h7v8H6V5Zm2 4h3" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  refresh:
+    '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M12.8 6.3A5 5 0 1 0 12.4 11m.4-4.7V3.4m0 2.9H9.9" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  search:
+    '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="6.9" cy="6.9" r="4" stroke="currentColor" stroke-width="1.2"/><path d="m10 10 3 3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>',
 };
 
 /** Build metadata only; opening and tokenizing documents belongs to the editor. */
 export function buildNavigationTree(inventory, basePath = '') {
-  const root = { key: `dir:${basePath}`, path: basePath, name: '', kind: 'directory', parentKey: null, children: [], changedCount: 0 };
+  const root = {
+    key: `dir:${basePath}`,
+    path: basePath,
+    name: '',
+    kind: 'directory',
+    parentKey: null,
+    children: [],
+    changedCount: 0,
+  };
   const nodes = new Map([[root.key, root]]);
   const files = new Map();
   const prefix = basePath ? `${basePath}/` : '';
@@ -30,7 +45,16 @@ export function buildNavigationTree(inventory, basePath = '') {
       const key = `${directory ? 'dir' : 'file'}:${pathname}`;
       let node = nodes.get(key);
       if (!node) {
-        node = { key, path: pathname, name: parts[index], kind: directory ? 'directory' : 'file', parentKey: parent.key, children: directory ? [] : null, changedCount: 0, file: directory ? null : file };
+        node = {
+          key,
+          path: pathname,
+          name: parts[index],
+          kind: directory ? 'directory' : 'file',
+          parentKey: parent.key,
+          children: directory ? [] : null,
+          changedCount: 0,
+          file: directory ? null : file,
+        };
         nodes.set(key, node);
         parent.children.push(node);
         if (!directory) files.set(pathname, node);
@@ -39,7 +63,13 @@ export function buildNavigationTree(inventory, basePath = '') {
     }
   }
   for (const node of nodes.values()) {
-    node.children?.sort((a, b) => (a.kind !== b.kind ? a.kind === 'directory' ? -1 : 1 : compare(a.name, b.name) || compare(a.path, b.path)));
+    node.children?.sort((a, b) =>
+      a.kind !== b.kind
+        ? a.kind === 'directory'
+          ? -1
+          : 1
+        : compare(a.name, b.name) || compare(a.path, b.path),
+    );
   }
   return { root, nodes, files };
 }
@@ -48,8 +78,10 @@ export function buildNavigationTree(inventory, basePath = '') {
 export function flattenNavigationTree(tree, expanded, query = '') {
   if (query) {
     const needle = query.toLocaleLowerCase();
-    return [...tree.files.values()].filter(node => node.path.toLocaleLowerCase().includes(needle))
-      .sort((a, b) => compare(a.path, b.path)).map(node => ({ node, depth: 1 }));
+    tree.searchFiles ??= [...tree.files.values()].sort((a, b) => compare(a.path, b.path));
+    return tree.searchFiles
+      .filter(node => (node.searchPath ??= node.path.toLocaleLowerCase()).includes(needle))
+      .map(node => ({ node, depth: 1 }));
   }
   const visible = [];
   const stack = [{ node: tree.root, depth: 0 }];
@@ -67,7 +99,8 @@ export function flattenNavigationTree(tree, expanded, query = '') {
 
 export function navigationStatus(file) {
   if (file?.conflicted) return '!';
-  const status = file?.worktree && ![' ', '.'].includes(file.worktree) ? file.worktree : file?.index;
+  const status =
+    file?.worktree && ![' ', '.'].includes(file.worktree) ? file.worktree : file?.index;
   return !status || [' ', '.'].includes(status) ? '' : status === '?' ? 'U' : status;
 }
 
@@ -78,13 +111,18 @@ function scopePrefix(snapshot) {
 }
 
 /** A persistent, keyboard-accessible project tree with viewport-bounded DOM rows. */
-export function createNavigator(container, api, onOpen, { iconFor, onPick, onFolder, onOutline } = {}) {
+export function createNavigator(
+  container,
+  api,
+  onOpen,
+  { iconFor, onPick, onFolder, onOutline } = {},
+) {
   const id = ++instance;
   container.classList.add('navigator');
   container.style.setProperty('--navigator-row-height', `${ROW_HEIGHT}px`);
   container.setAttribute('aria-label', 'Project explorer');
   container.dataset.searching = 'false';
-  container.innerHTML = `<div class="navigator-heading"><button type="button" class="navigator-root" data-action="root" aria-expanded="true"><span class="navigator-chevron" aria-hidden="true"></span><span class="navigator-project">Project</span></button><div class="navigator-actions"><button type="button" class="navigator-action" data-action="open-file" aria-label="Open file" title="Open file · ⌘P">${icons.openFile}</button><button type="button" class="navigator-action" data-action="open-folder" aria-label="Open folder" title="Open folder">${icons.openFolder}</button><button type="button" class="navigator-action" data-action="refresh" aria-label="Refresh explorer" title="Refresh explorer">${icons.refresh}</button><button type="button" class="navigator-action" data-action="collapse" aria-label="Collapse folders" title="Collapse folders">${icons.collapse}</button></div></div><label class="navigator-search">${icons.search}<input type="search" placeholder="Find a file…" aria-label="Find files in explorer" spellcheck="false" autocomplete="off"></label><div class="navigator-summary" role="status">Reading files…</div><div class="navigator-tree" role="tree" aria-label="Project files" tabindex="0"><div class="navigator-rows"></div></div><details class="navigator-outline"><summary>Outline</summary><div class="symbol-list navigator-symbols"></div></details><div class="navigator-footer"><span>Project files</span><span class="navigator-total"></span></div>`;
+  container.innerHTML = `<div class="navigator-heading"><button type="button" class="navigator-root" data-action="root" aria-expanded="true"><span class="navigator-chevron" aria-hidden="true"></span><span class="navigator-project">Project</span></button><div class="navigator-actions"><button type="button" class="navigator-action" data-action="open-file" aria-label="Search files" title="Search files · ⌘P">${icons.openFile}</button><button type="button" class="navigator-action" data-action="open-folder" aria-label="Open folder" title="Open folder">${icons.openFolder}</button><button type="button" class="navigator-action" data-action="refresh" aria-label="Refresh explorer" title="Refresh explorer">${icons.refresh}</button><button type="button" class="navigator-action" data-action="collapse" aria-label="Collapse folders" title="Collapse folders">${icons.collapse}</button></div></div><label class="navigator-search">${icons.search}<input type="search" placeholder="Find a file…" aria-label="Find files in explorer" spellcheck="false" autocomplete="off"></label><div class="navigator-summary" role="status">Reading files…</div><div class="navigator-tree" role="tree" aria-label="Project files" tabindex="0"><div class="navigator-rows"></div></div><details class="navigator-outline"><summary>Outline</summary><div class="symbol-list navigator-symbols"></div></details><div class="navigator-footer"><span>Project files</span><span class="navigator-total"></span></div>`;
   const list = container.querySelector('.navigator-tree');
   const rows = container.querySelector('.navigator-rows');
   const input = container.querySelector('input');
@@ -93,14 +131,19 @@ export function createNavigator(container, api, onOpen, { iconFor, onPick, onFol
   const refreshButton = container.querySelector('[data-action="refresh"]');
   const rootButton = container.querySelector('[data-action="root"]');
   const outline = container.querySelector('.navigator-outline');
-  const onOutlineToggle = () => { if (outline.open) onOutline?.(outline.querySelector('.symbol-list')); };
+  const onOutlineToggle = () => {
+    if (outline.open) onOutline?.(outline.querySelector('.symbol-list'));
+  };
   outline.addEventListener('toggle', onOutlineToggle);
   let tree = buildNavigationTree([]);
   let expanded = new Set(['']);
   let visible = [];
+  let visibleIndex = new Map();
   let snapshot = null;
   let key = null;
   let signature = null;
+  let inventoryRevision = null;
+  let appliedInventoryRevision = null;
   let activeKey = tree.root.key;
   let selectedPath = null;
   let revealPath = null;
@@ -116,7 +159,10 @@ export function createNavigator(container, api, onOpen, { iconFor, onPick, onFol
 
   function schedule() {
     if (frame !== null || disposed) return;
-    frame = requestAnimationFrame(() => { frame = null; render(); });
+    frame = requestAnimationFrame(() => {
+      frame = null;
+      render();
+    });
   }
 
   function refreshProjection(preserve = true) {
@@ -125,14 +171,19 @@ export function createNavigator(container, api, onOpen, { iconFor, onPick, onFol
     const offset = list.scrollTop % ROW_HEIGHT;
     visible = flattenNavigationTree(tree, expanded, query);
     if (!query) visible.shift();
+    visibleIndex = new Map(visible.map((row, index) => [row.node.key, index]));
     rootButton.setAttribute('aria-expanded', String(expanded.has(tree.root.path)));
-    if (!visible.some(row => row.node.key === activeKey)) activeKey = visible[0]?.node.key ?? null;
+    if (!visibleIndex.has(activeKey)) activeKey = visible[0]?.node.key ?? null;
     if (anchor) {
-      const next = visible.findIndex(row => row.node.key === anchor);
-      if (next >= 0) list.scrollTop = next * ROW_HEIGHT + offset;
+      const next = visibleIndex.get(anchor);
+      if (next !== undefined) list.scrollTop = next * ROW_HEIGHT + offset;
     }
-    if (query) summary.textContent = `${visible.length.toLocaleString()} matching ${visible.length === 1 ? 'file' : 'files'}`;
-    else summary.textContent = loading ? 'Reading files…' : `${changes.size.toLocaleString()} changed ${changes.size === 1 ? 'file' : 'files'}`;
+    if (query)
+      summary.textContent = `${visible.length.toLocaleString()} matching ${visible.length === 1 ? 'file' : 'files'}`;
+    else
+      summary.textContent = loading
+        ? 'Reading files…'
+        : `${changes.size.toLocaleString()} changed ${changes.size === 1 ? 'file' : 'files'}`;
     total.textContent = tree.files.size.toLocaleString();
     rows.style.height = `${visible.length * ROW_HEIGHT}px`;
     render();
@@ -142,7 +193,10 @@ export function createNavigator(container, api, onOpen, { iconFor, onPick, onFol
     if (disposed || container.hidden) return;
     const height = list.clientHeight || 400;
     const start = Math.max(0, Math.floor(list.scrollTop / ROW_HEIGHT) - OVERSCAN);
-    const end = Math.min(visible.length, Math.ceil((list.scrollTop + height) / ROW_HEIGHT) + OVERSCAN);
+    const end = Math.min(
+      visible.length,
+      Math.ceil((list.scrollTop + height) / ROW_HEIGHT) + OVERSCAN,
+    );
     const retained = new Set();
     let activeId = null;
     for (let index = start; index < end; index++) {
@@ -153,7 +207,8 @@ export function createNavigator(container, api, onOpen, { iconFor, onPick, onFol
         row = document.createElement('div');
         row.className = 'navigator-row';
         row.setAttribute('role', 'treeitem');
-        row.innerHTML = '<span class="navigator-chevron" aria-hidden="true"></span><span class="navigator-icon"></span><span class="navigator-name"></span><span class="navigator-directory"></span><span class="navigator-badge"></span>';
+        row.innerHTML =
+          '<span class="navigator-chevron" aria-hidden="true"></span><span class="navigator-icon"></span><span class="navigator-name"></span><span class="navigator-directory"></span><span class="navigator-badge"></span>';
         mounted.set(node.key, row);
         rows.appendChild(row);
       }
@@ -166,7 +221,8 @@ export function createNavigator(container, api, onOpen, { iconFor, onPick, onFol
       row.style.paddingLeft = `${8 + depth * 12}px`;
       row.setAttribute('aria-level', String(depth + 1));
       row.setAttribute('aria-selected', String(node.kind === 'file' && node.path === selectedPath));
-      if (node.kind === 'directory') row.setAttribute('aria-expanded', String(expanded.has(node.path)));
+      if (node.kind === 'directory')
+        row.setAttribute('aria-expanded', String(expanded.has(node.path)));
       else row.removeAttribute('aria-expanded');
       const file = changes.get(node.path) ?? node.file;
       const status = node.kind === 'file' ? navigationStatus(file) : '';
@@ -182,15 +238,31 @@ export function createNavigator(container, api, onOpen, { iconFor, onPick, onFol
         icon.replaceChildren(image);
         icon.dataset.glyph = glyph;
       }
-      row.querySelector('.navigator-name').textContent = node.name || snapshot?.scope?.split(/[\\/]/).filter(Boolean).pop() || snapshot?.root?.split(/[\\/]/).filter(Boolean).pop() || 'Project';
-      row.querySelector('.navigator-directory').textContent = query ? node.path.slice(0, node.path.lastIndexOf('/') + 1) : '';
+      row.querySelector('.navigator-name').textContent =
+        node.name ||
+        snapshot?.scope?.split(/[\\/]/).filter(Boolean).pop() ||
+        snapshot?.root?.split(/[\\/]/).filter(Boolean).pop() ||
+        'Project';
+      row.querySelector('.navigator-directory').textContent = query
+        ? node.path.slice(0, node.path.lastIndexOf('/') + 1)
+        : '';
       const badge = row.querySelector('.navigator-badge');
-      badge.textContent = node.kind === 'directory' ? node.changedCount ? '●' : '' : status;
-      badge.title = node.kind === 'directory' && node.changedCount ? `${node.changedCount} changed ${node.changedCount === 1 ? 'file' : 'files'}` : file?.conflicted ? 'Merge conflict' : status ? `Git status: ${status}` : '';
+      badge.textContent = node.kind === 'directory' ? (node.changedCount ? '●' : '') : status;
+      badge.title =
+        node.kind === 'directory' && node.changedCount
+          ? `${node.changedCount} changed ${node.changedCount === 1 ? 'file' : 'files'}`
+          : file?.conflicted
+            ? 'Merge conflict'
+            : status
+              ? `Git status: ${status}`
+              : '';
       if (node.key === activeKey) activeId = row.id;
     }
     for (const [pathname, row] of mounted) {
-      if (!retained.has(pathname)) { row.remove(); mounted.delete(pathname); }
+      if (!retained.has(pathname)) {
+        row.remove();
+        mounted.delete(pathname);
+      }
     }
     if (activeId) list.setAttribute('aria-activedescendant', activeId);
     else list.removeAttribute('aria-activedescendant');
@@ -213,8 +285,14 @@ export function createNavigator(container, api, onOpen, { iconFor, onPick, onFol
     const node = tree.files.get(pathname);
     if (!node) return false;
     let parent = tree.nodes.get(node.parentKey);
-    while (parent) { expanded.add(parent.path); parent = tree.nodes.get(parent.parentKey); }
-    if (query && !pathname.toLocaleLowerCase().includes(query)) { input.value = ''; query = ''; }
+    while (parent) {
+      expanded.add(parent.path);
+      parent = tree.nodes.get(parent.parentKey);
+    }
+    if (query && !pathname.toLocaleLowerCase().includes(query)) {
+      input.value = '';
+      query = '';
+    }
     activeKey = node.key;
     refreshProjection();
     scrollToActive();
@@ -223,11 +301,12 @@ export function createNavigator(container, api, onOpen, { iconFor, onPick, onFol
   }
 
   function scrollToActive() {
-    const index = visible.findIndex(row => row.node.key === activeKey);
-    if (index < 0) return;
+    const index = visibleIndex.get(activeKey);
+    if (index === undefined) return;
     const top = index * ROW_HEIGHT;
     if (top < list.scrollTop) list.scrollTop = top;
-    else if (top + ROW_HEIGHT > list.scrollTop + list.clientHeight) list.scrollTop = top + ROW_HEIGHT - list.clientHeight;
+    else if (top + ROW_HEIGHT > list.scrollTop + list.clientHeight)
+      list.scrollTop = top + ROW_HEIGHT - list.clientHeight;
     render();
   }
 
@@ -239,15 +318,25 @@ export function createNavigator(container, api, onOpen, { iconFor, onPick, onFol
     if (!query) summary.textContent = 'Reading files…';
     try {
       let generation;
-      let inventory;
+      const prior = tree;
       do {
         generation = wanted;
         catalogRequests++;
-        inventory = await api.files();
-        if (disposed) return;
+        if (api.filesDelta) {
+          const delta = await api.filesDelta(appliedInventoryRevision);
+          if (disposed) return;
+          tree = delta.reset
+            ? buildNavigationTree(delta.files, scopePrefix(snapshot))
+            : applyNavigationDelta(tree, delta.files, delta.removed);
+          appliedInventoryRevision = delta.revision;
+        } else {
+          const inventory = await api.files();
+          if (disposed) return;
+          tree =
+            reconcileNavigationTree(tree, inventory, scopePrefix(snapshot)) ??
+            buildNavigationTree(inventory, scopePrefix(snapshot));
+        }
       } while (generation !== wanted);
-      const prior = tree;
-      tree = buildNavigationTree(inventory, scopePrefix(snapshot));
       if (prior.root.path !== tree.root.path) expanded = new Set([tree.root.path]);
       markChanges();
       loading = false;
@@ -266,17 +355,34 @@ export function createNavigator(container, api, onOpen, { iconFor, onPick, onFol
     if (disposed || !next || next.error) return;
     const nextKey = `${next.root}\0${next.scope ?? next.root}`;
     const nextSignature = new Set(next.files.map(file => file.path));
-    const different = !signature || signature.size !== nextSignature.size || [...nextSignature].some(pathname => !signature.has(pathname));
+    const different =
+      !signature ||
+      signature.size !== nextSignature.size ||
+      [...nextSignature].some(pathname => !signature.has(pathname));
     const changedRoot = key !== nextKey;
     const fresh = next.revision !== snapshot?.revision;
-    const refresh = changedRoot || different || (fresh && (next.changedPaths?.includes('*') || next.changedPaths?.some(pathname => !tree.files.has(pathname) && !tree.nodes.has(`dir:${pathname}`))));
+    const refresh =
+      changedRoot ||
+      (Number.isFinite(next.inventoryRevision)
+        ? next.inventoryRevision !== inventoryRevision
+        : different ||
+          (fresh &&
+            (next.changedPaths?.includes('*') ||
+              next.changedPaths?.some(
+                pathname => !tree.files.has(pathname) && !tree.nodes.has(`dir:${pathname}`),
+              ))));
     snapshot = next;
-    container.querySelector('.navigator-project').textContent = (next.scope || next.root).split(/[\\/]/).filter(Boolean).pop();
+    container.querySelector('.navigator-project').textContent = (next.scope || next.root)
+      .split(/[\\/]/)
+      .filter(Boolean)
+      .pop();
     rootButton.title = next.scope || next.root;
     changes = new Map(next.files.map(file => [file.path, file]));
     signature = nextSignature;
+    inventoryRevision = next.inventoryRevision;
     key = nextKey;
     if (changedRoot) {
+      appliedInventoryRevision = null;
       expanded = new Set([scopePrefix(next)]);
       tree = buildNavigationTree([], scopePrefix(next));
       activeKey = tree.root.key;
@@ -287,9 +393,16 @@ export function createNavigator(container, api, onOpen, { iconFor, onPick, onFol
       query = '';
       refreshProjection(false);
     }
-    markChanges();
-    refreshProjection();
-    if (refresh) { wanted++; void fetchCatalog(); }
+    if (different || changedRoot) markChanges();
+    if (!query)
+      summary.textContent = loading
+        ? 'Reading files…'
+        : `${changes.size.toLocaleString()} changed ${changes.size === 1 ? 'file' : 'files'}`;
+    schedule();
+    if (refresh) {
+      wanted++;
+      void fetchCatalog();
+    }
   }
 
   function choose(node) {
@@ -317,14 +430,24 @@ export function createNavigator(container, api, onOpen, { iconFor, onPick, onFol
   }
 
   function onKey(event) {
-    if ((event.key.toLowerCase() === 'f' && (event.metaKey || event.ctrlKey)) || (event.key.length === 1 && !event.metaKey && !event.ctrlKey && !event.altKey && event.key !== ' ')) {
+    if (
+      (event.key.toLowerCase() === 'f' && (event.metaKey || event.ctrlKey)) ||
+      (event.key.length === 1 &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !event.altKey &&
+        event.key !== ' ')
+    ) {
       event.preventDefault();
       container.dataset.searching = 'true';
       input.focus();
-      if (!event.metaKey && !event.ctrlKey) { input.value += event.key; onSearch(); }
+      if (!event.metaKey && !event.ctrlKey) {
+        input.value += event.key;
+        onSearch();
+      }
       return;
     }
-    const index = Math.max(0, visible.findIndex(row => row.node.key === activeKey));
+    const index = visibleIndex.get(activeKey) ?? 0;
     const node = visible[index]?.node;
     if (!node) return;
     let target = index;
@@ -332,16 +455,25 @@ export function createNavigator(container, api, onOpen, { iconFor, onPick, onFol
     else if (event.key === 'ArrowUp') target = Math.max(0, index - 1);
     else if (event.key === 'Home') target = 0;
     else if (event.key === 'End') target = visible.length - 1;
-    else if (event.key === 'PageDown') target = Math.min(visible.length - 1, index + Math.max(1, Math.floor(list.clientHeight / ROW_HEIGHT)));
-    else if (event.key === 'PageUp') target = Math.max(0, index - Math.max(1, Math.floor(list.clientHeight / ROW_HEIGHT)));
+    else if (event.key === 'PageDown')
+      target = Math.min(
+        visible.length - 1,
+        index + Math.max(1, Math.floor(list.clientHeight / ROW_HEIGHT)),
+      );
+    else if (event.key === 'PageUp')
+      target = Math.max(0, index - Math.max(1, Math.floor(list.clientHeight / ROW_HEIGHT)));
     else if (event.key === 'ArrowRight' && !query) {
-      if (node.kind === 'directory' && !expanded.has(node.path)) { expanded.add(node.path); refreshProjection(); }
-      else if (node.kind === 'directory' && node.children.length) target = index + 1;
+      if (node.kind === 'directory' && !expanded.has(node.path)) {
+        expanded.add(node.path);
+        refreshProjection();
+      } else if (node.kind === 'directory' && node.children.length) target = index + 1;
     } else if (event.key === 'ArrowLeft' && !query) {
-      if (node.kind === 'directory' && expanded.has(node.path)) { expanded.delete(node.path); refreshProjection(); }
-      else {
-        const parent = visible.findIndex(row => row.node.key === node.parentKey);
-        if (parent >= 0) target = parent;
+      if (node.kind === 'directory' && expanded.has(node.path)) {
+        expanded.delete(node.path);
+        refreshProjection();
+      } else {
+        const parent = visibleIndex.get(node.parentKey);
+        if (parent !== undefined) target = parent;
       }
     } else if (event.key === 'Enter' || event.key === ' ') choose(node);
     else return;
@@ -357,21 +489,49 @@ export function createNavigator(container, api, onOpen, { iconFor, onPick, onFol
     refreshProjection(false);
   }
 
-  function onSearchBlur() { if (!query) container.dataset.searching = 'false'; }
+  function onSearchBlur() {
+    if (!query) container.dataset.searching = 'false';
+  }
 
   function onSearchKey(event) {
-    if (event.key === 'ArrowDown') { event.preventDefault(); activeKey = visible[0]?.node.key; scrollToActive(); list.focus(); }
-    else if (event.key === 'Escape') { event.preventDefault(); input.value = ''; onSearch(); container.dataset.searching = 'false'; list.focus(); }
-    else if (event.key === 'Enter') { const node = tree.nodes.get(activeKey); if (node?.kind === 'file') { event.preventDefault(); choose(node); list.focus(); } }
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      activeKey = visible[0]?.node.key;
+      scrollToActive();
+      list.focus();
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      input.value = '';
+      onSearch();
+      container.dataset.searching = 'false';
+      list.focus();
+    } else if (event.key === 'Enter') {
+      const node = tree.nodes.get(activeKey);
+      if (node?.kind === 'file') {
+        event.preventDefault();
+        choose(node);
+        list.focus();
+      }
+    }
   }
 
   function onAction(event) {
     const action = event.target.closest('[data-action]')?.dataset.action;
-    if (action === 'collapse') { expanded = new Set([tree.root.path]); activeKey = tree.root.key; list.scrollTop = 0; refreshProjection(false); }
-    else if (action === 'refresh') { wanted++; void fetchCatalog(); }
-    else if (action === 'root') { choose(tree.root); }
-    else if (action === 'open-file') { void onPick?.(); }
-    else if (action === 'open-folder') { void onFolder?.(); }
+    if (action === 'collapse') {
+      expanded = new Set([tree.root.path]);
+      activeKey = tree.root.key;
+      list.scrollTop = 0;
+      refreshProjection(false);
+    } else if (action === 'refresh') {
+      wanted++;
+      void fetchCatalog();
+    } else if (action === 'root') {
+      choose(tree.root);
+    } else if (action === 'open-file') {
+      void onPick?.();
+    } else if (action === 'open-folder') {
+      void onFolder?.();
+    }
   }
 
   list.addEventListener('scroll', schedule, { passive: true });
@@ -392,7 +552,11 @@ export function createNavigator(container, api, onOpen, { iconFor, onPick, onFol
       revealPath = pathname;
       if (ensureVisible(pathname)) revealPath = null;
     },
-    toggle() { container.hidden = !container.hidden; if (!container.hidden) schedule(); return !container.hidden; },
+    toggle() {
+      container.hidden = !container.hidden;
+      if (!container.hidden) schedule();
+      return !container.hidden;
+    },
     dispose() {
       disposed = true;
       if (frame !== null) cancelAnimationFrame(frame);
@@ -409,6 +573,16 @@ export function createNavigator(container, api, onOpen, { iconFor, onPick, onFol
       mounted.clear();
       container.replaceChildren();
     },
-    stats: () => ({ inventoryFiles: tree.files.size, treeNodes: tree.nodes.size, visibleRows: visible.length, mountedRows: mounted.size, expandedFolders: expanded.size, catalogRequests, loading, selectedPath, hidden: container.hidden }),
+    stats: () => ({
+      inventoryFiles: tree.files.size,
+      treeNodes: tree.nodes.size,
+      visibleRows: visible.length,
+      mountedRows: mounted.size,
+      expandedFolders: expanded.size,
+      catalogRequests,
+      loading,
+      selectedPath,
+      hidden: container.hidden,
+    }),
   };
 }

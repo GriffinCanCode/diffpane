@@ -1,11 +1,11 @@
 ---
 doc_radar:
   sentinels:
-    - file: syntax.mjs
+    - file: syntax.ts
       contains: ['syntaxCatalog', 'linguist-languages', '@wooorm/starry-night']
     - file: syntax/origins.json
       contains: ['token_sha256', 'e592133f33e4e9d2dd93ea7ee2e003e7e4e28e66']
-    - file: renderer/grammars.js
+    - file: renderer/grammars.ts
       contains: ['createOnigurumaEngine', 'embeddedLangs']
 ---
 

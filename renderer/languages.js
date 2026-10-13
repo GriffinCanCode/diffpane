@@ -3,17 +3,68 @@ import 'monaco-editor/editor/contrib/inlayHints/browser/inlayHintsContribution.j
 import 'monaco-editor/editor/contrib/semanticTokens/browser/documentSemanticTokens.js';
 import 'monaco-editor/editor/contrib/semanticTokens/browser/viewportSemanticTokens.js';
 
-const LANGUAGES = new Set(['python', 'rust', 'elixir', 'go', 'swift', 'typescript', 'tsx', 'jsx', 'javascript']);
-const TYPESCRIPT = new Map([['tsx', 'typescriptreact'], ['jsx', 'javascriptreact'], ['javascript', 'javascript']]);
+const LANGUAGES = new Set([
+  'python',
+  'rust',
+  'elixir',
+  'go',
+  'swift',
+  'typescript',
+  'tsx',
+  'jsx',
+  'javascript',
+]);
+const TYPESCRIPT = new Map([
+  ['tsx', 'typescriptreact'],
+  ['jsx', 'javascriptreact'],
+  ['javascript', 'javascript'],
+]);
 // One protocol legend lets each server keep its own token order; `member` is TypeScript's legacy method kind.
 const LEGEND = {
-  tokenTypes: ['namespace', 'type', 'class', 'enum', 'interface', 'struct', 'typeParameter', 'parameter', 'variable', 'property', 'enumMember', 'event', 'function', 'method', 'macro', 'keyword', 'modifier', 'comment', 'string', 'number', 'regexp', 'operator', 'decorator', 'member'],
-  tokenModifiers: ['declaration', 'definition', 'readonly', 'static', 'deprecated', 'abstract', 'async', 'modification', 'documentation', 'defaultLibrary'],
+  tokenTypes: [
+    'namespace',
+    'type',
+    'class',
+    'enum',
+    'interface',
+    'struct',
+    'typeParameter',
+    'parameter',
+    'variable',
+    'property',
+    'enumMember',
+    'event',
+    'function',
+    'method',
+    'macro',
+    'keyword',
+    'modifier',
+    'comment',
+    'string',
+    'number',
+    'regexp',
+    'operator',
+    'decorator',
+    'member',
+  ],
+  tokenModifiers: [
+    'declaration',
+    'definition',
+    'readonly',
+    'static',
+    'deprecated',
+    'abstract',
+    'async',
+    'modification',
+    'documentation',
+    'defaultLibrary',
+  ],
 };
 
 function signal() {
   const listeners = new Set();
   return {
+    /** @this {void} */
     event(listener, receiver, disposables) {
       const callback = receiver ? listener.bind(receiver) : listener;
       listeners.add(callback);
@@ -21,8 +72,12 @@ function signal() {
       disposables?.push(subscription);
       return subscription;
     },
-    fire(value) { for (const listener of listeners) listener(value); },
-    dispose() { listeners.clear(); },
+    fire(value) {
+      for (const listener of listeners) listener(value);
+    },
+    dispose() {
+      listeners.clear();
+    },
   };
 }
 
@@ -58,9 +113,14 @@ function markdown(content) {
   if (content.language) {
     // Choose a fence longer than any run in the source, so docs stay code.
     let fenceLength = 3;
-    for (const match of String(content.value).matchAll(/`+/g)) fenceLength = Math.max(fenceLength, match[0].length + 1);
+    for (const match of String(content.value).matchAll(/`+/g))
+      fenceLength = Math.max(fenceLength, match[0].length + 1);
     const fence = '`'.repeat(fenceLength);
-    return { value: `${fence}${content.language}\n${content.value}\n${fence}`, isTrusted: false, supportHtml: false };
+    return {
+      value: `${fence}${content.language}\n${content.value}\n${fence}`,
+      isTrusted: false,
+      supportHtml: false,
+    };
   }
   const value = String(content.value ?? '');
   return {
@@ -74,7 +134,9 @@ function semanticTokens(result, sourceLegend, model) {
   const source = result?.data;
   if (!source || source.length % 5 || !sourceLegend?.tokenTypes) return null;
   const typeMap = sourceLegend.tokenTypes.map(type => LEGEND.tokenTypes.indexOf(type));
-  const modifierMap = (sourceLegend.tokenModifiers ?? []).map(type => LEGEND.tokenModifiers.indexOf(type));
+  const modifierMap = (sourceLegend.tokenModifiers ?? []).map(type =>
+    LEGEND.tokenModifiers.indexOf(type),
+  );
   const data = new Uint32Array(source.length);
   let output = 0;
   let line = 0;
@@ -94,12 +156,13 @@ function semanticTokens(result, sourceLegend, model) {
     column = deltaLine ? deltaColumn : column + deltaColumn;
     const targetType = typeMap[type];
     // Server-specific token types retain their lexical color rather than an invented meaning.
-    if (targetType == null || targetType < 0 || length === 0 || line >= model.getLineCount()) continue;
+    if (targetType == null || targetType < 0 || length === 0 || line >= model.getLineCount())
+      continue;
     const available = model.getLineMaxColumn(line + 1) - column - 1;
     if (available <= 0) continue;
     let targetModifiers = 0;
     for (let bit = 0; bit < modifierMap.length && bit < 32; bit++) {
-      if (modifierMap[bit] >= 0 && (modifiers & (1 << bit))) targetModifiers |= 1 << modifierMap[bit];
+      if (modifierMap[bit] >= 0 && modifiers & (1 << bit)) targetModifiers |= 1 << modifierMap[bit];
     }
     data[output++] = line - previousLine;
     data[output++] = line === previousLine ? column - previousColumn : column;
@@ -117,16 +180,18 @@ function documentSymbols(result, model) {
   return result.flatMap(symbol => {
     const range = toRange(symbol.range ?? symbol.location?.range, model);
     if (!range || typeof symbol.name !== 'string') return [];
-    return [{
-      name: symbol.name,
-      detail: symbol.detail ?? '',
-      kind: Math.max(0, Math.min(25, (symbol.kind ?? 1) - 1)),
-      tags: symbol.tags ?? (symbol.deprecated ? [1] : []),
-      containerName: symbol.containerName,
-      range,
-      selectionRange: toRange(symbol.selectionRange, model) ?? range,
-      children: documentSymbols(symbol.children, model),
-    }];
+    return [
+      {
+        name: symbol.name,
+        detail: symbol.detail ?? '',
+        kind: Math.max(0, Math.min(25, (symbol.kind ?? 1) - 1)),
+        tags: symbol.tags ?? (symbol.deprecated ? [1] : []),
+        containerName: symbol.containerName,
+        range,
+        selectionRange: toRange(symbol.selectionRange, model) ?? range,
+        children: documentSymbols(symbol.children, model),
+      },
+    ];
   });
 }
 
@@ -140,7 +205,14 @@ export function createLanguageFeatures(monaco, api, { onState = () => {} } = {})
   const semanticChanged = signal();
   const hintsChanged = signal();
   const foldingChanged = signal();
-  const metrics = { requests: 0, discarded: 0, errors: 0, semanticTokens: 0, inlayHints: 0, hovers: 0 };
+  const metrics = {
+    requests: 0,
+    discarded: 0,
+    errors: 0,
+    semanticTokens: 0,
+    inlayHints: 0,
+    hovers: 0,
+  };
   let disposed = false;
   let sequence = 0;
   const requestPrefix = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
@@ -148,7 +220,13 @@ export function createLanguageFeatures(monaco, api, { onState = () => {} } = {})
   function publish(state, status, message = '') {
     state.status = status;
     state.message = message;
-    onState({ path: state.path, language: state.language, status, message, capabilities: state.capabilities });
+    onState({
+      path: state.path,
+      language: state.language,
+      status,
+      message,
+      capabilities: state.capabilities,
+    });
   }
 
   function cancel(work) {
@@ -168,7 +246,13 @@ export function createLanguageFeatures(monaco, api, { onState = () => {} } = {})
   }
 
   function payload(state) {
-    return { path: state.path, language: state.language, languageId: state.languageId, text: state.model.getValue(), version: state.model.getVersionId() };
+    return {
+      path: state.path,
+      language: state.language,
+      languageId: state.languageId,
+      text: state.model.getValue(),
+      version: state.model.getVersionId(),
+    };
   }
 
   async function open(state) {
@@ -181,43 +265,60 @@ export function createLanguageFeatures(monaco, api, { onState = () => {} } = {})
     }
     const request = payload(state);
     publish(state, state.openVersion == null ? 'starting' : state.status, state.message);
-    state.opening = runtime.open(request).then(result => {
-      if (state.closed || disposed) return false;
-      state.openVersion = request.version;
-      state.available = Boolean(result?.available);
-      state.capabilities = result?.capabilities ?? result?.caps ?? {};
-      state.legend = result?.legend ?? state.capabilities.semanticTokensProvider?.legend;
-      const status = state.available ? 'ready' : ['missing', 'error'].includes(state.status) ? state.status : 'unavailable';
-      publish(state, status, result?.message ?? state.message);
-      if (state.available) {
-        semanticChanged.fire();
-        hintsChanged.fire();
-        foldingChanged.fire();
-      }
-      return state.available;
-    }).catch(error => {
-      if (!state.closed && !disposed) {
-        metrics.errors++;
+    state.opening = runtime
+      .open(request)
+      .then(result => {
+        if (state.closed || disposed) return false;
         state.openVersion = request.version;
-        publish(state, 'error', error.message ?? String(error));
-      }
-      return false;
-    }).finally(() => { state.opening = null; });
+        state.available = Boolean(result?.available);
+        state.capabilities = result?.capabilities ?? result?.caps ?? {};
+        state.legend = result?.legend ?? state.capabilities.semanticTokensProvider?.legend;
+        const status = state.available
+          ? 'ready'
+          : ['missing', 'error'].includes(state.status)
+            ? state.status
+            : 'unavailable';
+        publish(state, status, result?.message ?? state.message);
+        if (state.available) {
+          semanticChanged.fire();
+          hintsChanged.fire();
+          foldingChanged.fire();
+        }
+        return state.available;
+      })
+      .catch(error => {
+        if (!state.closed && !disposed) {
+          metrics.errors++;
+          state.openVersion = request.version;
+          publish(state, 'error', error.message ?? String(error));
+        }
+        return false;
+      })
+      .finally(() => {
+        state.opening = null;
+      });
     return state.opening;
   }
 
   async function request(state, method, params, token, cache = false) {
-    if (!state || state.closed || token?.isCancellationRequested || !state.visible || !state.active) return null;
+    if (!state || state.closed || token?.isCancellationRequested || !state.visible || !state.active)
+      return null;
     const epoch = state.epoch;
-    if (!await open(state) || state.closed || epoch !== state.epoch || token?.isCancellationRequested) return null;
-    const capability = ({
+    if (
+      !(await open(state)) ||
+      state.closed ||
+      epoch !== state.epoch ||
+      token?.isCancellationRequested
+    )
+      return null;
+    const capability = {
       'textDocument/hover': 'hoverProvider',
       'textDocument/inlayHint': 'inlayHintProvider',
       'textDocument/documentSymbol': 'documentSymbolProvider',
       'textDocument/foldingRange': 'foldingRangeProvider',
       'textDocument/semanticTokens/full': 'semanticTokensProvider',
       'textDocument/semanticTokens/range': 'semanticTokensProvider',
-    })[method];
+    }[method];
     const supported = state.capabilities[capability];
     if (capability && !supported) return null;
     if (method === 'textDocument/semanticTokens/full' && !supported.full) return null;
@@ -227,15 +328,31 @@ export function createLanguageFeatures(monaco, api, { onState = () => {} } = {})
     let work = state.pending.get(key);
     if (!work) {
       metrics.requests++;
-      work = { id: `${requestPrefix}:${++sequence}`, canceled: false, clients: new Set(), promise: null };
-      work.promise = runtime.request({ path: state.path, language: state.language, method, params, version: state.model.getVersionId(), requestId: work.id })
+      work = {
+        id: `${requestPrefix}:${++sequence}`,
+        canceled: false,
+        clients: new Set(),
+        promise: null,
+      };
+      work.promise = runtime
+        .request({
+          path: state.path,
+          language: state.language,
+          method,
+          params,
+          version: state.model.getVersionId(),
+          requestId: work.id,
+        })
         .catch(error => {
           if (!state.closed && epoch === state.epoch && !work.canceled) {
             metrics.errors++;
             publish(state, 'error', error.message ?? String(error));
           }
           return null;
-        }).finally(() => { if (state.pending.get(key) === work) state.pending.delete(key); });
+        })
+        .finally(() => {
+          if (state.pending.get(key) === work) state.pending.delete(key);
+        });
       state.pending.set(key, work);
     }
     const client = {};
@@ -250,12 +367,24 @@ export function createLanguageFeatures(monaco, api, { onState = () => {} } = {})
     const result = await work.promise;
     cancellation?.dispose();
     work.clients.delete(client);
-    if (disposed || state.closed || epoch !== state.epoch || token?.isCancellationRequested || work.canceled) {
+    if (
+      disposed ||
+      state.closed ||
+      epoch !== state.epoch ||
+      token?.isCancellationRequested ||
+      work.canceled
+    ) {
       metrics.discarded++;
       return null;
     }
     // An initialized server may still be indexing; an empty first answer is not a proof of absence.
-    if (cache && result != null && (!Array.isArray(result) || result.length) && (!result.data || result.data.length)) state.cache.set(key, result);
+    if (
+      cache &&
+      result != null &&
+      (!Array.isArray(result) || result.length) &&
+      (!result.data || result.data.length)
+    )
+      state.cache.set(key, result);
     return result;
   }
 
@@ -265,71 +394,129 @@ export function createLanguageFeatures(monaco, api, { onState = () => {} } = {})
 
   for (const language of LANGUAGES) {
     const selector = { language, scheme: 'file' };
-    disposables.push(monaco.languages.registerHoverProvider(selector, {
-      async provideHover(model, position, token) {
-        const state = stateFor(model);
-        if (state) state.active = true;
-        const result = await request(state, 'textDocument/hover', { position: fromPosition(position) }, token);
-        if (!result) return null;
-        metrics.hovers++;
-        return { contents: (Array.isArray(result.contents) ? result.contents : [result.contents]).map(markdown).filter(Boolean), range: toRange(result.range, model) };
-      },
-    }));
-    disposables.push(monaco.languages.registerDocumentSymbolProvider(selector, {
-      displayName: 'Language server',
-      async provideDocumentSymbols(model, token) {
-        return documentSymbols(await request(stateFor(model), 'textDocument/documentSymbol', {}, token, true), model);
-      },
-    }));
-    disposables.push(monaco.languages.registerFoldingRangeProvider(selector, {
-      onDidChange: foldingChanged.event,
-      async provideFoldingRanges(model, _context, token) {
-        const result = await request(stateFor(model), 'textDocument/foldingRange', {}, token, true);
-        if (!Array.isArray(result)) return null;
-        return result.filter(range => Number.isInteger(range.startLine) && Number.isInteger(range.endLine) && range.endLine > range.startLine)
-          .map(range => ({ start: range.startLine + 1, end: Math.min(range.endLine + 1, model.getLineCount()), kind: range.kind ? new monaco.languages.FoldingRangeKind(range.kind) : undefined }));
-      },
-    }));
-    disposables.push(monaco.languages.registerDocumentSemanticTokensProvider(selector, {
-      onDidChange: semanticChanged.event,
-      getLegend: () => LEGEND,
-      async provideDocumentSemanticTokens(model, _lastResultId, token) {
-        const state = stateFor(model);
-        const result = await request(state, 'textDocument/semanticTokens/full', {}, token, true);
-        const tokens = semanticTokens(result, state?.legend, model);
-        metrics.semanticTokens += (tokens?.data.length ?? 0) / 5;
-        return tokens;
-      },
-      releaseDocumentSemanticTokens() {},
-    }));
-    disposables.push(monaco.languages.registerDocumentRangeSemanticTokensProvider(selector, {
-      getLegend: () => LEGEND,
-      async provideDocumentRangeSemanticTokens(model, range, token) {
-        const state = stateFor(model);
-        const result = await request(state, 'textDocument/semanticTokens/range', { range: fromRange(range) }, token);
-        const tokens = semanticTokens(result, state?.legend, model);
-        metrics.semanticTokens += (tokens?.data.length ?? 0) / 5;
-        return tokens;
-      },
-    }));
-    disposables.push(monaco.languages.registerInlayHintsProvider(selector, {
-      displayName: 'Language server',
-      onDidChangeInlayHints: hintsChanged.event,
-      async provideInlayHints(model, range, token) {
-        const result = await request(stateFor(model), 'textDocument/inlayHint', { range: fromRange(range) }, token);
-        if (!Array.isArray(result)) return null;
-        const hints = result.filter(hint => hint.position && (typeof hint.label === 'string' || Array.isArray(hint.label))).map(hint => ({
-          position: toPosition(hint.position),
-          label: Array.isArray(hint.label) ? hint.label.map(part => ({ label: part.value, tooltip: markdown(part.tooltip) })) : hint.label,
-          kind: hint.kind,
-          tooltip: markdown(hint.tooltip),
-          paddingLeft: hint.paddingLeft,
-          paddingRight: hint.paddingRight,
-        }));
-        metrics.inlayHints += hints.length;
-        return { hints, dispose() {} };
-      },
-    }));
+    disposables.push(
+      monaco.languages.registerHoverProvider(selector, {
+        async provideHover(model, position, token) {
+          const state = stateFor(model);
+          if (state) state.active = true;
+          const result = await request(
+            state,
+            'textDocument/hover',
+            { position: fromPosition(position) },
+            token,
+          );
+          if (!result) return null;
+          metrics.hovers++;
+          return {
+            contents: (Array.isArray(result.contents) ? result.contents : [result.contents])
+              .map(markdown)
+              .filter(Boolean),
+            range: toRange(result.range, model),
+          };
+        },
+      }),
+    );
+    disposables.push(
+      monaco.languages.registerDocumentSymbolProvider(selector, {
+        displayName: 'Language server',
+        async provideDocumentSymbols(model, token) {
+          return documentSymbols(
+            await request(stateFor(model), 'textDocument/documentSymbol', {}, token, true),
+            model,
+          );
+        },
+      }),
+    );
+    disposables.push(
+      monaco.languages.registerFoldingRangeProvider(selector, {
+        onDidChange: foldingChanged.event,
+        async provideFoldingRanges(model, _context, token) {
+          const result = await request(
+            stateFor(model),
+            'textDocument/foldingRange',
+            {},
+            token,
+            true,
+          );
+          if (!Array.isArray(result)) return null;
+          return result
+            .filter(
+              range =>
+                Number.isInteger(range.startLine) &&
+                Number.isInteger(range.endLine) &&
+                range.endLine > range.startLine,
+            )
+            .map(range => ({
+              start: range.startLine + 1,
+              end: Math.min(range.endLine + 1, model.getLineCount()),
+              kind: range.kind ? new monaco.languages.FoldingRangeKind(range.kind) : undefined,
+            }));
+        },
+      }),
+    );
+    disposables.push(
+      monaco.languages.registerDocumentSemanticTokensProvider(selector, {
+        onDidChange: semanticChanged.event,
+        getLegend: () => LEGEND,
+        async provideDocumentSemanticTokens(model, _lastResultId, token) {
+          const state = stateFor(model);
+          const result = await request(state, 'textDocument/semanticTokens/full', {}, token, true);
+          const tokens = semanticTokens(result, state?.legend, model);
+          metrics.semanticTokens += (tokens?.data.length ?? 0) / 5;
+          return tokens;
+        },
+        releaseDocumentSemanticTokens() {},
+      }),
+    );
+    disposables.push(
+      monaco.languages.registerDocumentRangeSemanticTokensProvider(selector, {
+        getLegend: () => LEGEND,
+        async provideDocumentRangeSemanticTokens(model, range, token) {
+          const state = stateFor(model);
+          const result = await request(
+            state,
+            'textDocument/semanticTokens/range',
+            { range: fromRange(range) },
+            token,
+          );
+          const tokens = semanticTokens(result, state?.legend, model);
+          metrics.semanticTokens += (tokens?.data.length ?? 0) / 5;
+          return tokens;
+        },
+      }),
+    );
+    disposables.push(
+      monaco.languages.registerInlayHintsProvider(selector, {
+        displayName: 'Language server',
+        onDidChangeInlayHints: hintsChanged.event,
+        async provideInlayHints(model, range, token) {
+          const result = await request(
+            stateFor(model),
+            'textDocument/inlayHint',
+            { range: fromRange(range) },
+            token,
+          );
+          if (!Array.isArray(result)) return null;
+          const hints = result
+            .filter(
+              hint =>
+                hint.position && (typeof hint.label === 'string' || Array.isArray(hint.label)),
+            )
+            .map(hint => ({
+              position: toPosition(hint.position),
+              label: Array.isArray(hint.label)
+                ? hint.label.map(part => ({ label: part.value, tooltip: markdown(part.tooltip) }))
+                : hint.label,
+              kind: hint.kind,
+              tooltip: markdown(hint.tooltip),
+              paddingLeft: hint.paddingLeft,
+              paddingRight: hint.paddingRight,
+            }));
+          metrics.inlayHints += hints.length;
+          return { hints, dispose() {} };
+        },
+      }),
+    );
   }
 
   const unsubscribe = runtime?.onEvent(event => {
@@ -360,26 +547,42 @@ export function createLanguageFeatures(monaco, api, { onState = () => {} } = {})
     const state = paths.get(event.path);
     if (!state || state.closed || state.model.isDisposed()) return;
     if (event.version != null && event.version !== state.model.getVersionId()) return;
-    const severities = [monaco.MarkerSeverity.Error, monaco.MarkerSeverity.Warning, monaco.MarkerSeverity.Info, monaco.MarkerSeverity.Hint];
+    const severities = [
+      monaco.MarkerSeverity.Error,
+      monaco.MarkerSeverity.Warning,
+      monaco.MarkerSeverity.Info,
+      monaco.MarkerSeverity.Hint,
+    ];
     const markers = (event.diagnostics ?? []).flatMap(diagnostic => {
       const range = toRange(diagnostic.range, state.model);
       if (!range) return [];
-      return [{
-        ...range,
-        message: diagnostic.message,
-        severity: severities[(diagnostic.severity ?? 1) - 1] ?? monaco.MarkerSeverity.Error,
-        source: diagnostic.source,
-        code: diagnostic.code == null ? undefined : String(diagnostic.code),
-        tags: diagnostic.tags,
-        modelVersionId: state.model.getVersionId(),
-        relatedInformation: diagnostic.relatedInformation?.map(info => ({
-          ...toRange(info.location.range), resource: monaco.Uri.parse(info.location.uri), message: info.message,
-        })),
-      }];
+      return [
+        {
+          ...range,
+          message: diagnostic.message,
+          severity: severities[(diagnostic.severity ?? 1) - 1] ?? monaco.MarkerSeverity.Error,
+          source: diagnostic.source,
+          code: diagnostic.code == null ? undefined : String(diagnostic.code),
+          tags: diagnostic.tags,
+          modelVersionId: state.model.getVersionId(),
+          relatedInformation: diagnostic.relatedInformation?.map(info => ({
+            ...toRange(info.location.range),
+            resource: monaco.Uri.parse(info.location.uri),
+            message: info.message,
+          })),
+        },
+      ];
     });
     monaco.editor.setModelMarkers(state.model, 'diffpane-lsp', markers);
     state.diagnostics = markers.length;
-    onState({ path: state.path, language: state.language, status: state.status, message: state.message, capabilities: state.capabilities, diagnostics: markers.length });
+    onState({
+      path: state.path,
+      language: state.language,
+      status: state.status,
+      message: state.message,
+      capabilities: state.capabilities,
+      diagnostics: markers.length,
+    });
   });
 
   function attachModel(editor, model, path, { active = true } = {}) {
@@ -388,17 +591,35 @@ export function createLanguageFeatures(monaco, api, { onState = () => {} } = {})
     const key = model.uri.toString();
     states.get(key)?.cleanup();
     const state = {
-      editor, model, path, language: TYPESCRIPT.has(language) ? 'typescript' : language,
-      languageId: TYPESCRIPT.get(language) ?? language, active, visible: false, closed: false, available: false,
-      epoch: 0, openVersion: null, opening: null, capabilities: {}, legend: null,
-      status: runtime ? 'idle' : 'unavailable', message: '', diagnostics: 0,
-      pending: new Map(), cache: new Map(), timer: null, idle: null,
+      editor,
+      model,
+      path,
+      language: TYPESCRIPT.has(language) ? 'typescript' : language,
+      languageId: TYPESCRIPT.get(language) ?? language,
+      active,
+      visible: false,
+      closed: false,
+      available: false,
+      epoch: 0,
+      openVersion: null,
+      opening: null,
+      capabilities: {},
+      legend: null,
+      status: runtime ? 'idle' : 'unavailable',
+      message: '',
+      diagnostics: 0,
+      pending: new Map(),
+      cache: new Map(),
+      timer: null,
+      idle: null,
     };
     states.set(key, state);
     paths.set(path, state);
     publish(state, state.status, runtime ? '' : 'Language services unavailable');
     editor.updateOptions({
-      folding: true, foldingStrategy: 'auto', showFoldingControls: 'mouseover',
+      folding: true,
+      foldingStrategy: 'auto',
+      showFoldingControls: 'mouseover',
       inlayHints: { enabled: 'on', fontSize: 12, padding: true },
       'semanticHighlighting.enabled': true,
       renderValidationDecorations: 'on',
@@ -417,25 +638,39 @@ export function createLanguageFeatures(monaco, api, { onState = () => {} } = {})
       cancelScheduled();
       if (!state.visible || !state.active || state.closed) return;
       state.timer = setTimeout(() => {
-        const run = () => { state.idle = null; void open(state); };
-        state.idle = globalThis.requestIdleCallback ? requestIdleCallback(run, { timeout: 1000 }) : setTimeout(run, 0);
+        const run = () => {
+          state.idle = null;
+          void open(state);
+        };
+        state.idle = globalThis.requestIdleCallback
+          ? requestIdleCallback(run, { timeout: 1000 })
+          : setTimeout(run, 0);
       }, delay);
     };
     const dom = editor.getDomNode();
-    const observer = globalThis.IntersectionObserver && dom ? new IntersectionObserver(entries => {
-      state.visible = entries.some(entry => entry.isIntersecting);
-      if (state.visible) schedule();
-      else cancelScheduled();
-    }) : null;
+    const observer =
+      globalThis.IntersectionObserver && dom
+        ? new IntersectionObserver(entries => {
+            state.visible = entries.some(entry => entry.isIntersecting);
+            if (state.visible) schedule();
+            else cancelScheduled();
+          })
+        : null;
     if (observer) observer.observe(dom);
-    else { state.visible = true; schedule(); }
+    else {
+      state.visible = true;
+      schedule();
+    }
     const content = model.onDidChangeContent(() => {
       invalidate(state);
       monaco.editor.setModelMarkers(model, 'diffpane-lsp', []);
       state.diagnostics = 0;
       schedule();
     });
-    const focus = editor.onDidFocusEditorText(() => { state.visible = state.active = true; schedule(0); });
+    const focus = editor.onDidFocusEditorText(() => {
+      state.visible = state.active = true;
+      schedule(0);
+    });
     const modelDisposal = model.onWillDispose(() => state.cleanup());
     state.cleanup = () => {
       if (state.closed) return;
@@ -466,7 +701,11 @@ export function createLanguageFeatures(monaco, api, { onState = () => {} } = {})
     };
     const languageChange = model.onDidChangeLanguage(bind);
     bind();
-    const detach = () => { languageChange.dispose(); cleanup(); attachments.delete(detach); };
+    const detach = () => {
+      languageChange.dispose();
+      cleanup();
+      attachments.delete(detach);
+    };
     attachments.add(detach);
     return detach;
   }
@@ -477,12 +716,20 @@ export function createLanguageFeatures(monaco, api, { onState = () => {} } = {})
       const state = paths.get(path);
       if (!state) return [];
       state.visible = state.active = true;
-      return documentSymbols(await request(state, 'textDocument/documentSymbol', {}, null, true), state.model);
+      return documentSymbols(
+        await request(state, 'textDocument/documentSymbol', {}, null, true),
+        state.model,
+      );
     },
     stats() {
       return {
-        ...metrics, documents: states.size,
-        languages: [...new Set([...states.values()].filter(state => state.available).map(state => state.language))],
+        ...metrics,
+        documents: states.size,
+        languages: [
+          ...new Set(
+            [...states.values()].filter(state => state.available).map(state => state.language),
+          ),
+        ],
         pending: [...states.values()].reduce((sum, state) => sum + state.pending.size, 0),
       };
     },
@@ -490,6 +737,8 @@ export function createLanguageFeatures(monaco, api, { onState = () => {} } = {})
       if (disposed) return;
       disposed = true;
       unsubscribe?.();
+      // Detaching mutates the set; visit the original registrations once.
+      // oxlint-disable-next-line unicorn/no-useless-spread
       for (const detach of [...attachments]) detach();
       for (const disposable of disposables) disposable.dispose();
       semanticChanged.dispose();

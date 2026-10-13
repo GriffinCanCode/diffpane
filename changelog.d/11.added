@@ -1,0 +1,1 @@
+Text edits now save automatically and sync the working-tree diff, explorer, previews, and language services. Pending saves finish before file switches and window close; failed saves retain the editor buffer with a retry shortcut.
