@@ -4,17 +4,32 @@ doc_radar:
     - file: electron/main.mjs
       contains: ['contextIsolation: true', 'nodeIntegration: false', 'sandbox: true']
     - file: renderer/main.js
-      contains: ['createNavigator', 'createLanguageFeatures', 'saveViewState', 'readOnly: true']
+      contains:
+        [
+          'createNavigator',
+          'createLanguageFeatures',
+          'saveViewState',
+          'readOnly: closingRequested || !card.document?.editable',
+          'diff-gutter-${kind}',
+        ]
     - file: renderer/navigator.js
       contains: ['ROW_HEIGHT', 'buildNavigationTree', 'navigator-root']
-    - file: renderer/syntax.js
+    - file: renderer/syntax.ts
       contains: ['configureSyntax', 'parseDocument']
-    - file: renderer/icons.js
+    - file: renderer/icons.ts
       contains: ['material-icon-theme', 'projectIcon']
     - file: electron/language.mjs
       contains: ['LanguageRuntime', 'textDocument/didOpen']
-    - file: electron/servers.mjs
-      contains: ['basedpyright', 'rust-analyzer', 'ElixirLS', 'gopls', 'SourceKit-LSP', 'typescript-language-server']
+    - file: electron/servers.ts
+      contains:
+        [
+          'basedpyright',
+          'rust-analyzer',
+          'ElixirLS',
+          'gopls',
+          'SourceKit-LSP',
+          'typescript-language-server',
+        ]
 ---
 
 # diffpane
@@ -34,19 +49,23 @@ The installer puts Diffpane in `~/Applications` and the command in `~/.local/bin
 
 Building the macOS app from source also requires Rust 1.88+ and the Xcode command-line tools. The installer builds a pinned, checksum-verified HowMany 3.1 and includes its binary and license inside the app. People receiving the built app do not need to install HowMany, Rust, or Homebrew. Reinstalling reuses the verified build for the same revision and architecture.
 
+The app bundle and browser favicon use the mint split-pane artwork in `assets/diffpane.png`. On macOS, `npm run build:icons` regenerates `assets/diffpane.icns` and the web images in `public/img` from that master; the installer includes the native icon automatically.
+
 ## Browse and review
 
-Click a file in the explorer to read its full contents, including unchanged code. Expand folders, type in the explorer to filter paths, drag its divider, or use ⌘B to hide it. The project header holds file and folder pickers, refresh, and collapse; Outline shows the current file’s symbols. ⌘P opens the searchable file picker.
+Click a file in the explorer to read its full contents, including unchanged code. Expand folders, use the persistent explorer search to filter paths, drag its divider, or use ⌘B to hide it. The project header holds file and folder pickers, refresh, and collapse; Outline shows the current file’s symbols. ⌘P opens the searchable file picker.
 
-Changes shows current files with Git edits highlighted. Filter with ⌘K, choose all, staged, or unstaged changes, and use the down arrow to jump between edits. ⌘F searches inside a file; ⌘O opens another folder; ⌘R refreshes.
+Text files open in one full-height editor. Images, audio, video, and PDFs open in a dedicated preview; other binary formats open as hexadecimal bytes and ASCII. The Hex button inspects raw bytes, and the split-pane glyph compares both versions against HEAD. Git changes against HEAD appear beside the line numbers: green for additions, blue for modifications, and red for deletions. The down arrow jumps between edits. The split-pane glyph opens the full before/after file comparison, with changed functions emphasized. ⌘F searches inside a file; ⌘O opens another folder; ⌘R refreshes.
 
-We use Monaco for text layout, selection, syntax colors, zoom, and scrolling. The explorer and picker render nearby rows; Changes mounts editors around the viewport. Live saves update existing models and preserve their view positions.
+We use Monaco for text layout, selection, syntax colors, zoom, and scrolling. The explorer and picker render nearby rows; we keep one current editor. Live saves update existing models and preserve their view positions.
+
+Edit text directly in the current-file editor or the working side of a comparison. Every change saves automatically to disk and syncs the Git highlights, explorer, previews, and language services. Switching files and closing the window finish pending saves first. The status bar shows saving, saved, or a save failure; ⌘S retries a failed save. If another program changes the file before a save, Diffpane keeps your edits open and reports the conflict. Original versions, symlinks, binary files, and bounded previews stay read-only. Saves preserve the file’s text encoding and line endings.
 
 ## Language features
 
 We load syntax from Monaco and a pinned TextMate catalog when a file is used. Source languages, JSON/JSONC/JSON5, TOML/ZON, YAML, INI, Makefiles, Dockerfiles, ignore files, dotenv, JSX/TSX, Astro, Jinja, Cedar, and Billy’s custom formats keep their source text and indentation. Prose and raw records stay readable as plain text.
 
-Python, Rust, Elixir, Go, Swift, and TypeScript have language-server connections; JavaScript and JSX/TSX share the TypeScript server. Opening a file loads its server when the editor becomes visible; scrolling through Changes keeps servers asleep until a file is used. Symbols opens the document outline, and supported servers supply semantic colors, type hints, hover documentation, folding, and diagnostics.
+Python, Rust, Elixir, Go, Swift, and TypeScript have language-server connections; JavaScript and JSX/TSX share the TypeScript server. Opening a file loads its server; unused languages stay asleep. Symbols opens the document outline, and supported servers supply semantic colors, type hints, hover documentation, folding, and diagnostics.
 
 Features follow each server's capabilities. ElixirLS currently supplies hover, symbols, folding, and diagnostics with syntax colors; it does not advertise semantic tokens or inlay hints. Python uses Monaco's indentation folding. Diffpane keeps at most two servers running per window and stops idle servers after their documents close.
 
@@ -68,11 +87,25 @@ For source development, `npm run setup:howmany` prepares the bundled binary. An 
 
 ## Live updates
 
-Native filesystem events trigger background Git reads. Git owns status, renames, staging, ignores, conflicts, and worktree resolution. Binary files, files over 2 MiB, files over 50,000 lines, and lines over 16 KiB get an explicit preview note.
+Native filesystem events trigger background Git reads. Git owns status, renames, staging, ignores, conflicts, and worktree resolution. Text loading accepts any extension, UTF-8, and BOM-marked UTF-16. Unmarked non-Unicode text uses an explicitly labeled Windows-1252 fallback. Large text files retain a bounded beginning with a preview note. Hex inspection shows the first 64 KiB, with total size and byte offsets. Working images, audio, and video stream independently of text limits; PDF previews and inline historical media are limited to 16 MiB. Unsupported codecs and formats remain inspectable as bytes.
 
 ## Check it
 
-Run `npm test` for Git, navigator, language runtime, and documentation checks. `npm run test:app` drives the real Electron app through large change feeds, scrolling, resizing, unchanged files, explorer navigation, and language features. `npm run test:billy -- /path/to/billy` opens representatives of the checkout’s text-file categories and records coverage in `test-results`. `npm run test:languages` checks all six installed servers against real nested projects and verifies process cleanup. `make lint-doc-radar` checks the documentation assertions.
+The development toolchain is [Vite+](https://viteplus.dev/guide/), pinned in the lockfile. Use the Node.js version in `.node-version` and npm version in `package.json`, then run `npm ci`. No global Vite+ installation is required; npm scripts use the local `vp` binary.
+
+```sh
+npm run dev -- .    # Electron with Vite renderer hot updates
+npm run check       # Oxfmt formatting, Oxlint linting and type-aware checks
+npm run check:fix   # apply formatting and safe lint fixes
+npm test            # Vitest: Git, navigator, language runtime and documentation checks
+npm run test:watch  # rerun affected tests while editing
+npm run build       # production renderer build with Vite Task caching
+npm run verify      # check, test and build
+```
+
+Configuration lives in `vite.config.ts`. Repeated builds reuse tracked inputs and restore `dist` from the task cache; source, public asset and relevant environment changes invalidate it. Tests and desktop installation always execute. `npm ci` installs the pre-commit hook, which formats and checks staged files. VS Code recommendations enable Oxc formatting and lint fixes on save. The vendored syntax grammar JSON retains its upstream formatting.
+
+`npm run test:app` builds and drives the real Electron app through large projects, gutter markers, scrolling, resizing, unchanged files, explorer navigation, and language features. `npm run test:billy -- /path/to/billy` opens representatives of the checkout’s text-file categories and records coverage in `test-results`. `npm run test:languages` checks all six installed servers against real nested projects and verifies process cleanup. `make lint-doc-radar` checks the documentation assertions. GitHub Actions runs the static checks, tests, build and desktop checks on macOS.
 
 ## Built on
 
