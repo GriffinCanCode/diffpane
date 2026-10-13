@@ -1,0 +1,44 @@
+name: Desktop load budgets
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: Workload profile
+        type: choice
+        options: [smoke, scale, soak, languages]
+        default: scale
+
+permissions:
+  contents: read
+
+concurrency:
+  group: load-budgets-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  desktop:
+    runs-on: macos-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: voidzero-dev/setup-vp@v1.21.1
+        with:
+          node-version-file: .node-version
+          cache: true
+          run-install: false
+      - uses: grafana/setup-k6-action@v1
+        with:
+          k6-version: '2.3.0'
+      - run: npm ci
+      - run: npm run setup:howmany
+      - run: npm run check:k6
+      - run: npm run test:k6
+        env:
+          DIFFPANE_K6_PROFILE: ${{ inputs.profile }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: k6-${{ inputs.profile }}-${{ github.run_id }}
+          path: test-results/k6-*/
+          if-no-files-found: warn

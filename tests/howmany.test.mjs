@@ -1,4 +1,4 @@
-import test from 'node:test';
+import { test } from 'vite-plus/test';
 import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, mkdir, rm, realpath, symlink, readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -42,7 +42,7 @@ setTimeout(() => {
     debounceMs: 30,
     timeoutMs: 5000,
   });
-  t.after(async () => {
+  t.onTestFinished(async () => {
     await runtime.dispose();
     await rm(root, { recursive: true, force: true });
   });
@@ -115,9 +115,8 @@ test('bundling rejects a changed source archive before compilation', () => {
 });
 
 const bundled = new URL('../resources/howmany/howmany', import.meta.url);
-test(
+test.skipIf(!existsSync(bundled))(
   'bundled HowMany produces real counts, thresholds, config reloads and shuts down its LSP',
-  { skip: !existsSync(bundled) },
   async t => {
     const { root } = await fixture(t);
     const events = [];
@@ -130,7 +129,7 @@ test(
         APPDATA: path.join(root, 'AppData'),
       },
     });
-    t.after(() => runtime.dispose());
+    t.onTestFinished(() => runtime.dispose());
     const config = path.join(
       root,
       process.platform === 'darwin'

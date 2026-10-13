@@ -7,59 +7,138 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 
 const root = await mkdtemp(path.join(os.tmpdir(), 'diffpane-app-'));
-const git = (...args) => execFileSync('git', ['-C', root, ...args], { stdio: 'pipe', env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' } });
+const git = (...args) =>
+  execFileSync('git', ['-C', root, ...args], {
+    stdio: 'pipe',
+    env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' },
+  });
+const source = (file, edited = false) =>
+  Array.from(
+    { length: file ? 24 : 4000 },
+    (_, i) => `export const value${i} = ${edited && i === 30 ? 99999 : i};`,
+  ).join('\n') + '\n';
 git('init', '-q');
-for (let file = 0; file < 80; file++) {
-  const lines = file ? 24 : 4000;
-  await writeFile(path.join(root, `${String(file).padStart(3, '0')}-sample.ts`), Array.from({ length: lines }, (_, i) => `export const value${i} = ${i};`).join('\n') + '\n');
-}
+for (let file = 0; file < 80; file++)
+  await writeFile(path.join(root, `${String(file).padStart(3, '0')}-sample.ts`), source(file));
 git('add', '.');
-git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '-qm', 'initial');
-for (let file = 0; file < 80; file++) {
-  const lines = file ? 24 : 4000;
-  await writeFile(path.join(root, `${String(file).padStart(3, '0')}-sample.ts`), Array.from({ length: lines }, (_, i) => `export const value${i} = ${i === 30 ? 99999 : i};`).join('\n') + '\n// updated\n');
-}
-const application = await electron.launch({ executablePath, args: ['.', root], env: { ...process.env, ELECTRON_ENABLE_LOGGING: '1' } });
+git(
+  '-c',
+  'user.name=Test',
+  '-c',
+  'user.email=test@example.invalid',
+  '-c',
+  'commit.gpgsign=false',
+  'commit',
+  '-qm',
+  'initial',
+);
+for (let file = 0; file < 80; file++)
+  await writeFile(
+    path.join(root, `${String(file).padStart(3, '0')}-sample.ts`),
+    source(file, true) + '// updated\n',
+  );
+const packaged = process.env.DIFFPANE_EXECUTABLE;
+const application = await electron.launch({
+  executablePath: packaged || executablePath,
+  args: packaged ? [root] : [process.env.DIFFPANE_TEST_APP || '.', root],
+});
 const page = await application.firstWindow();
 const errors = [];
 page.on('pageerror', error => errors.push(error.message));
+async function open(file) {
+  await page.locator('.navigator-search input').fill(file);
+  await page.locator(`.navigator-row[data-path="${file}"]`).click();
+  await page.locator(`#feed [data-path="${file}"] .view-lines`).waitFor();
+}
 try {
-  await page.waitForFunction(() => window.__diffpane?.stats().files === 80 && window.__diffpane.stats().activeEditors > 0, undefined, { timeout: 15000 });
-  await page.locator('#navigator').waitFor({ state: 'visible' });
-  assert.equal(await page.locator('aside#navigator').count(), 1, 'the project explorer should be visible beside changes');
-  assert.equal(await page.getByText('ORIGINAL · HEAD').count(), 0);
-  await page.locator('#filter').fill('000-sample');
-  await page.waitForFunction(() => document.querySelector('.file-card:not([hidden]) .monaco-editor'));
-  await page.locator('.file-card:not([hidden]) .monaco-editor').hover();
-  await page.mouse.wheel(0, 300);
-  await page.waitForTimeout(300);
-  const before = await page.evaluate(() => document.querySelector('.file-card:not([hidden]) .view-lines').textContent);
+  await page.waitForFunction(
+    () =>
+      window.__diffpane?.stats().navigator.inventoryFiles === 80 &&
+      window.__diffpane.stats().activeEditors === 1,
+    undefined,
+    { timeout: 15000 },
+  );
+  assert.equal(
+    await page.locator('.toolbar, .view-switch').count(),
+    0,
+    'the duplicate banner and modes must be removed',
+  );
+  assert.equal(
+    await page.locator('#feed .file-card').count(),
+    1,
+    'many changed files still open only one editor',
+  );
+  await open('000-sample.ts');
+  await page.locator('#feed .monaco-editor').hover();
+  await page.mouse.wheel(0, 700);
+  await page.waitForTimeout(350);
+  const before = await page.locator('.view-line').first().innerText();
+  assert.ok(!before.includes('value0 ='), 'the complete document scrolls beyond the first line');
   const start = performance.now();
-  await writeFile(path.join(root, '000-sample.ts'), Array.from({ length: 4000 }, (_, i) => `export const value${i} = ${i === 50 ? 88888 : i === 30 ? 99999 : i};`).join('\n') + '\n// changed again\n');
-  await page.waitForFunction(() => document.querySelector('.file-card:not([hidden]) .view-lines').textContent.includes('88888'), undefined, { timeout: 5000 });
+  await writeFile(
+    path.join(root, '000-sample.ts'),
+    source(0, true).replace('value30 = 99999', 'value30 = 88888') + '// changed again\n',
+  );
+  await page.waitForFunction(
+    () => document.querySelector('.view-lines')?.textContent.includes('88888'),
+    undefined,
+    { timeout: 5000 },
+  );
   const liveSaveMs = performance.now() - start;
-  const after = await page.evaluate(() => document.querySelector('.file-card:not([hidden]) .view-lines').textContent);
-  assert.ok(before.includes('value') && after.includes('value'), 'real code should remain painted during an edit');
-  const modelCount = await page.evaluate(() => window.__diffpane.stats().models);
-  assert.equal(modelCount, 1);
-  await page.locator('#filter').fill('');
-  await page.locator('#feed-scroll').evaluate(element => { element.scrollTop = element.scrollHeight; });
-  await page.waitForFunction(() => document.querySelector('[data-path="079-sample.ts"] .monaco-editor'));
-  const stats = await page.evaluate(() => window.__diffpane.stats());
-  assert.ok(stats.models <= 6, JSON.stringify(stats));
-  await page.locator('#feed-scroll').evaluate(element => { element.scrollTop = 0; });
-  await page.waitForFunction(() => document.querySelector('[data-path="000-sample.ts"] .monaco-editor'));
+  assert.equal(
+    await page.locator('.view-line').first().innerText(),
+    before,
+    'live saves retain the visible code',
+  );
+  assert.equal(await page.evaluate(() => window.__diffpane.stats().models), 1);
+  await page.evaluate(
+    () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+  );
+  const overview = await page.locator('#feed .decorationsOverviewRuler').evaluate(canvas => {
+    const { data, width, height } = canvas
+      .getContext('2d')
+      .getImageData(0, 0, canvas.width, canvas.height);
+    const colors = new Set(['71,125,146', '82,120,91', '172,98,102']);
+    let widest = 0;
+    for (let row = 0; row < height; row++) {
+      let pixels = 0;
+      for (let column = 0; column < width; column++) {
+        const offset = (row * width + column) * 4;
+        if (
+          data[offset + 3] &&
+          colors.has(`${data[offset]},${data[offset + 1]},${data[offset + 2]}`)
+        )
+          pixels++;
+      }
+      widest = Math.max(widest, pixels);
+    }
+    return { widest, width };
+  });
+  assert.ok(
+    overview.widest > 0 && overview.widest <= overview.width / 3 + 1,
+    JSON.stringify(overview),
+  );
+
+  await open('079-sample.ts');
+  assert.equal(
+    await page.evaluate(() => window.__diffpane.stats().models),
+    1,
+    'switching files disposes the previous model',
+  );
   await page.setViewportSize({ width: 800, height: 700 });
   await page.waitForTimeout(150);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+  await open('000-sample.ts');
+  await page.locator('.navigator-search input').fill('');
+  await page.locator('.navigator-tree').focus();
   await page.setViewportSize({ width: 1400, height: 960 });
-  await page.locator('#filter').fill('000-sample');
-  await page.waitForFunction(() => document.querySelector('.file-card:not([hidden]) .monaco-editor'));
   await mkdir('test-results', { recursive: true });
   await page.screenshot({ path: 'test-results/app.png' });
-  assert.deepEqual(errors, [], 'renderer must not throw during scrolling, editing or resizing');
-  const metrics = await application.evaluate(({ app }) => app.getAppMetrics().map(({type, memory, cpu}) => ({type, memory, cpu})));
-  console.log(JSON.stringify({ files: 80, stats, liveSaveMs, metrics, rendererErrors: errors }, null, 2));
+  const stats = await page.evaluate(() => window.__diffpane.stats());
+  assert.deepEqual(errors, [], 'renderer must not throw during browsing, editing or resizing');
+  console.log(
+    JSON.stringify({ changedFiles: 80, stats, liveSaveMs, rendererErrors: errors }, null, 2),
+  );
 } catch (error) {
   console.error('renderer errors', errors);
   console.error(await page.locator('body').innerText());
