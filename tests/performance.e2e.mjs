@@ -54,6 +54,17 @@ try {
     '-qm',
     'baseline',
   );
+  // Ignored dependencies are as large as the tracked tree, but stay unindexed.
+  await writeFile(path.join(root, '.git/info/exclude'), 'dependencies/\n');
+  for (let index = 0; index < Math.ceil(count / 500); index++)
+    await mkdir(path.join(root, 'dependencies', `package${index}`), { recursive: true });
+  await batch(count, index =>
+    writeFile(
+      path.join(root, 'dependencies', `package${Math.floor(index / 500)}`, `ignored${index}.txt`),
+      'ignored dependency\n',
+    ),
+  );
+  metrics.ignoredFiles = count;
   const changedCount = Math.min(4000, count);
   await batch(changedCount, index =>
     writeFile(
@@ -86,6 +97,34 @@ try {
   metrics.readyMs = performance.now() - launchStart;
   assert.equal(await page.locator('.diff-word-added').count(), 0);
   assert.equal(await page.locator('#feed .file-card').count(), 1);
+  assert.ok((await page.locator('.navigator-row').count()) < 60);
+  const cold = await page.evaluate(() => window.__diffpane.stats());
+  const ignoredStart = performance.now();
+  await page.locator('.navigator-row[data-path="dependencies"]').click();
+  await page.locator('.navigator-row[data-path="dependencies/package0"]').waitFor();
+  assert.equal(
+    (await page.evaluate(() => window.__diffpane.stats())).navigator.inventoryFiles,
+    count,
+  );
+  await page.locator('.navigator-row[data-path="dependencies/package0"]').click();
+  await page.waitForFunction(
+    count =>
+      window.__diffpane.stats().navigator.inventoryFiles === count + Math.min(500, count) &&
+      !window.__diffpane.stats().navigator.loading,
+    count,
+  );
+  metrics.ignoredExpansionMs = performance.now() - ignoredStart;
+  await page.locator('.navigator-row[data-path="dependencies"]').click();
+  await page.waitForFunction(
+    count =>
+      window.__diffpane.stats().navigator.inventoryFiles === count &&
+      !window.__diffpane.stats().navigator.loading,
+    count,
+  );
+  assert.equal(
+    (await page.evaluate(() => window.__diffpane.stats())).navigator.treeNodes,
+    cold.navigator.treeNodes,
+  );
   assert.ok((await page.locator('.navigator-row').count()) < 60);
   const inventoryRequests = await page.evaluate(
     () => window.__diffpane.stats().navigator.catalogRequests,

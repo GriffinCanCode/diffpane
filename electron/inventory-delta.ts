@@ -1,4 +1,4 @@
-type InventoryFile = { path: string; submodule: boolean };
+type InventoryFile = { path: string; submodule: boolean; ignored?: boolean; directory?: boolean };
 
 /** One explorer baseline per window; changes do not resend a whole large catalog over IPC. */
 export class InventoryDelta {
@@ -13,7 +13,13 @@ export class InventoryDelta {
     const removed: string[] = [];
     for (const [pathname, file] of index) {
       const prior = previous.index.get(pathname);
-      if (!prior || prior.submodule !== file.submodule) files.push(file);
+      if (
+        !prior ||
+        prior.submodule !== file.submodule ||
+        prior.ignored !== file.ignored ||
+        prior.directory !== file.directory
+      )
+        files.push(file);
     }
     for (const pathname of previous.index.keys()) if (!index.has(pathname)) removed.push(pathname);
     return { revision, reset: false, files, removed };

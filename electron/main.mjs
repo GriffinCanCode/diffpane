@@ -186,6 +186,7 @@ for (const method of [
   'snapshot',
   'files',
   'files-delta',
+  'directory-expanded',
   'document',
   'save',
   'refresh',

@@ -160,6 +160,12 @@
 .navigator-row[data-status='!'] .navigator-name {
   color: #f48771;
 }
+.navigator-row[data-ignored='true'] .navigator-name {
+  color: #969696;
+}
+.navigator-row[data-ignored='true'] .navigator-icon {
+  opacity: 0.65;
+}
 .navigator-chevron {
   display: block;
   position: relative;

@@ -29,49 +29,11 @@ export function buildNavigationTree(inventory, basePath = '') {
     children: [],
     changedCount: 0,
   };
-  const nodes = new Map([[root.key, root]]);
-  const files = new Map();
-  const prefix = basePath ? `${basePath}/` : '';
-  for (const file of inventory) {
-    if (files.has(file.path) || (prefix && !file.path.startsWith(prefix))) continue;
-    const relative = file.path.slice(prefix.length);
-    if (!relative) continue;
-    const parts = relative.split('/');
-    let parent = root;
-    let pathname = basePath;
-    for (let index = 0; index < parts.length; index++) {
-      pathname = pathname ? `${pathname}/${parts[index]}` : parts[index];
-      const directory = index < parts.length - 1;
-      const key = `${directory ? 'dir' : 'file'}:${pathname}`;
-      let node = nodes.get(key);
-      if (!node) {
-        node = {
-          key,
-          path: pathname,
-          name: parts[index],
-          kind: directory ? 'directory' : 'file',
-          parentKey: parent.key,
-          children: directory ? [] : null,
-          changedCount: 0,
-          file: directory ? null : file,
-        };
-        nodes.set(key, node);
-        parent.children.push(node);
-        if (!directory) files.set(pathname, node);
-      }
-      parent = node;
-    }
-  }
-  for (const node of nodes.values()) {
-    node.children?.sort((a, b) =>
-      a.kind !== b.kind
-        ? a.kind === 'directory'
-          ? -1
-          : 1
-        : compare(a.name, b.name) || compare(a.path, b.path),
-    );
-  }
-  return { root, nodes, files };
+  return reconcileNavigationTree(
+    { root, nodes: new Map([[root.key, root]]), files: new Map(), directories: new Map() },
+    inventory,
+    basePath,
+  );
 }
 
 /** A flattened projection contains expanded folders only, or matching file paths. */
@@ -228,6 +190,7 @@ export function createNavigator(
       const status = node.kind === 'file' ? navigationStatus(file) : '';
       row.dataset.status = status;
       row.dataset.changed = String(node.changedCount > 0);
+      row.dataset.ignored = String(node.file?.ignored === true);
       row.title = node.path || snapshot?.scope || snapshot?.root || '';
       const glyph = iconFor?.(node, expanded.has(node.path));
       const icon = row.querySelector('.navigator-icon');
@@ -405,10 +368,28 @@ export function createNavigator(
     }
   }
 
+  function setExpanded(node, value) {
+    if (value) expanded.add(node.path);
+    else {
+      expanded.delete(node.path);
+      for (const pathname of expanded) {
+        if (
+          (!node.path || pathname.startsWith(`${node.path}/`)) &&
+          tree.nodes.get(`dir:${pathname}`)?.file?.ignored
+        )
+          expanded.delete(pathname);
+      }
+    }
+    if ((node.file?.ignored || !value) && api.directoryExpanded) {
+      void api.directoryExpanded(node.path, value).catch(error => {
+        if (!disposed) summary.textContent = error.message || String(error);
+      });
+    }
+  }
+
   function choose(node) {
     if (node.kind === 'directory') {
-      if (expanded.has(node.path)) expanded.delete(node.path);
-      else expanded.add(node.path);
+      setExpanded(node, !expanded.has(node.path));
       activeKey = node.key;
       refreshProjection();
       scrollToActive();
@@ -464,12 +445,12 @@ export function createNavigator(
       target = Math.max(0, index - Math.max(1, Math.floor(list.clientHeight / ROW_HEIGHT)));
     else if (event.key === 'ArrowRight' && !query) {
       if (node.kind === 'directory' && !expanded.has(node.path)) {
-        expanded.add(node.path);
+        setExpanded(node, true);
         refreshProjection();
       } else if (node.kind === 'directory' && node.children.length) target = index + 1;
     } else if (event.key === 'ArrowLeft' && !query) {
       if (node.kind === 'directory' && expanded.has(node.path)) {
-        expanded.delete(node.path);
+        setExpanded(node, false);
         refreshProjection();
       } else {
         const parent = visibleIndex.get(node.parentKey);
@@ -518,6 +499,7 @@ export function createNavigator(
   function onAction(event) {
     const action = event.target.closest('[data-action]')?.dataset.action;
     if (action === 'collapse') {
+      setExpanded(tree.root, false);
       expanded = new Set([tree.root.path]);
       activeKey = tree.root.key;
       list.scrollTop = 0;

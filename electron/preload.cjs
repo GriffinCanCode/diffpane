@@ -23,6 +23,8 @@ electron_1.contextBridge.exposeInMainWorld('diffpane', {
   snapshot: () => electron_1.ipcRenderer.invoke('snapshot'),
   files: () => electron_1.ipcRenderer.invoke('files'),
   filesDelta: revision => electron_1.ipcRenderer.invoke('files-delta', revision),
+  directoryExpanded: (path, expanded) =>
+    electron_1.ipcRenderer.invoke('directory-expanded', path, expanded),
   document: (path, comparison = 'head') =>
     electron_1.ipcRenderer.invoke('document', path, comparison),
   save: (path, text, expected) => electron_1.ipcRenderer.invoke('save', path, text, expected),

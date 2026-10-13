@@ -62,7 +62,7 @@ async function fixture(t) {
   return { root, git, write, commit, open: () => Repository.open(root) };
 }
 
-test('file inventory includes unchanged code and nonignored untracked files without opening contents', async t => {
+test('file inventory includes ignored directory placeholders without loading their children, including tracked exceptions', async t => {
   const repo = await fixture(t);
   await repo.write('unchanged.rs', 'fn main() {}\n');
   await repo.write('ignored/tracked.rs', 'tracked despite ignore rules\n');
@@ -73,10 +73,14 @@ test('file inventory includes unchanged code and nonignored untracked files with
   await repo.write('node_modules/dependency/index.js', 'ignore this too\n');
   const repository = await repo.open();
   const files = await repository.files();
-  assert.deepEqual(
-    files,
-    ['.gitignore', 'ignored/tracked.rs', 'new.rs', 'unchanged.rs'].map(plain),
-  );
+  assert.deepEqual(files, [
+    plain('.gitignore'),
+    { ...plain('ignored'), ignored: true, directory: true },
+    plain('ignored/tracked.rs'),
+    plain('new.rs'),
+    { ...plain('node_modules'), ignored: true, directory: true },
+    plain('unchanged.rs'),
+  ]);
   assert.deepEqual(await repository.contents(files.find(file => file.path === 'unchanged.rs')), {
     before: 'fn main() {}\n',
     after: 'fn main() {}\n',
@@ -85,6 +89,83 @@ test('file inventory includes unchanged code and nonignored untracked files with
   assert.equal(
     (await repository.snapshot()).files.some(file => file.path === 'unchanged.rs'),
     false,
+  );
+});
+
+test('ignored directory expansion is shallow, collapse releases descendants, and reopening reads current entries', async t => {
+  const repo = await fixture(t);
+  await repo.write('.gitignore', 'cache/\n*.log\n!keep.log\n');
+  await repo.write('cache/direct.txt', 'ignored text\n');
+  await repo.write('cache/deep/child.txt', 'nested text\n');
+  await repo.write('debug.log', 'ignored log\n');
+  await repo.write('logs/nested/debug.log', 'nested ignored log\n');
+  await repo.write('keep.log', 'visible log\n');
+  await mkdir(path.join(repo.root, 'empty'));
+  const repository = await repo.open();
+  const names = async () => (await repository.files()).map(file => file.path);
+  assert.deepEqual(await names(), [
+    '.gitignore',
+    'cache',
+    'debug.log',
+    'keep.log',
+    'logs/nested/debug.log',
+  ]);
+  assert.equal(repository.inventoryMetadata.get('debug.log').ignored, true);
+  assert.equal(await repository.setDirectoryExpanded('cache', true), true);
+  assert.equal(await repository.setDirectoryExpanded('cache', true), false);
+  assert.deepEqual(await names(), [
+    '.gitignore',
+    'cache',
+    'cache/deep',
+    'cache/direct.txt',
+    'debug.log',
+    'keep.log',
+    'logs/nested/debug.log',
+  ]);
+  assert.deepEqual(
+    await repository.contents(repository.inventoryMetadata.get('cache/direct.txt')),
+    { before: '', after: 'ignored text\n', note: null },
+  );
+  await repository.setDirectoryExpanded('cache/deep', true);
+  assert.ok((await names()).includes('cache/deep/child.txt'));
+  await repository.setDirectoryExpanded('cache', false);
+  assert.deepEqual(await names(), [
+    '.gitignore',
+    'cache',
+    'debug.log',
+    'keep.log',
+    'logs/nested/debug.log',
+  ]);
+  assert.equal(repository.expandedIgnored.size, 0);
+  assert.ok(!repository.inventoryMetadata.has('cache/direct.txt'));
+  await repo.write('cache/new.txt', 'new\n');
+  await repository.setDirectoryExpanded('cache', true);
+  assert.ok((await names()).includes('cache/new.txt'));
+  assert.ok(!repository.inventoryMetadata.has('cache/deep/child.txt'));
+  await assert.rejects(() => repository.setDirectoryExpanded('../outside', true));
+  await assert.rejects(() => repository.setDirectoryExpanded('empty', true));
+  await repo.write('.gitignore', '*.log\n!keep.log\n');
+  await names();
+  assert.equal(repository.inventoryMetadata.get('cache/direct.txt').ignored, undefined);
+  assert.equal(repository.expandedIgnored.size, 0);
+});
+
+test('ignored discovery respects nested scope and never descends into symlinks', async t => {
+  const repo = await fixture(t);
+  await repo.write('.gitignore', 'cache/\n');
+  await repo.write('cache/nested/a.txt', 'a\n');
+  await repo.write('cache/other/b.txt', 'b\n');
+  await symlink(repo.root, path.join(repo.root, 'cache/nested/link'));
+  const repository = await Repository.open(path.join(repo.root, 'cache/nested'));
+  assert.deepEqual(
+    (await repository.files()).map(file => file.path),
+    ['cache/nested', 'cache/nested/a.txt', 'cache/nested/link'],
+  );
+  assert.equal(repository.inventoryMetadata.get('cache/nested/link').directory, false);
+  await repository.setDirectoryExpanded('cache/nested', false);
+  assert.deepEqual(
+    (await repository.files()).map(file => file.path),
+    ['cache/nested'],
   );
 });
 

@@ -1,0 +1,1 @@
+Show Git-ignored files and folders with muted explorer styling. Load ignored folders one level at a time when expanded, and release their descendant metadata and cached documents when collapsed.

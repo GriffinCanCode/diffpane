@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { constants } from 'node:fs';
-import { lstat, open, readlink, realpath } from 'node:fs/promises';
+import { lstat, open, readdir, readlink, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { encodeText, fileContent, MAX_FILE_BYTES, readLimit } from './file-content.ts';
 import { mediaType } from '../media-types.ts';
@@ -17,6 +17,7 @@ export class Repository {
     this.blobs = new Map();
     this.blobBytes = 0;
     this.inventoryMetadata = new Map();
+    this.expandedIgnored = new Set();
   }
 
   static async open(directory) {
@@ -87,7 +88,7 @@ export class Repository {
       } else
         files.set(
           filename,
-          prior?.submodule === submodule
+          prior && !prior.ignored && prior.submodule === submodule
             ? prior
             : {
                 path: filename,
@@ -99,9 +100,198 @@ export class Repository {
               },
         );
     }
-    // Replace the previous map; deleted paths do not accumulate across reorganizations.
+    const addIgnored = (filename, directory) => {
+      if (files.has(filename)) return;
+      validatePath(filename);
+      if (scope && filename !== scope && !filename.startsWith(`${scope}/`)) return;
+      const prior = this.inventoryMetadata.get(filename);
+      files.set(
+        filename,
+        prior?.ignored && prior.directory === directory
+          ? prior
+          : {
+              path: filename,
+              originalPath: null,
+              index: ' ',
+              worktree: ' ',
+              conflicted: false,
+              submodule: false,
+              ignored: true,
+              directory,
+            },
+      );
+    };
+    // Inspect only known, nonignored parents. Git's recursive ignored listing can
+    // walk an entire dependency tree when it contains even one tracked exception.
+    const directories = new Set([scope]);
+    for (const filename of files.keys()) {
+      let directory = path.posix.dirname(filename);
+      while (directory !== '.' && !directories.has(directory)) {
+        directories.add(directory);
+        directory = path.posix.dirname(directory);
+      }
+    }
+    const ignoredDirectories = await this.#ignored([...directories].filter(Boolean));
+    for (const directory of ignoredDirectories) {
+      if (!ignoredDirectories.has(path.posix.dirname(directory))) addIgnored(directory, true);
+    }
+    const discover = async parents => {
+      const candidates = new Map();
+      let nextParent = 0;
+      await Promise.all(
+        Array.from({ length: Math.min(8, parents.length) }, async () => {
+          while (nextParent < parents.length) {
+            const directory = parents[nextParent++];
+            for (const entry of await this.#directoryEntries(directory)) {
+              if (entry.name === '.git') continue;
+              const filename = directory ? `${directory}/${entry.name}` : entry.name;
+              if (!files.has(filename) && !directories.has(filename))
+                candidates.set(filename, entry.isDirectory());
+            }
+          }
+        }),
+      );
+      return candidates;
+    };
+    let candidates = await discover(
+      [...directories].filter(directory => !ignoredDirectories.has(directory)),
+    );
+    while (candidates.size) {
+      const ignored = await this.#ignored([...candidates.keys()]);
+      const parents = [];
+      for (const [filename, directory] of candidates) {
+        if (ignored.has(filename)) addIgnored(filename, directory);
+        else if (directory) {
+          // A nonignored parent may contain only ignored files, so Git's normal
+          // catalog has no record of it. Stop as soon as an ignored folder appears.
+          directories.add(filename);
+          parents.push(filename);
+        }
+      }
+      candidates = await discover(parents);
+    }
+    this.inventoryDirectories = new Set(
+      [...directories].filter(directory => !ignoredDirectories.has(directory)),
+    );
+    // Only explicit expansions read directory entries. Never walk dependency trees.
+    if (scope && files.get(scope)?.directory && !this.inventoryMetadata.has(scope))
+      this.expandedIgnored.add(scope);
+    for (const directory of [...this.expandedIgnored].sort((a, b) => a.length - b.length)) {
+      if (!files.get(directory)?.directory) {
+        this.expandedIgnored.delete(directory);
+        continue;
+      }
+      for (const entry of await this.#directoryEntries(directory)) {
+        if (entry.name !== '.git') addIgnored(`${directory}/${entry.name}`, entry.isDirectory());
+      }
+    }
+    // Replace the previous map; collapsed ignored descendants are released too.
     this.inventoryMetadata = files;
     return [...files.values()].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  }
+
+  async #ignored(names) {
+    if (!names.length) return new Set();
+    const result = await command(
+      this.root,
+      ['check-ignore', '--no-index', '-z', '--stdin'],
+      MAX_STATUS_BYTES,
+      Buffer.from(`${names.join('\0')}\0`),
+    );
+    if (result.code === 1) return new Set();
+    return new Set(decoder.decode(successful(result)).split('\0').filter(Boolean));
+  }
+
+  async #directoryEntries(directory) {
+    const absolute = path.join(this.root, directory);
+    try {
+      if (!within(this.scope, await realpath(absolute)) || !(await lstat(absolute)).isDirectory())
+        return [];
+      return await readdir(absolute, { withFileTypes: true });
+    } catch (error) {
+      if (['ENOENT', 'ENOTDIR'].includes(error.code)) return [];
+      throw error;
+    }
+  }
+
+  async setDirectoryExpanded(filename, expanded) {
+    if (filename !== '') validatePath(filename);
+    if (
+      typeof expanded !== 'boolean' ||
+      (expanded && !this.inventoryMetadata.get(filename)?.directory)
+    )
+      throw new Error('Unknown ignored directory.');
+    if (expanded) {
+      if (this.expandedIgnored.has(filename)) return false;
+      const entries = await this.#directoryEntries(filename);
+      const inventory = new Map(this.inventoryMetadata);
+      for (const entry of entries) {
+        const pathname = `${filename}/${entry.name}`;
+        if (entry.name === '.git' || inventory.has(pathname)) continue;
+        validatePath(pathname);
+        inventory.set(pathname, {
+          path: pathname,
+          originalPath: null,
+          index: ' ',
+          worktree: ' ',
+          conflicted: false,
+          submodule: false,
+          ignored: true,
+          directory: entry.isDirectory(),
+        });
+      }
+      this.inventoryMetadata = inventory;
+      this.expandedIgnored.add(filename);
+    } else {
+      const collapsed = new Set();
+      for (const directory of this.expandedIgnored) {
+        if (!filename || directory === filename || directory.startsWith(`${filename}/`)) {
+          this.expandedIgnored.delete(directory);
+          collapsed.add(directory);
+        }
+      }
+      if (collapsed.size) {
+        const inventory = new Map(this.inventoryMetadata);
+        for (const [pathname, file] of inventory) {
+          if (!file.ignored) continue;
+          let parent = path.posix.dirname(pathname);
+          while (parent !== '.') {
+            if (collapsed.has(parent)) {
+              inventory.delete(pathname);
+              break;
+            }
+            parent = path.posix.dirname(parent);
+          }
+        }
+        this.inventoryMetadata = inventory;
+      }
+      return collapsed.size > 0;
+    }
+    return true;
+  }
+
+  // An explicitly opened document remains usable after its folder is collapsed.
+  async ignoredFile(filename) {
+    validatePath(filename);
+    const absolute = path.join(this.root, filename);
+    if (!within(this.scope, absolute) || !(await this.#ignored([filename])).has(filename))
+      return undefined;
+    try {
+      if (!(await lstat(absolute)).isFile()) return undefined;
+    } catch (error) {
+      if (['ENOENT', 'ENOTDIR'].includes(error.code)) return undefined;
+      throw error;
+    }
+    return {
+      path: filename,
+      originalPath: null,
+      index: ' ',
+      worktree: ' ',
+      conflicted: false,
+      submodule: false,
+      ignored: true,
+      directory: false,
+    };
   }
 
   async hasRelevantPaths(paths) {
@@ -109,6 +299,18 @@ export class Repository {
     if (!paths.length || paths.some(name => name === this.root || !within(this.root, name))) {
       return true;
     }
+    if (
+      paths.some(name => {
+        const relative = path.relative(this.root, name).split(path.sep).join('/');
+        const parent = path.posix.dirname(relative);
+        return (
+          this.inventoryMetadata.get(relative)?.ignored ||
+          this.inventoryDirectories?.has(parent === '.' ? '' : parent) ||
+          this.expandedIgnored.has(parent)
+        );
+      })
+    )
+      return true;
     const input = Buffer.from(`${paths.join('\0')}\0`);
     const output = await command(
       this.root,
@@ -141,11 +343,17 @@ export class Repository {
     const headPath = file.originalPath || file.path;
     const indexPath = ['R', 'C'].includes(file.index) ? file.path : headPath;
     const [beforeBytes, afterBytes] = await Promise.all([
-      this.#blob(
-        comparison === 'unstaged' ? ':' : 'HEAD:',
-        comparison === 'unstaged' ? indexPath : headPath,
-      ),
-      comparison === 'staged' ? this.#blob(':', indexPath) : this.#workingFile(file.path),
+      file.ignored
+        ? empty()
+        : this.#blob(
+            comparison === 'unstaged' ? ':' : 'HEAD:',
+            comparison === 'unstaged' ? indexPath : headPath,
+          ),
+      comparison === 'staged'
+        ? file.ignored
+          ? empty()
+          : this.#blob(':', indexPath)
+        : this.#workingFile(file.path),
     ]);
     const before = fileContent(beforeBytes, headPath);
     const after = fileContent(afterBytes, file.path);

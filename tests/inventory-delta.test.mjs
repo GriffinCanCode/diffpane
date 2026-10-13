@@ -23,3 +23,15 @@ test('explorer deltas send only additions, removals and submodule changes after 
   assert.equal(missed.reset, true);
   assert.equal(missed.files.length, 3);
 });
+
+test('ignore-rule changes update metadata even when file paths stay the same', () => {
+  const delta = new InventoryDelta();
+  delta.update(null, 1, index(['debug.log']));
+  const ignored = new Map([
+    ['debug.log', { path: 'debug.log', submodule: false, ignored: true, directory: false }],
+  ]);
+  assert.deepEqual(delta.update(1, 2, ignored).files, [...ignored.values()]);
+  assert.deepEqual(delta.update(2, 3, index(['debug.log'])).files, [
+    ...index(['debug.log']).values(),
+  ]);
+});

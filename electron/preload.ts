@@ -26,6 +26,8 @@ contextBridge.exposeInMainWorld('diffpane', {
   snapshot: () => ipcRenderer.invoke('snapshot'),
   files: () => ipcRenderer.invoke('files'),
   filesDelta: (revision: number | null) => ipcRenderer.invoke('files-delta', revision),
+  directoryExpanded: (path: string, expanded: boolean) =>
+    ipcRenderer.invoke('directory-expanded', path, expanded),
   document: (path: string, comparison = 'head') => ipcRenderer.invoke('document', path, comparison),
   save: (path: string, text: string, expected: string) =>
     ipcRenderer.invoke('save', path, text, expected),

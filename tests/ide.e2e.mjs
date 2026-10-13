@@ -175,9 +175,9 @@ try {
     'folders start collapsed',
   );
   assert.equal(
-    await page.locator('.navigator-row[data-path="ignored"]').count(),
-    0,
-    'ignored files stay outside the explorer',
+    await page.locator('.navigator-row[data-path="ignored"]').getAttribute('data-ignored'),
+    'true',
+    'ignored directories appear muted without loading their children',
   );
   assert.equal(
     await page.evaluate(() => window.__diffpane.stats().models),

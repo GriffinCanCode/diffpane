@@ -156,3 +156,54 @@ test('concurrent saves retain the inventory and unrelated cached documents; new 
   assert.equal(committed.after, latest.after);
   assert.deepEqual(committed.decorations, []);
 });
+
+test('ignored folders load only explicit expansions and release catalog and document cache entries on collapse', async t => {
+  const repo = await fixture(t);
+  await repo.write('.gitignore', 'cache/\n');
+  await mkdir(path.join(repo.root, 'cache/deep'), { recursive: true });
+  await repo.write('cache/a.txt', 'ignored document\n');
+  await repo.write('cache/deep/b.txt', 'nested ignored document\n');
+  await repo.call('refresh');
+  const cold = await repo.call('files-delta', null);
+  assert.ok(cold.files.some(file => file.path === 'cache' && file.ignored && file.directory));
+  assert.ok(!cold.files.some(file => file.path.startsWith('cache/')));
+  const loads = (await repo.call('performance')).documents.loads;
+  await repo.call('directory-expanded', 'cache', true);
+  const opened = await repo.call('files-delta', cold.revision);
+  assert.deepEqual(
+    opened.files.map(file => file.path),
+    ['cache/a.txt', 'cache/deep'],
+  );
+  assert.equal((await repo.call('performance')).documents.loads, loads);
+  assert.ok(!(await repo.call('files')).some(file => file.ignored));
+  await repo.call('document', 'cache/a.txt', 'head');
+  await repo.call('directory-expanded', 'cache/deep', true);
+  const nested = await repo.call('files-delta', opened.revision);
+  assert.deepEqual(
+    nested.files.map(file => file.path),
+    ['cache/deep/b.txt'],
+  );
+  await repo.call('directory-expanded', 'cache', false);
+  const collapsed = await repo.call('files-delta', nested.revision);
+  assert.deepEqual(collapsed.removed, ['cache/a.txt', 'cache/deep', 'cache/deep/b.txt']);
+  assert.equal((await repo.call('performance')).documents.entries, 0);
+  // The visible editor can still save after its explorer folder was collapsed.
+  await repo.call('save', 'cache/a.txt', 'saved while collapsed\n', 'ignored document\n');
+  assert.equal(
+    (await repo.call('document', 'cache/a.txt', 'head')).after,
+    'saved while collapsed\n',
+  );
+  await repo.write('cache/hidden.txt', 'created while closed\n');
+  await repo.call('directory-expanded', 'cache', true);
+  const reopened = await repo.call('files-delta', collapsed.revision);
+  assert.ok(reopened.files.some(file => file.path === 'cache/deep'));
+  assert.ok(reopened.files.some(file => file.path === 'cache/hidden.txt'));
+  assert.ok(!reopened.files.some(file => file.path === 'cache/deep/b.txt'));
+  const revision = (await repo.call('snapshot')).revision;
+  await repo.write('cache/new.txt', 'new ignored document\n');
+  await repo.waitFor(
+    snapshot => snapshot.revision > revision && snapshot.changedPaths.includes('cache/new.txt'),
+  );
+  const added = await repo.call('files-delta', reopened.revision);
+  assert.ok(added.files.some(file => file.path === 'cache/new.txt'));
+});

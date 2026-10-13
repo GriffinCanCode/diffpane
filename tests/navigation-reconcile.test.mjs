@@ -83,3 +83,37 @@ test('incremental deltas preserve node identity across bulk folder moves and pru
     projection(buildNavigationTree([{ path: 'stay.ts' }, { path: 'new' }])),
   );
 });
+
+test('lazy ignored directory markers survive empty folders and release descendant nodes and search indexes on collapse', () => {
+  const folder = path => ({ path, ignored: true, directory: true, submodule: false });
+  const cold = [folder('cache'), { path: 'stay.txt' }];
+  const tree = buildNavigationTree(cold);
+  const root = tree.nodes.get('dir:cache');
+  assert.equal(root.file.ignored, true);
+  assert.equal(tree.files.size, 1);
+  const loaded = [
+    folder('cache/deep'),
+    { path: 'cache/a.txt', ignored: true },
+    { path: 'cache/deep/b.txt', ignored: true },
+  ];
+  applyNavigationDelta(tree, loaded, []);
+  flattenNavigationTree(tree, new Set(), 'cache');
+  assert.equal(tree.searchFiles.length, 3);
+  applyNavigationDelta(
+    tree,
+    [],
+    loaded.map(file => file.path),
+  );
+  assert.equal(tree.nodes.get('dir:cache'), root);
+  assert.equal(tree.nodes.size, 3);
+  assert.equal(tree.files.size, 1);
+  assert.equal(tree.directories.size, 1);
+  assert.equal(tree.searchFiles, undefined);
+  assert.deepEqual(projection(tree), projection(buildNavigationTree(cold)));
+  applyNavigationDelta(tree, [{ path: 'cache/a.txt' }], ['cache']);
+  assert.equal(tree.nodes.get('dir:cache').file, null);
+  assert.deepEqual(
+    projection(tree),
+    projection(buildNavigationTree([{ path: 'stay.txt' }, { path: 'cache/a.txt' }])),
+  );
+});

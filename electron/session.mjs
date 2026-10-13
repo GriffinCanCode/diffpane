@@ -37,6 +37,7 @@ let pending = false;
 let force = false;
 let watchError;
 let shuttingDown = false;
+let directoryChanges = Promise.resolve();
 const changes = new Set();
 const languageChanges = new Map();
 const subscriptions = [];
@@ -73,6 +74,19 @@ function gitMetadata(file) {
     }
   }
   return null;
+}
+
+function collapsedIgnoredParent(filename) {
+  let parent = path.posix.dirname(filename);
+  while (parent !== '.') {
+    if (
+      repository.inventoryMetadata.get(parent)?.directory &&
+      !repository.expandedIgnored.has(parent)
+    )
+      return true;
+    parent = path.posix.dirname(parent);
+  }
+  return false;
 }
 
 function schedule(all = false) {
@@ -165,7 +179,8 @@ async function files() {
 async function findFile(filePath) {
   if (snapshotIndex.has(filePath)) return snapshotIndex.get(filePath);
   await files();
-  return snapshotIndex.get(filePath) ?? catalogIndex.get(filePath);
+  const file = snapshotIndex.get(filePath) ?? catalogIndex.get(filePath);
+  return file?.directory ? undefined : (file ?? (await repository.ignoredFile(filePath)));
 }
 
 async function document(filePath, comparison) {
@@ -179,8 +194,30 @@ parentPort.on('message', async ({ id, method, args = [] }) => {
   try {
     let value;
     if (method === 'snapshot') value = snapshot ?? (await refresh());
-    else if (method === 'files') value = await files();
-    else if (method === 'files-delta') {
+    else if (method === 'files') value = (await files()).filter(file => !file.ignored);
+    else if (method === 'directory-expanded') {
+      const change = directoryChanges.then(async () => {
+        await files();
+        const base = catalogRevision;
+        if (await repository.setDirectoryExpanded(...args)) {
+          if (!args[1]) documents.invalidate([args[0] || '*']);
+          // Expansions touch only one directory; keep the regular inventory cached.
+          if (base === catalogRevision) {
+            catalogIndex = repository.inventoryMetadata;
+            catalog = Promise.resolve([...catalogIndex.values()]);
+          } else {
+            catalog = undefined;
+            catalogIndex = new Map();
+          }
+          catalogRevision++;
+          snapshot = { ...snapshot, changedPaths: [], inventoryRevision: catalogRevision };
+          parentPort.postMessage({ event: 'change', value: snapshot });
+        }
+      });
+      directoryChanges = change.catch(() => {});
+      await change;
+      value = null;
+    } else if (method === 'files-delta') {
       const base = args[0];
       if (base !== null && (!Number.isSafeInteger(base) || base < 0))
         throw new Error('Invalid inventory revision');
@@ -275,9 +312,19 @@ for (const directory of new Set([repository.scope, repository.gitDir, repository
           // FSEvents can retain FileCreated on existing paths; atomic saves also reuse paths.
           const known = catalogIndex.has(relative);
           if (
+            (!known && !snapshotIndex.has(relative) && collapsedIgnoredParent(relative)) ||
+            (event.type === 'update' &&
+              repository.inventoryMetadata.get(relative)?.directory &&
+              !repository.expandedIgnored.has(relative))
+          )
+            continue;
+          if (
             path.basename(event.path) === '.gitignore' ||
             (event.type === 'create' && !known) ||
-            (event.type === 'delete' && (!known || snapshotIndex.get(relative)?.index === '?'))
+            (event.type === 'delete' &&
+              (!known ||
+                catalogIndex.get(relative)?.ignored ||
+                snapshotIndex.get(relative)?.index === '?'))
           )
             inventoryDirty = true;
           if (languageChanges.size < 4096) languageChanges.set(event.path, event);
