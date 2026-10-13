@@ -10,6 +10,7 @@ const utf8 = new TextDecoder('utf-8', { fatal: true });
 const semanticTypes = ['namespace', 'type', 'class', 'enum', 'interface', 'struct', 'typeParameter', 'parameter', 'variable', 'property', 'enumMember', 'event', 'function', 'method', 'macro', 'keyword', 'modifier', 'comment', 'string', 'number', 'regexp', 'operator', 'decorator'];
 const semanticModifiers = ['declaration', 'definition', 'readonly', 'static', 'deprecated', 'abstract', 'async', 'modification', 'documentation', 'defaultLibrary'];
 const feature = {
+  'textDocument/codeLens': 'codeLensProvider',
   'textDocument/hover': 'hoverProvider',
   'textDocument/documentSymbol': 'documentSymbolProvider',
   'textDocument/foldingRange': 'foldingRangeProvider',

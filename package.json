@@ -10,8 +10,10 @@
     "start": "electron .",
     "test": "node --test tests/*.test.mjs",
     "test:app": "node tests/app.e2e.mjs && node tests/files.e2e.mjs && node tests/ide.e2e.mjs && node tests/configs.e2e.mjs",
-    "install:app": "node install.mjs",
+    "install:app": "node install.ts",
     "setup:languages": "node setup-languages.mjs",
+    "setup:howmany": "node setup-howmany.ts",
+    "test:howmany": "npm run build && node tests/howmany.e2e.mjs",
     "test:languages": "node tests/languages.integration.mjs",
     "test:billy": "node tests/billy.integration.mjs"
   },

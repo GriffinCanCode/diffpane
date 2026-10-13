@@ -20,3 +20,5 @@ The explorer projects metadata into a virtualized folder tree. Its flat chrome a
 Language providers attach to visible models. Syntax grammars load on demand; real language servers supply only the features they advertise. Requests cancel when models change or close, and stale results never replace newer content.
 
 Live updates edit the existing model and restore its view state. Editor disposal keeps the card height and view state. The chrome uses OKLCH colors and adapts to narrower windows.
+
+HowMany adds a collapsible explorer summary, a status-bar report action, and a per-file breakdown above the editor. Its report uses the app's native typography, composition bars, quality scores, language rows, and structural metrics only when the analyzer actually returned structural data. A native save dialog exports JSON. HowMany owns separate Monaco diagnostic markers, and file switches cancel its pending counts.

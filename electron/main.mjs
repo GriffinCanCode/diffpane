@@ -2,6 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, Menu } from 'electron';
 import { Worker } from 'node:worker_threads';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { writeFile } from 'node:fs/promises';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const sessions = new Map();
@@ -38,7 +39,7 @@ function createWindow(directory) {
   worker.on('exit', code => { if (code && !window.isDestroyed()) fail(new Error(`Git worker exited (${code})`)); });
   worker.on('message', message => {
     if (message.event) {
-      if (message.event === 'language-event' && message.value.type === 'process') {
+      if (['language-event', 'howmany-event'].includes(message.event) && message.value.type === 'process') {
         const { status, pid } = message.value;
         if (status === 'started') languageProcesses.add(pid);
         if (status === 'stopped') languageProcesses.delete(pid);
@@ -86,7 +87,7 @@ function createWindow(directory) {
   return window;
 }
 
-for (const method of ['snapshot', 'files', 'document', 'refresh', 'language-open', 'language-request', 'language-cancel', 'language-close', 'language-status']) {
+for (const method of ['snapshot', 'files', 'document', 'refresh', 'language-open', 'language-request', 'language-cancel', 'language-close', 'language-status', 'howmany-analyze', 'howmany-file', 'howmany-close']) {
   ipcMain.handle(method, (event, ...args) => {
     const session = sessions.get(event.sender.id);
     if (!session) throw new Error('Unknown window');
@@ -96,6 +97,21 @@ for (const method of ['snapshot', 'files', 'document', 'refresh', 'language-open
 ipcMain.handle('open-folder', async event => {
   const result = await dialog.showOpenDialog(BrowserWindow.fromWebContents(event.sender), { properties: ['openDirectory'], title: 'Open a Git working directory' });
   if (!result.canceled) createWindow(result.filePaths[0]);
+});
+
+ipcMain.handle('howmany-export', async event => {
+  const session = sessions.get(event.sender.id);
+  if (!session) throw new Error('Unknown window');
+  const { report } = await session.call('howmany-analyze');
+  if (!report) throw new Error('Analyze the workspace before exporting');
+  const result = await dialog.showSaveDialog(BrowserWindow.fromWebContents(event.sender), {
+    title: 'Export HowMany report',
+    defaultPath: 'howmany-report.json',
+    filters: [{ name: 'JSON report', extensions: ['json'] }],
+  });
+  if (result.canceled || !result.filePath) return false;
+  await writeFile(result.filePath, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
+  return true;
 });
 
 app.whenReady().then(() => {

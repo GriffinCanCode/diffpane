@@ -24,3 +24,5 @@ The config check exercises syntax colors, source preservation, live updates, and
 The language matrix runs actual servers serially against nested projects and checks advertised capabilities, real responses, and process cleanup.
 
 Run `npm test` for the backend and documentation; run `npm run build && npm run test:app` for the desktop check. App screenshots land in the ignored `test-results` directory.
+
+`npm run setup:howmany && npm run test:howmany` checks real HowMany counts, report rendering, JSON export, save updates, and keyboard dismissal in Electron. The unit suite also checks request coalescing, cancellation, timeouts, invalid reports, path confinement, and source checksum rejection; when the bundled binary exists it verifies real LSP diagnostics and config reloads. Set `DIFFPANE_EXECUTABLE` to a packaged executable and run `node tests/howmany.e2e.mjs` to verify the app's bundled binary without a PATH override.

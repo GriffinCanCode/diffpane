@@ -11,6 +11,7 @@ import { createFilePicker } from './files.js';
 import { projectIcon } from './icons.js';
 import { createNavigator } from './navigator.js';
 import { createLanguageFeatures } from './languages.js';
+import { createHowMany } from './howmany.js';
 import './navigator.css';
 
 globalThis.MonacoEnvironment = { getWorker: () => new EditorWorker() };
@@ -113,6 +114,7 @@ let closed = false;
 app.dataset.view = view;
 const navigator = createNavigator(ui.navigator, api, openFile, { iconFor: projectIcon, onPick: () => openFilePicker(), onFolder: () => api.openFolder(), onOutline: list => { const card = cards.get(openedFile?.path); if (card?.editor) void showSymbols(card, list); else list.textContent = 'Open a file to see its outline'; } });
 const languageFeatures = createLanguageFeatures(monaco, api, { onState: updateLanguageState });
+const howmany = createHowMany(monaco, api, ui.navigator, document.querySelector('.statusbar-end'));
 const languageWidgets = document.createElement('div');
 languageWidgets.className = 'monaco-editor language-widgets';
 document.body.append(languageWidgets);
@@ -391,6 +393,7 @@ async function loadDocument(card) {
 }
 
 function renderDocument(card, document) {
+  card.document = document;
   const text = document.after ?? '';
   const state = card.editor?.saveViewState();
   const lineCount = Math.max(1, text.split('\n').length);
@@ -400,6 +403,14 @@ function renderDocument(card, document) {
   card.note.hidden = !card.note.textContent;
   card.note.classList.remove('is-error');
   card.host.classList.remove('has-error');
+  if (!card.element.querySelector('.howmany-counts')) {
+    const counts = documentNode('div', 'howmany-counts', '');
+    const warnings = documentNode('div', 'howmany-warnings', '');
+    counts.hidden = true;
+    warnings.hidden = true;
+    warnings.setAttribute('role', 'status');
+    card.host.before(counts, warnings);
+  }
   if (!card.editor) {
     card.host.replaceChildren();
     const root = snapshot.root.replaceAll('\\', '/').replace(/\/$/, '');
@@ -483,6 +494,7 @@ function renderDocument(card, document) {
   const language = card.model.getLanguageId();
   card.language.textContent = monaco.languages.getLanguages().find(value => value.id === language)?.aliases?.[0] ?? language;
   card.editor.layout();
+  void howmany.updateFile(card, document);
   if (card.element.querySelector('.symbol-outline').open) void showSymbols(card);
   const outline = ui.navigator.querySelector('.navigator-outline[open] .symbol-list');
   if (outline && view === 'files') void showSymbols(card, outline);
@@ -511,6 +523,7 @@ function documentNode(tag, className, text) {
 }
 
 function deactivate(card) {
+  howmany.clearFile(card);
   card.active = false;
   card.generation++;
   card.dirty = true;
@@ -603,11 +616,13 @@ window.__diffpane = {
 
 if (!api) showError('The desktop connection is unavailable. Reopen diffpane from your terminal.');
 else {
+  void howmany.analyze();
   const unsubscribe = api.onChange(applySnapshot);
   const unsubscribeErrors = api.onError(showError);
   api.snapshot().then(applySnapshot).catch(error => showError(error.message || error));
   window.addEventListener('beforeunload', () => {
     closed = true;
+    howmany.dispose();
     observer.disconnect();
     navigator.dispose();
     languageFeatures.dispose();

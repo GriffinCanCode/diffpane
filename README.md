@@ -32,6 +32,8 @@ diffpane src/main.js     # open a file directly
 
 The installer puts Diffpane in `~/Applications` and the command in `~/.local/bin`. It currently targets macOS; `npm run build && npm start -- /path/to/repo` runs the source app on other Electron platforms.
 
+Building the macOS app from source also requires Rust 1.88+ and the Xcode command-line tools. The installer builds a pinned, checksum-verified HowMany 3.1 and includes its binary and license inside the app. People receiving the built app do not need to install HowMany, Rust, or Homebrew. Reinstalling reuses the verified build for the same revision and architecture.
+
 ## Browse and review
 
 Click a file in the explorer to read its full contents, including unchanged code. Expand folders, type in the explorer to filter paths, drag its divider, or use ⌘B to hide it. The project header holds file and folder pickers, refresh, and collapse; Outline shows the current file’s symbols. ⌘P opens the searchable file picker.
@@ -55,6 +57,14 @@ npm run setup:languages
 ```
 
 Setup pins gopls and ElixirLS, verifies the ElixirLS archive, and stores tools in `~/Library/Application Support/Diffpane/languages`. Existing servers on PATH also work. Language services follow the nearest project manifest inside the opened repository; unavailable tools leave readable syntax-highlighted code and an explanatory status.
+
+## HowMany
+
+The explorer's HowMany section shows workspace lines, code, documentation, comments, blank lines, and quality. Click **Full report** or the status-bar count for language and complexity details, refresh, and JSON export. The report refreshes after saved changes; analysis runs outside the renderer with two worker threads and coalesces save bursts.
+
+Each opened file shows HowMany's line breakdown above the editor. Its language server supplies threshold warnings independently of the file's language server. HowMany 3.1 reads thresholds from its user config: `~/Library/Application Support/howmany/config.toml` on macOS (`$XDG_CONFIG_HOME/howmany/config.toml` or `~/.config/howmany/config.toml` on Linux). Add an `[lsp]` section with `max_file_lines`, `min_doc_ratio`, `documented_from_lines`, or `code_lens`; zero disables a warning. Refresh HowMany after changing these settings.
+
+For source development, `npm run setup:howmany` prepares the bundled binary. An existing `howmany` on PATH also works; versions before 3.1 supply saved-file counts and reports without threshold warnings. `DIFFPANE_HOWMANY_BINARY` selects an explicit executable. Missing tools leave files readable and show an explanation in the HowMany section.
 
 ## Live updates
 

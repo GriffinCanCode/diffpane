@@ -6,11 +6,13 @@ import watcher from '@parcel/watcher';
 import { decorations } from './changes.mjs';
 import { Repository } from './repository.mjs';
 import { LanguageRuntime } from './language.mjs';
+import { HowManyRuntime } from './howmany.mjs';
 
 const repository = await Repository.open(workerData.directory);
 const launchPath = await realpath(workerData.directory);
 const initialPath = (await lstat(launchPath)).isFile() ? path.relative(repository.root, launchPath) : null;
 const languages = new LanguageRuntime(repository.root, value => parentPort.postMessage({ event: 'language-event', value }));
+const howmany = new HowManyRuntime(repository.root, repository.scope, value => parentPort.postMessage({ event: 'howmany-event', value }));
 let snapshot;
 let catalog;
 let catalogRevision = 0;
@@ -64,6 +66,7 @@ async function performRefresh() {
     const result = await repository.snapshot();
     revision++;
     const changedPaths = all ? ['*'] : paths.map(file => path.relative(repository.root, file));
+    howmany.changed(changedPaths);
     documents.clear();
     catalog = undefined;
     catalogRevision++;
@@ -115,6 +118,14 @@ parentPort.on('message', async ({ id, method, args = [] }) => {
     if (method === 'snapshot') value = snapshot ?? await refresh();
     else if (method === 'files') value = await files();
     else if (method === 'document') value = await document(...args);
+    else if (method === 'howmany-analyze') value = await howmany.analyze(args[0] === true);
+    else if (method === 'howmany-file') {
+      const contents = await document(args[0], 'head');
+      value = contents.note ? null : await howmany.file(args[0], contents.after);
+    } else if (method === 'howmany-close') {
+      howmany.closeFile(args[0]);
+      value = null;
+    }
     else if (method === 'language-open') {
       const input = args[0];
       const file = snapshot?.files.find(file => file.path === input?.path) ?? (await files()).find(file => file.path === input?.path);
@@ -125,7 +136,7 @@ parentPort.on('message', async ({ id, method, args = [] }) => {
     else if (method === 'language-cancel') { languages.cancel(args[0]); value = null; }
     else if (method === 'language-close') { languages.close(args[0]); value = null; }
     else if (method === 'language-status') value = languages.status();
-    else if (method === 'language-dispose') { await languages.dispose(); value = null; }
+    else if (method === 'language-dispose') { await Promise.all([languages.dispose(), howmany.dispose()]); value = null; }
     else if (method === 'refresh') { force = true; if (refreshing) { schedule(true); value = snapshot; } else value = await refresh(); }
     else throw new Error('Unknown request');
     parentPort.postMessage({ id, value });
