@@ -6,17 +6,11 @@
 .howmany-panel > summary {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   padding: 7px 10px;
+  list-style: none;
   cursor: pointer;
   color: #aaa;
-}
-.howmany-panel > summary::before {
-  content: '›';
-  width: 8px;
-}
-.howmany-panel[open] > summary::before {
-  content: '⌄';
 }
 .howmany-panel > summary > span:first-child {
   font-weight: 650;
