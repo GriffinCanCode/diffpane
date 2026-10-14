@@ -204,6 +204,7 @@ async function mutateFile(action, pathname, name) {
   }
 }
 const navigator = createNavigator(ui.navigator, api, openFile, {
+  onReady: startBackgroundAnalysis,
   iconFor: projectIcon,
   onMutate: mutateFile,
   languageFor: languageForPath,
@@ -218,6 +219,12 @@ const navigator = createNavigator(ui.navigator, api, openFile, {
 });
 const languageFeatures = createLanguageFeatures(monaco, api, { onState: updateLanguageState });
 const howmany = createHowMany(monaco, api, ui.navigator, document.querySelector('.statusbar-end'));
+function startBackgroundAnalysis() {
+  if (closed || !snapshot || navigator.stats().loading || documentLoading) return;
+  const card = cards.get(openedFile?.path);
+  if (card?.dirty || card?.loading) return;
+  howmany.start();
+}
 const languageWidgets = document.createElement('div');
 languageWidgets.className = 'monaco-editor language-widgets';
 document.body.append(languageWidgets);
@@ -546,6 +553,7 @@ async function loadDocument(card) {
     documentLoading = false;
     card.element.classList.remove('is-loading');
     scheduleDocument();
+    startBackgroundAnalysis();
   }
 }
 
@@ -835,7 +843,7 @@ function renderDocument(card, document) {
     monaco.languages.getLanguages().find(value => value.id === language)?.aliases?.[0] ?? language;
   (card.diffEditor ?? card.editor).layout();
   card.editor.render(true);
-  void howmany.updateFile(card, document);
+  howmany.updateFile(card, document);
   if (card.diffEditor) void highlightFunctions(card);
   if (card.element.querySelector('.symbol-outline').open) void showSymbols(card);
   const outline = ui.navigator.querySelector('.navigator-outline[open] .symbol-list');
@@ -1137,7 +1145,6 @@ else {
       scheduleDocument();
     }
   });
-  void howmany.analyze();
   let pendingSnapshot;
   const snapshotPaths = new LivePathBatch();
   let snapshotFrame = null;

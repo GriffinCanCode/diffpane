@@ -1,4 +1,5 @@
 import './howmany.css';
+import { afterPaint } from './after-paint.ts';
 
 const number = value =>
   Number.isFinite(value) ? value.toLocaleString(undefined, { maximumFractionDigits: 1 }) : '—';
@@ -72,7 +73,8 @@ function composition(basic) {
 
 /** Native explorer summary and report; all counts and scores come from HowMany. */
 export function createHowMany(monaco, api, navigator, statusbar) {
-  if (!api?.howmany) return { analyze() {}, updateFile() {}, clearFile() {}, dispose() {} };
+  if (!api?.howmany)
+    return { start() {}, analyze() {}, updateFile() {}, clearFile() {}, dispose() {} };
   const panel = node('details', 'howmany-panel');
   panel.id = 'howmany-panel';
   panel.open = true;
@@ -98,6 +100,9 @@ export function createHowMany(monaco, api, navigator, statusbar) {
   let active = null;
   let fileRequest = 0;
   let disposed = false;
+  let started = false;
+  let cancelAnalysis;
+  let cancelFile;
 
   function renderReport() {
     content.replaceChildren();
@@ -215,6 +220,10 @@ export function createHowMany(monaco, api, navigator, statusbar) {
   }
 
   async function analyze(force = false) {
+    started = true;
+    cancelAnalysis?.();
+    cancelAnalysis = null;
+    if (disposed) return;
     try {
       render(await api.howmany.analyze(force));
     } catch (error) {
@@ -227,7 +236,7 @@ export function createHowMany(monaco, api, navigator, statusbar) {
   }
   async function refreshAnalysis() {
     await analyze(true);
-    if (active?.document) void updateFile(active, active.document, true);
+    if (active?.document) updateFile(active, active.document, true);
   }
   panel.querySelector('.howmany-report-button').addEventListener('click', showReport);
   status.addEventListener('click', showReport);
@@ -283,16 +292,20 @@ export function createHowMany(monaco, api, navigator, statusbar) {
 
   function clearFile(card = active) {
     if (!card || card !== active) return;
+    cancelFile?.();
+    cancelFile = null;
     fileRequest++;
     active = null;
     card.howmanyVersion = null;
     if (card.model) monaco.editor.setModelMarkers(card.model, 'howmany', []);
     void api.howmany.close(card.file.path).catch(() => {});
   }
-  async function updateFile(card, document, force = false) {
+  function updateFile(card, document, force = false) {
+    if (disposed) return;
     const version = card.model.getVersionId();
     if (!force && !document.note && active === card && card.howmanyVersion === version) return;
     active = card;
+    cancelFile?.();
     card.howmanyVersion = version;
     const request = ++fileRequest;
     const counts = card.element.querySelector('.howmany-counts');
@@ -303,6 +316,20 @@ export function createHowMany(monaco, api, navigator, statusbar) {
       clearFile(card);
       return;
     }
+    cancelFile = afterPaint(() => {
+      cancelFile = null;
+      if (
+        disposed ||
+        request !== fileRequest ||
+        !card.active ||
+        card.model?.getVersionId() !== version
+      )
+        return;
+      void loadFile(card, version, request, counts);
+    });
+  }
+
+  async function loadFile(card, version, request, counts) {
     try {
       const result = await api.howmany.file(card.file.path);
       if (
@@ -324,11 +351,21 @@ export function createHowMany(monaco, api, navigator, statusbar) {
     }
   }
   return {
+    start() {
+      if (started || disposed) return;
+      started = true;
+      cancelAnalysis = afterPaint(() => {
+        cancelAnalysis = null;
+        void analyze();
+      });
+    },
     analyze,
     updateFile,
     clearFile,
     dispose() {
       disposed = true;
+      cancelAnalysis?.();
+      cancelAnalysis = null;
       clearFile();
       unsubscribe();
       dialog.remove();

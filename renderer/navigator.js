@@ -91,7 +91,7 @@ export function createNavigator(
   container,
   api,
   onOpen,
-  { iconFor, onPick, onFolder, onOutline, onMutate, languageFor } = {},
+  { iconFor, onPick, onFolder, onOutline, onMutate, languageFor, onReady } = {},
 ) {
   const id = ++instance;
   container.classList.add('navigator');
@@ -347,6 +347,7 @@ export function createNavigator(
       loading = false;
       refreshButton.classList.remove('is-refreshing');
       refreshButton.removeAttribute('aria-busy');
+      if (!disposed) onReady?.();
     }
   }
 

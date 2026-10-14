@@ -35,6 +35,8 @@ Language providers attach to visible models. Syntax grammars load on demand; rea
 
 HowMany adds a collapsible explorer summary, a status-bar report action, and a per-file breakdown above the editor. Its report uses the app's native typography, composition bars, quality scores, language rows, and structural metrics only when the analyzer actually returned structural data. A native save dialog exports JSON. HowMany owns separate Monaco diagnostic markers, and file switches cancel its pending counts.
 
+Files load before automatic HowMany workspace analysis starts. The explorer and initial document finish loading, then analysis yields through a paint opportunity and runs during an idle turn. Per-file counts also wait for a paint opportunity; switching files cancels queued counts, and delayed results cannot replace counts for a newer selection. A slow or unavailable analyzer leaves browsing and editing usable.
+
 Live updates edit the existing model and restore its view state. Switching files disposes the previous model and its requests. The title bar keeps a muted monochrome mark, project context, and branch; search stays in the explorer and live updates run without a title bar indicator. The chrome uses OKLCH colors and adapts to narrower windows.
 
 Large file-picker searches run in a Web Worker with a reusable path index and coalesced queries; only the newest query can publish results. Status-only snapshots update explorer badges without rebuilding the inventory or visible projection. File navigation keeps one document read in flight, skips superseded selections, and remembers up to 64 file view positions without retaining their Monaco models. Live saves preserve the current model and batch snapshot updates per animation frame.

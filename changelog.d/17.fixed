@@ -1,0 +1,1 @@
+Load and paint files before starting automatic HowMany workspace analysis. Defer per-file counts until after a paint opportunity, cancel queued counts on navigation, and keep file browsing usable while analysis is pending.

@@ -15,7 +15,7 @@
     "setup:languages": "node setup-languages.ts",
     "setup:howmany": "node setup-howmany.ts",
     "test:languages": "node tests/languages.integration.mjs",
-    "test:howmany": "npm run build && node tests/howmany.e2e.mjs",
+    "test:howmany": "npm run build && node tests/howmany-startup.e2e.mjs && node tests/howmany.e2e.mjs",
     "test:billy": "node tests/billy.integration.mjs",
     "prepare": "vp config --no-agent && node scripts/emit-preload.ts",
     "dev": "node scripts/dev.ts",
