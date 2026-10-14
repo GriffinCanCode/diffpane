@@ -36,7 +36,7 @@ test('reorganization retains unchanged nodes and matches a fresh naturally sorte
   assert.deepEqual(projection(tree), projection(buildNavigationTree(next)));
   assert.deepEqual(
     flattenNavigationTree(tree, new Set(), 'new').map(row => row.node.path),
-    ['new/deep/a.ts'],
+    ['new/deep/a.ts', 'new', 'new/deep'],
   );
 });
 

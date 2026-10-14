@@ -13,6 +13,8 @@ doc_radar:
 
 Window management stays in the main process; Git and language-server work runs in a worker. The preload exposes document reads, status, refresh, the native folder picker, and a bounded language-service API.
 
+File and folder operations validate scope, resolved parent directories, and Git metadata boundaries. Renames accept one basename and reject name collisions; deleting moves the entry to the system Trash. Changes refresh the inventory and invalidate cached documents.
+
 Text saves use a scoped IPC call and validate regular files, parent confinement, payload limits, and the expected disk contents before writing. Saves retain source encoding and permissions, flush the file descriptor, invalidate the document cache, and notify watchers and language services directly. The main process asks the renderer to finish queued saves before closing or quitting; failed saves keep the window open.
 
 Working images, audio, and videos use a private `diffpane-media` protocol scoped to each window's file inventory. Responses stream from regular file descriptors and support byte ranges for video seeking, independently of the text preview size limit. Requests reject external symlinks and paths outside the repository; closing the window revokes its media URLs.

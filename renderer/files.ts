@@ -1,7 +1,8 @@
+import { createSearchFilters, searchableEntries, type LanguageFor } from './search-filters.ts';
 import { createFileSearch } from './search-runtime.ts';
 import { projectIcon } from './icons.ts';
 
-type PickerFile = { path: string };
+type PickerFile = { path: string; directory?: boolean };
 type PickerMatch = { file: PickerFile; positions: number[] };
 type PickerApi = {
   files: () => Promise<PickerFile[]>;
@@ -15,12 +16,14 @@ export function createFilePicker(
   api: PickerApi,
   onSelect: (file: PickerFile) => void,
   context: () => string = () => '',
+  languageFor?: LanguageFor,
+  basePath: () => string = () => '',
 ) {
   const dialog = document.createElement('dialog');
   dialog.id = 'file-picker';
   dialog.className = 'file-picker';
   dialog.setAttribute('aria-labelledby', 'picker-title');
-  dialog.innerHTML = `<header class="picker-heading"><div><h2 id="picker-title">Search files</h2><p class="picker-context"></p></div><button type="button" class="picker-close" aria-label="Close file search" title="Close · Escape">×</button></header><div class="picker-search"><svg viewBox="0 0 18 18" fill="none" aria-hidden="true"><circle cx="7.8" cy="7.8" r="4.6" stroke="currentColor" stroke-width="1.4"/><path d="m11.3 11.3 3.3 3.3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><input id="file-search" placeholder="Search by filename or path…" aria-label="Search files" role="combobox" aria-autocomplete="list" aria-controls="file-list" aria-expanded="true" autocomplete="off" spellcheck="false"><button type="button" class="picker-clear" aria-label="Clear file search" hidden>Clear</button><kbd>esc</kbd></div><div class="picker-summary" role="status" aria-live="polite">Reading files…</div><div class="picker-results"><div id="file-list" class="picker-list" role="listbox" aria-label="Project files"><div class="picker-rows"></div></div><div class="picker-empty" hidden><strong></strong><p></p><button type="button" class="open-button picker-retry" hidden>Try again</button></div></div><footer class="picker-footer"><span><kbd>↑</kbd><kbd>↓</kbd> Navigate <kbd>↵</kbd> Open file</span><span>Tracked + untracked</span></footer>`;
+  dialog.innerHTML = `<header class="picker-heading"><div><h2 id="picker-title">Search files</h2><p class="picker-context"></p></div><button type="button" class="picker-close" aria-label="Close file search" title="Close · Escape">×</button></header><div class="picker-search"><svg viewBox="0 0 18 18" fill="none" aria-hidden="true"><circle cx="7.8" cy="7.8" r="4.6" stroke="currentColor" stroke-width="1.4"/><path d="m11.3 11.3 3.3 3.3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><input id="file-search" placeholder="Search files, folders, or paths…" aria-label="Search files" role="combobox" aria-autocomplete="list" aria-controls="file-list" aria-expanded="true" autocomplete="off" spellcheck="false"><button type="button" class="picker-clear" aria-label="Clear file search" hidden>Clear</button><kbd>esc</kbd></div><div class="picker-filter-host"></div><div class="picker-summary" role="status" aria-live="polite">Reading files…</div><div class="picker-results"><div id="file-list" class="picker-list" role="listbox" aria-label="Project files"><div class="picker-rows"></div></div><div class="picker-empty" hidden><strong></strong><p></p><button type="button" class="open-button picker-retry" hidden>Try again</button></div></div><footer class="picker-footer"><span><kbd>↑</kbd><kbd>↓</kbd> Navigate <kbd>↵</kbd> Open</span><span>Tracked + untracked</span></footer>`;
   document.body.appendChild(dialog);
   const input = dialog.querySelector('input') as HTMLInputElement;
   const list = dialog.querySelector('.picker-list') as HTMLElement;
@@ -30,6 +33,14 @@ export function createFilePicker(
   const clear = dialog.querySelector('.picker-clear') as HTMLButtonElement;
   const retry = dialog.querySelector('.picker-retry') as HTMLButtonElement;
   const search = createFileSearch<PickerFile>();
+  const filters = createSearchFilters(
+    dialog.querySelector('.picker-filter-host') as HTMLElement,
+    () => {
+      search.setFiles(inventory.filter(filters.matches));
+      filter();
+    },
+    languageFor,
+  );
   let filterGeneration = 0;
   let inventory: PickerFile[] = [];
   let matches: PickerMatch[] = [];
@@ -80,20 +91,20 @@ export function createFilePicker(
       ? 'Reading project files…'
       : failure
         ? 'File search unavailable'
-        : `${matches.length.toLocaleString()} ${matches.length === 1 ? 'file' : 'files'}${input.value.trim() ? ` found · ${inventory.length.toLocaleString()} in project` : ' in project'}`;
+        : `${matches.length.toLocaleString()} ${matches.length === 1 ? 'item' : 'items'}${input.value.trim() ? ` found · ${inventory.length.toLocaleString()} in project` : ' in project'}`;
     empty.hidden = matches.length > 0;
     empty.querySelector('strong')!.textContent = loading
       ? 'Reading your project'
       : failure
         ? 'Couldn’t load files'
         : input.value.trim()
-          ? 'No files found'
+          ? 'No files or folders found'
           : 'No files to show';
     empty.querySelector('p')!.textContent = loading
       ? 'Your files will appear here in a moment.'
       : failure ||
         (input.value.trim()
-          ? 'Try a shorter name, a path, or an abbreviation.'
+          ? 'Try a shorter name, a path, or reset the filters.'
           : 'Tracked and nonignored files will appear here.');
     retry.hidden = !failure;
     list.setAttribute('aria-busy', String(loading));
@@ -135,7 +146,10 @@ export function createFilePicker(
       const slash = file.path.lastIndexOf('/');
       const filename = file.path.slice(slash + 1);
       const icon = document.createElement('img');
-      icon.src = projectIcon({ kind: 'file', name: filename }) as string;
+      icon.src = projectIcon({
+        kind: file.directory ? 'directory' : 'file',
+        name: filename,
+      }) as string;
       icon.alt = '';
       const label = document.createElement('div');
       label.className = 'picker-file-label';
@@ -143,7 +157,12 @@ export function createFilePicker(
       const directory = document.createElement('small');
       const highlights = new Set(positions);
       highlight(name, filename, Array.from(file.path.slice(0, slash + 1)).length, highlights);
-      highlight(directory, file.path.slice(0, slash + 1) || './', 0, highlights);
+      highlight(
+        directory,
+        (file.path.slice(0, slash + 1) || './') + (file.directory ? ' · Folder' : ''),
+        0,
+        highlights,
+      );
       label.append(name, directory);
       const enter = document.createElement('span');
       enter.className = 'picker-enter';
@@ -250,8 +269,9 @@ export function createFilePicker(
     try {
       const files = await api.files();
       if (!dialog.open || generation !== request) return;
-      inventory = files;
-      search.setFiles(files);
+      inventory = searchableEntries(files, basePath());
+      filters.update(inventory);
+      search.setFiles(inventory.filter(filters.matches));
       loading = false;
       filter(refresh);
     } catch (error) {

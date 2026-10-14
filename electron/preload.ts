@@ -31,6 +31,8 @@ contextBridge.exposeInMainWorld('diffpane', {
   document: (path: string, comparison = 'head') => ipcRenderer.invoke('document', path, comparison),
   save: (path: string, text: string, expected: string) =>
     ipcRenderer.invoke('save', path, text, expected),
+  rename: (path: string, name: string) => ipcRenderer.invoke('rename', path, name),
+  fileAction: (action: string, path: string) => ipcRenderer.invoke('file-action', action, path),
   onFlushSaves: (callback: () => void) => listen('flush-saves', callback),
   onResumeEditing: (callback: () => void) => listen('resume-editing', callback),
   savesFlushed: (success: boolean) => ipcRenderer.send('saves-flushed', success),

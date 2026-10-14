@@ -9,6 +9,7 @@ import { DiffRuntime } from './diff-runtime.ts';
 import { Repository } from './repository.mjs';
 import { LanguageRuntime } from './language.mjs';
 import { HowManyRuntime } from './howmany.mjs';
+import { operationPath, renameEntry } from './file-operations.ts';
 import { mediaType } from '../media-types.ts';
 
 const repository = await Repository.open(workerData.directory);
@@ -194,7 +195,19 @@ parentPort.on('message', async ({ id, method, args = [] }) => {
   try {
     let value;
     if (method === 'snapshot') value = snapshot ?? (await refresh());
-    else if (method === 'files') value = (await files()).filter(file => !file.ignored);
+    else if (method === 'operation-path' || method === 'rename') {
+      await files();
+      if (catalogIndex.get(args[0])?.submodule)
+        throw new Error('Open the submodule to change its files.');
+      if (method === 'operation-path') value = await operationPath(repository, args[0]);
+      else {
+        value = await renameEntry(repository, ...args);
+        documents.invalidate([args[0], value]);
+        force = true;
+        if (refreshing) await currentRefresh;
+        await refresh();
+      }
+    } else if (method === 'files') value = (await files()).filter(file => !file.ignored);
     else if (method === 'directory-expanded') {
       const change = directoryChanges.then(async () => {
         await files();

@@ -141,7 +141,7 @@ try {
   await page.locator('.picker-clear').click();
   assert.equal(await page.locator('#file-search').inputValue(), '');
   await page.locator('#file-search').fill('no-such-file-exists');
-  await page.getByText('No files found', { exact: true }).waitFor();
+  await page.getByText('No files or folders found', { exact: true }).waitFor();
   await page.keyboard.press('Enter');
   assert.equal(
     await page.locator('#file-picker').isVisible(),
@@ -149,6 +149,7 @@ try {
     'Enter with no match must keep search open',
   );
   await page.locator('#file-search').fill('src');
+  await page.keyboard.press('ArrowDown');
   await page.keyboard.press('ArrowDown');
   assert.equal(
     await page.locator('#file-list [aria-selected="true"]').getAttribute('data-path'),
@@ -338,7 +339,7 @@ try {
   await page.locator('.navigator-action[data-action="open-file"]').click();
   await page.locator('#file-search').fill('catalog');
   await page.waitForFunction(() =>
-    document.querySelector('.picker-summary').textContent.startsWith('200 files'),
+    document.querySelector('.picker-summary').textContent.startsWith('201 items'),
   );
   assert.ok(
     (await page.locator('#file-list button').count()) < 25,
@@ -373,7 +374,7 @@ try {
   await page.locator('.navigator-action[data-action="open-file"]').click();
   await page.locator('#file-search').fill('catalog doc');
   await page.waitForFunction(() =>
-    document.querySelector('.picker-summary').textContent.startsWith('200 files'),
+    document.querySelector('.picker-summary').textContent.startsWith('200 items'),
   );
   await mkdir('test-results', { recursive: true });
   await page.waitForTimeout(200);

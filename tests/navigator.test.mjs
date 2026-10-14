@@ -76,6 +76,7 @@ test('search reaches collapsed descendants without mounting or expanding their f
   assert.deepEqual(paths(flattenNavigationTree(tree, new Set(['']), 'src/deep')), [
     'src/deep/Hello.swift',
     'src/deep/world.swift',
+    'src/deep',
   ]);
   assert.deepEqual(paths(flattenNavigationTree(tree, new Set(['']), 'missing')), []);
 });

@@ -1,6 +1,6 @@
 // Keep the native watcher library loaded while worker teardown joins its native threads.
 import '@parcel/watcher';
-import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, shell } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, protocol, shell } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { Worker } from 'node:worker_threads';
 import { fileURLToPath } from 'node:url';
@@ -189,6 +189,7 @@ for (const method of [
   'directory-expanded',
   'document',
   'save',
+  'rename',
   'refresh',
   'language-open',
   'language-request',
@@ -205,6 +206,19 @@ for (const method of [
     return session.call(method, args);
   });
 }
+ipcMain.handle('file-action', async (event, action, filePath) => {
+  const session = sessions.get(event.sender.id);
+  if (!session) throw new Error('Unknown window');
+  if (!['trash', 'reveal', 'copy-path', 'copy-relative-path'].includes(action))
+    throw new Error('Unknown file action');
+  const absolute = await session.call('operation-path', [filePath]);
+  if (action === 'trash') {
+    await shell.trashItem(absolute);
+    await session.call('refresh');
+  } else if (action === 'reveal') shell.showItemInFolder(absolute);
+  else await clipboard.writeText(action === 'copy-path' ? absolute : filePath);
+});
+
 ipcMain.on('saves-flushed', (event, success) => {
   sessions.get(event.sender.id)?.finishFlush?.(success === true);
 });

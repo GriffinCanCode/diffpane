@@ -142,8 +142,70 @@ function scheduleDocument() {
       void loadDocument(card);
   });
 }
+const languageAssociations = monaco.languages.getLanguages();
+const searchLanguages = new Map();
+function languageForPath(pathname) {
+  if (searchLanguages.has(pathname)) return searchLanguages.get(pathname);
+  const name = pathname.slice(pathname.lastIndexOf('/') + 1).toLocaleLowerCase();
+  let best;
+  let length = 0;
+  for (const language of languageAssociations) {
+    if (language.filenames?.some(filename => filename.toLocaleLowerCase() === name)) {
+      best = language;
+      break;
+    }
+    for (const extension of language.extensions ?? [])
+      if (name.endsWith(extension.toLocaleLowerCase()) && extension.length > length) {
+        best = language;
+        length = extension.length;
+      }
+  }
+  const label = best?.aliases?.[0] ?? best?.id ?? 'Plain text';
+  searchLanguages.set(pathname, label);
+  return label;
+}
+async function mutateFile(action, pathname, name) {
+  const current = cards.get(openedFile?.path);
+  const affected =
+    openedFile && (openedFile.path === pathname || openedFile.path.startsWith(`${pathname}/`));
+  const editor = affected && (current?.diffEditor?.getModifiedEditor() ?? current?.editor);
+  if (editor) editor.updateOptions({ readOnly: true });
+  try {
+    if (affected) await current?.autosave?.flush();
+    const destination =
+      action === 'rename'
+        ? await api.rename(pathname, name)
+        : await api.fileAction(action, pathname);
+    if (action === 'rename') navigator.renamed(pathname, destination);
+    if (affected && openedFile?.path === current?.file.path) {
+      const previous = openedFile.path;
+      navigationVersion++;
+      for (const card of cards.values()) {
+        deactivate(card);
+        card.element.remove();
+      }
+      cards.clear();
+      openedFile = null;
+      if (action === 'rename')
+        await openFile({ path: destination + previous.slice(pathname.length) });
+      else {
+        ui.feed.replaceChildren();
+        ui.empty_state.hidden = false;
+        navigator.select(null);
+        document.getElementById('save-state').textContent = 'Autosave on';
+        const outline = ui.navigator.querySelector('.navigator-outline .symbol-list');
+        if (outline) outline.textContent = 'Open a file to see its outline';
+      }
+    }
+    if (action === 'rename' && !affected) navigator.select(destination);
+  } finally {
+    if (current?.active && editor) editor.updateOptions({ readOnly: !current.document?.editable });
+  }
+}
 const navigator = createNavigator(ui.navigator, api, openFile, {
   iconFor: projectIcon,
+  onMutate: mutateFile,
+  languageFor: languageForPath,
   onPick: () => openFilePicker(),
   onFolder: () => api.openFolder(),
   onOutline: list => {
@@ -160,8 +222,14 @@ languageWidgets.className = 'monaco-editor language-widgets';
 document.body.append(languageWidgets);
 const openFilePicker = createFilePicker(
   api,
-  openFile,
+  file => (file.directory ? navigator.revealDirectory(file.path) : openFile(file)),
   () => snapshot?.scope || snapshot?.root || ui.project_path.textContent,
+  languageForPath,
+  () => {
+    const root = snapshot?.root?.replaceAll('\\', '/').replace(/\/$/u, '') ?? '';
+    const scope = snapshot?.scope?.replaceAll('\\', '/').replace(/\/$/u, '') ?? root;
+    return scope.startsWith(`${root}/`) ? scope.slice(root.length + 1) : '';
+  },
 );
 
 async function openFile(file) {

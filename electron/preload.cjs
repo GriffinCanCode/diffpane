@@ -28,6 +28,8 @@ electron_1.contextBridge.exposeInMainWorld('diffpane', {
   document: (path, comparison = 'head') =>
     electron_1.ipcRenderer.invoke('document', path, comparison),
   save: (path, text, expected) => electron_1.ipcRenderer.invoke('save', path, text, expected),
+  rename: (path, name) => electron_1.ipcRenderer.invoke('rename', path, name),
+  fileAction: (action, path) => electron_1.ipcRenderer.invoke('file-action', action, path),
   onFlushSaves: callback => listen('flush-saves', callback),
   onResumeEditing: callback => listen('resume-editing', callback),
   savesFlushed: success => electron_1.ipcRenderer.send('saves-flushed', success),
