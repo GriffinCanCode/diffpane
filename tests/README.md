@@ -19,7 +19,7 @@ doc_radar:
 
 `npm run test:markdown` builds and drives the real Electron Markdown view through Mermaid flowcharts and sequence diagrams, malformed input, code highlighting, copy, expansion and zoom, source/diff transitions, local links and images, live saves, narrow panes, HTML sanitization, and cleanup. Screenshots are saved as `test-results/markdown.png` and `test-results/markdown-narrow.png`. Markdown path tests cover encoded links, anchors, and project traversal boundaries.
 
-`node tests/explorer-actions.e2e.mjs` checks folder search, combined filters, clipboard paths, rename collisions, open-file and folder renames, narrow-window filters, and moving files and folders to Trash in Electron. It runs in `test:app`. Unit checks cover filter boundaries and filesystem confinement.
+`node tests/explorer-actions.e2e.mjs` checks folder search, combined filters, clipboard paths, rename collisions, open-file and folder renames, narrow-window filters, and moving files and folders to Trash in Electron, including tracked-file removal from search and restoration. It runs in `test:app`. Unit checks cover filter boundaries and filesystem confinement.
 
 We test actual Git repositories, including partial staging, unusual paths, renames, worktrees, conflicts, binary previews, and ignore behavior. The Electron check drives the real app through edits and scrolling, then verifies switching files retains one model. Gutter checks distinguish additions, modifications, and deletions without whole-line fills. The file-viewer check reads unchanged code, saves and commits it, searches the picker, and launches a file directly.
 

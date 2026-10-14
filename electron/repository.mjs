@@ -59,7 +59,16 @@ export class Repository {
   async files() {
     const bytes = await git(
       this.root,
-      ['ls-files', '--stage', '--cached', '--others', '--exclude-standard', '-t', '-z'],
+      [
+        'ls-files',
+        '--stage',
+        '--cached',
+        '--deleted',
+        '--others',
+        '--exclude-standard',
+        '-t',
+        '-z',
+      ],
       MAX_STATUS_BYTES,
     );
     let source;
@@ -70,6 +79,7 @@ export class Repository {
     }
     const scope = path.relative(this.root, this.scope).split(path.sep).join('/');
     const files = new Map();
+    const deleted = new Set();
     for (const record of source.split('\0')) {
       if (!record) continue;
       // Tags distinguish untracked names from the fixed index metadata, even when a name resembles that metadata.
@@ -77,6 +87,10 @@ export class Repository {
       const separator = untracked ? 1 : record.indexOf('\t');
       if (record[1] !== ' ' || separator < 0) throw new Error('Invalid Git file inventory record.');
       const filename = record.slice(separator + 1);
+      if (record.startsWith('R ')) {
+        deleted.add(filename);
+        continue;
+      }
       const prior = this.inventoryMetadata.get(filename);
       // A retained path was validated when it first entered this repository's inventory.
       if (!prior) validatePath(filename);
@@ -100,6 +114,9 @@ export class Repository {
               },
         );
     }
+    // --cached retains missing tracked paths; --deleted marks those entries separately.
+    // Keep deletions in Git status, but remove them from the filesystem explorer and picker.
+    for (const filename of deleted) files.delete(filename);
     const addIgnored = (filename, directory) => {
       if (files.has(filename)) return;
       validatePath(filename);

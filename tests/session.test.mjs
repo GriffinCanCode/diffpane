@@ -207,3 +207,22 @@ test('ignored folders load only explicit expansions and release catalog and docu
   const added = await repo.call('files-delta', reopened.revision);
   assert.ok(added.files.some(file => file.path === 'cache/new.txt'));
 });
+
+test('tracked deletions leave the inventory, retain Git status, and reappear after restoration', async t => {
+  const repo = await fixture(t);
+  const before = await repo.call('files-delta', null);
+  await rm(path.join(repo.root, 'src/file0.txt'));
+  const deleted = await repo.waitFor(snapshot =>
+    snapshot.files.some(file => file.path === 'src/file0.txt' && file.worktree === 'D'),
+  );
+  assert.ok(deleted.inventoryRevision > before.revision);
+  assert.ok(!(await repo.call('files')).some(file => file.path === 'src/file0.txt'));
+  const delta = await repo.call('files-delta', before.revision);
+  assert.ok(delta.removed.includes('src/file0.txt'));
+  await repo.write('src/file0.txt', 'restored\n');
+  await repo.waitFor(
+    snapshot =>
+      snapshot.revision > deleted.revision && snapshot.changedPaths.includes('src/file0.txt'),
+  );
+  assert.ok((await repo.call('files')).some(file => file.path === 'src/file0.txt'));
+});

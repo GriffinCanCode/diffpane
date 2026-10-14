@@ -169,7 +169,7 @@ test('ignored discovery respects nested scope and never descends into symlinks',
   );
 });
 
-test('file inventory honors nested directory scope and retains missing tracked paths', async t => {
+test('file inventory honors nested directory scope and excludes deleted tracked paths', async t => {
   const repo = await fixture(t);
   for (const name of ['inside/a.rs', 'inside/deep/b.rs', 'inside-other/c.rs', 'outside/d.rs']) {
     await repo.write(name, `${name}\n`);
@@ -179,10 +179,13 @@ test('file inventory honors nested directory scope and retains missing tracked p
   await repo.write('outside/new.rs', 'outside\n');
   await rm(path.join(repo.root, 'inside/a.rs'));
   const repository = await Repository.open(path.join(repo.root, 'inside'));
-  assert.deepEqual(
-    await repository.files(),
-    ['inside/a.rs', 'inside/deep/b.rs', 'inside/new.rs'].map(plain),
+  assert.deepEqual(await repository.files(), ['inside/deep/b.rs', 'inside/new.rs'].map(plain));
+  assert.equal(
+    (await repository.snapshot()).files.find(file => file.path === 'inside/a.rs')?.worktree,
+    'D',
   );
+  await repo.write('inside/a.rs', 'restored\n');
+  assert.ok((await repository.files()).some(file => file.path === 'inside/a.rs'));
 });
 
 test('file inventory preserves unusual names and distinguishes untracked names resembling stage metadata', async t => {

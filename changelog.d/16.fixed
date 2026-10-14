@@ -1,0 +1,1 @@
+Remove deleted tracked files from the explorer and file picker instead of retaining their Git index entries. Preserve Git deletion status and refresh the inventory when files are deleted or restored.

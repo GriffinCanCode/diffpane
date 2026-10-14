@@ -16,13 +16,51 @@ try {
   await writeFile(path.join(root, 'src/deep/main.ts'), 'export const value = 1;\n');
   await writeFile(path.join(root, 'src/deep/helper.py'), 'value = 1\n');
   await writeFile(path.join(root, 'docs/readme.md'), '# Notes\n');
-  application = await electron.launch({ executablePath, args: ['.', root] });
+  execFileSync('git', ['-C', root, 'add', '.']);
+  execFileSync('git', [
+    '-C',
+    root,
+    '-c',
+    'user.name=Test',
+    '-c',
+    'user.email=test@example.invalid',
+    '-c',
+    'commit.gpgsign=false',
+    'commit',
+    '-qm',
+    'baseline',
+  ]);
+  application = await electron.launch({
+    executablePath: process.env.DIFFPANE_EXECUTABLE || executablePath,
+    args: process.env.DIFFPANE_EXECUTABLE ? [root] : ['.', root],
+  });
   const page = await application.firstWindow();
   page.setDefaultTimeout(15000);
   page.on('pageerror', error => errors.push(error.message));
   const explorer = page.locator('#navigator');
   const search = explorer.locator('.navigator-search input');
   await explorer.locator('.navigator-row[data-path="src"]').waitFor();
+  await search.fill('docs/readme.md');
+  await explorer.locator('.navigator-row[data-path="docs/readme.md"]').click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Move to Trash' }).click();
+  await page.waitForFunction(
+    () => !document.querySelector('.navigator-row[data-path="docs/readme.md"]'),
+  );
+  await assert.rejects(stat(path.join(root, 'docs/readme.md')), { code: 'ENOENT' });
+  assert.ok(
+    (await page.evaluate(() => window.diffpane.snapshot())).files.some(
+      file => file.path === 'docs/readme.md' && file.worktree === 'D',
+    ),
+  );
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+p' : 'Control+p');
+  await page.locator('#file-search').fill('docs/readme.md');
+  await page.waitForFunction(() =>
+    document.querySelector('.picker-summary').textContent.startsWith('0 items'),
+  );
+  await page.locator('.picker-close').click();
+  // Restoring a tracked file must make it searchable again.
+  await writeFile(path.join(root, 'docs/readme.md'), '# Notes restored\n');
+  await explorer.locator('.navigator-row[data-path="docs/readme.md"]').waitFor();
   await search.fill('deep');
   await explorer.locator('.navigator-row[data-kind="directory"][data-path="src/deep"]').waitFor();
   await explorer.locator('.search-filter-toggle').click();

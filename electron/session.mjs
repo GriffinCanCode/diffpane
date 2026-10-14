@@ -343,10 +343,7 @@ for (const directory of new Set([repository.scope, repository.gitDir, repository
           if (
             path.basename(event.path) === '.gitignore' ||
             (event.type === 'create' && !known) ||
-            (event.type === 'delete' &&
-              (!known ||
-                catalogIndex.get(relative)?.ignored ||
-                snapshotIndex.get(relative)?.index === '?'))
+            event.type === 'delete'
           )
             inventoryDirty = true;
           if (languageChanges.size < 4096) languageChanges.set(event.path, event);
