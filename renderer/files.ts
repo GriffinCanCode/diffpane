@@ -48,7 +48,7 @@ export function createFilePicker(
   let request = 0;
   let loading = false;
   let failure = '';
-  let scheduled = false;
+  let frame: number | undefined;
   let inventoryRevision: number | undefined;
   const unsubscribe = api.onChange?.(snapshot => {
     if (snapshot.inventoryRevision === inventoryRevision) return;
@@ -123,7 +123,8 @@ export function createFilePicker(
   }
 
   function render() {
-    scheduled = false;
+    if (frame !== undefined) cancelAnimationFrame(frame);
+    frame = undefined;
     const height = list.clientHeight || 380;
     const start = Math.max(0, Math.floor(list.scrollTop / ROW_HEIGHT) - 3);
     const end = Math.min(matches.length, start + Math.ceil(height / ROW_HEIGHT) + 6);
@@ -228,10 +229,7 @@ export function createFilePicker(
   list.addEventListener(
     'scroll',
     () => {
-      if (!scheduled) {
-        scheduled = true;
-        requestAnimationFrame(render);
-      }
+      if (dialog.open && frame === undefined) frame = requestAnimationFrame(render);
     },
     { passive: true },
   );
@@ -249,7 +247,14 @@ export function createFilePicker(
   dialog.addEventListener('close', () => {
     request++;
     filterGeneration++;
-    search.cancel();
+    search.dispose();
+    inventory = [];
+    matches = [];
+    if (frame !== undefined) cancelAnimationFrame(frame);
+    frame = undefined;
+    rows.replaceChildren();
+    rows.style.height = '0px';
+    input.removeAttribute('aria-activedescendant');
   });
   window.addEventListener('beforeunload', () => search.dispose(), { once: true });
   new ResizeObserver(() => {

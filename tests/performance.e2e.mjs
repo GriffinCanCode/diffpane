@@ -169,9 +169,9 @@ try {
     .locator('.navigator-action[data-action="open-file"]')
     .evaluate(button => button.click());
   await page.waitForFunction(
-    count =>
-      document.querySelector('.picker-summary')?.textContent.startsWith(count.toLocaleString()),
-    count,
+    () =>
+      document.querySelector('#file-list')?.getAttribute('aria-busy') === 'false' &&
+      document.querySelector('#file-list button'),
   );
   const searchStart = performance.now();
   // Only the newest query may publish results, even when queries overlap the worker's execution.
@@ -179,7 +179,10 @@ try {
   await page.locator('#file-search').fill('file2');
   await page.locator('#file-search').fill('file00042.txt');
   await page.waitForFunction(
-    () => document.querySelector('.picker-summary')?.textContent.startsWith('1 file found'),
+    () =>
+      document.querySelectorAll('#file-list button').length === 1 &&
+      document.querySelector('#file-list button')?.getAttribute('data-path') ===
+        'src/package000/file00042.txt',
     undefined,
     { timeout: 10000 },
   );
@@ -205,8 +208,11 @@ try {
     .locator('.navigator-action[data-action="open-file"]')
     .evaluate(button => button.click());
   await page.locator('#file-search').fill('file00000.txt');
-  await page.waitForFunction(() =>
-    document.querySelector('.picker-summary')?.textContent.startsWith('1 file found'),
+  await page.waitForFunction(
+    () =>
+      document.querySelectorAll('#file-list button').length === 1 &&
+      document.querySelector('#file-list button')?.getAttribute('data-path') ===
+        'src/package000/file00000.txt',
   );
   await page.locator('#file-list button').evaluate(button => button.click());
   await page.waitForFunction(() =>
@@ -223,6 +229,19 @@ try {
     };
   });
   metrics.stats = await page.evaluate(() => window.__diffpane.stats());
+  await page.waitForFunction(() => !document.querySelector('#file-picker')?.open);
+  assert.equal(await page.locator('.picker-rows button').count(), 0);
+  const workerDeadline = Date.now() + 5000;
+  while (
+    page.workers().some(worker => worker.url().includes('search-worker')) &&
+    Date.now() < workerDeadline
+  )
+    await page.waitForTimeout(20);
+  assert.equal(
+    page.workers().filter(worker => worker.url().includes('search-worker')).length,
+    0,
+    'closing file search releases its worker and duplicate path index',
+  );
   assert.equal(metrics.stats.models, 1);
   assert.ok(
     metrics.frames.p95Ms < 100,

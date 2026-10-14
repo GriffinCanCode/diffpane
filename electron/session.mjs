@@ -11,6 +11,7 @@ import { LanguageRuntime } from './language.mjs';
 import { HowManyRuntime } from './howmany.mjs';
 import { operationPath, renameEntry } from './file-operations.ts';
 import { mediaType } from '../media-types.ts';
+import { countLines } from '../text-lines.ts';
 
 const repository = await Repository.open(workerData.directory);
 const launchPath = await realpath(workerData.directory);
@@ -37,6 +38,7 @@ let currentRefresh;
 let pending = false;
 let force = false;
 let watchError;
+let fallbackTimer;
 let shuttingDown = false;
 let directoryChanges = Promise.resolve();
 const changes = new Set();
@@ -57,7 +59,7 @@ const documents = new DocumentCache(async (filePath, comparison) => {
     editable: !contents.preview && !file.submodule && (await repository.editable(filePath)),
     ...(contents.preview ? { preview: contents.preview } : {}),
     ...changes,
-    lineCount: Math.max(1, contents.after.split('\n').length),
+    lineCount: countLines(contents.after),
     elapsedMs: performance.now() - start,
   };
 });
@@ -99,6 +101,13 @@ function schedule(all = false) {
       timer = undefined;
       void refresh().catch(() => {});
     }, 0);
+}
+
+function watchFailed(message) {
+  watchError = `${message}; using a 2s refresh.`;
+  // Healthy native subscriptions need no polling or periodic wakeups.
+  fallbackTimer ??= setInterval(() => schedule(true), 2000).unref();
+  schedule(true);
 }
 
 function refresh() {
@@ -279,6 +288,7 @@ parentPort.on('message', async ({ id, method, args = [] }) => {
       shuttingDown = true;
       clearTimeout(timer);
       clearInterval(fallbackTimer);
+      documents.dispose();
       await Promise.all(subscriptions.map(subscription => subscription.unsubscribe()));
       await currentRefresh?.catch(() => {});
       await Promise.all([languages.dispose(), diffs.dispose(), howmany.dispose()]);
@@ -302,8 +312,7 @@ for (const directory of new Set([repository.scope, repository.gitDir, repository
     const subscription = await watcher.subscribe(directory, (error, events) => {
       if (shuttingDown) return;
       if (error) {
-        watchError = `Live watcher failed: ${error.message}; using a 2s refresh.`;
-        schedule(true);
+        watchFailed(`Live watcher failed: ${error.message}`);
         return;
       }
       const livePaths = new Set();
@@ -352,11 +361,8 @@ for (const directory of new Set([repository.scope, repository.gitDir, repository
     });
     subscriptions.push(subscription);
   } catch (error) {
-    watchError = `Live watcher unavailable: ${error.message}; using a 2s refresh.`;
+    watchFailed(`Live watcher unavailable: ${error.message}`);
   }
 }
-const fallbackTimer = setInterval(() => {
-  if (watchError) schedule(true);
-}, 2000).unref();
 force = true;
 await refresh();

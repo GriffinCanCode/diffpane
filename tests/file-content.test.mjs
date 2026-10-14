@@ -74,3 +74,30 @@ test('oversized and malformed inputs retain bounded text or byte previews', () =
   assert.equal(fileContent(Buffer.from([0xff, 0xfe, 0]), 'bad').kind, 'binary');
   assert.equal(fileContent(Buffer.alloc(0), 'deleted.png').kind, 'text');
 });
+
+test('line bounds preserve the final newline and truncate only past 50000 complete lines', () => {
+  const source = 'line\n'.repeat(50_000);
+  const complete = fileContent(Buffer.from(source), 'lines.txt');
+  assert.equal(complete.value, source);
+  assert.equal(Boolean(complete.limited), false);
+  for (const extra of ['last', '\n']) {
+    const limited = fileContent(Buffer.from(source + extra), 'lines.txt');
+    assert.equal(limited.value, source.slice(0, -1));
+    assert.match(limited.note, /50000-line/);
+  }
+});
+
+test('long-line bounds measure UTF-8 bytes and retain the prefix through the first long line', () => {
+  for (const line of ['x'.repeat(16 * 1024 + 1), '雪'.repeat(5462), '😀'.repeat(4097)]) {
+    const result = fileContent(Buffer.from(`short\n${line}\nhidden\n`), 'lines.txt');
+    assert.equal(result.value, `short\n${line}`);
+    assert.match(result.note, /line longer than 16 KiB/);
+    assert.ok(result.limited);
+  }
+  const boundary = `short\n${'x'.repeat(16 * 1024)}\n`;
+  assert.equal(fileContent(Buffer.from(boundary), 'lines.txt').value, boundary);
+  assert.equal(
+    fileContent(Buffer.from('x'.repeat(100 * 1024)), 'lines.txt').value.length,
+    64 * 1024,
+  );
+});

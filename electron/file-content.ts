@@ -121,20 +121,35 @@ export function fileContent(input: Buffer | ContentInput, filename: string, incl
   let note = decoded.note;
   if (truncated)
     note = 'File exceeds the 2 MiB text preview limit. Showing the beginning of the file.';
-  const lines = value.split('\n');
-  if (lines.length > 50_001 || (lines.length === 50_001 && lines.at(-1) !== '')) {
-    value = lines.slice(0, 50_000).join('\n');
-    note = 'File exceeds the 50000-line preview limit. Showing the first 50000 lines.';
+  let longLineEnd = -1;
+  let start = 0;
+  let lines = 0;
+  while (start < value.length) {
+    if (lines === 50_000) {
+      value = value.slice(0, start - 1);
+      note = 'File exceeds the 50000-line preview limit. Showing the first 50000 lines.';
+      break;
+    }
+    const newline = value.indexOf('\n', start);
+    const end = newline < 0 ? value.length : newline;
+    // UTF-8 uses at most three bytes per UTF-16 code unit; short lines need no slice.
+    if (
+      longLineEnd < 0 &&
+      (end - start) * 3 > 16 * 1024 &&
+      Buffer.byteLength(value.slice(start, end)) > 16 * 1024
+    )
+      longLineEnd = end;
+    lines++;
+    start = newline < 0 ? value.length : newline + 1;
   }
-  const longLine = value.split('\n').findIndex(line => Buffer.byteLength(line) > 16 * 1024);
-  if (longLine >= 0) {
-    value = value
-      .split('\n')
-      .slice(0, longLine + 1)
-      .join('\n')
-      .slice(0, 64 * 1024);
+  if (longLineEnd >= 0) {
+    value = value.slice(0, Math.min(longLineEnd, 64 * 1024));
     note = `${note ? `${note} ` : ''}File contains a line longer than 16 KiB. Showing a bounded text preview.`;
   }
+  // A cached substring must not pin the entire decoded input behind a small preview.
+  // UTF-16 preserves every code unit, including a surrogate at the preview boundary.
+  if (value.length !== decoded.value.length)
+    value = Buffer.from(value, 'utf16le').toString('utf16le');
   const limited = truncated || note?.includes('preview') || note?.includes('50000');
   return {
     ...(limited || includeRaw ? byteView() : { size }),

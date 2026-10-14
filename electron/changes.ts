@@ -1,4 +1,5 @@
 import { diffLines } from 'diff';
+import { countLines } from '../text-lines.ts';
 
 export type LineDecoration = {
   startLine: number;
@@ -21,8 +22,8 @@ export function decorations(before: string, after: string): DiffDecorations {
   const segments = diffLines(before.replaceAll('\r\n', '\n'), after.replaceAll('\r\n', '\n'), {
     timeout: 150,
   });
-  const maxLine = Math.max(1, after.split('\n').length);
-  const beforeMaxLine = Math.max(1, before.split('\n').length);
+  const maxLine = countLines(after);
+  const beforeMaxLine = countLines(before);
   const coarse = (note: string): DiffDecorations => ({
     decorations: [{ startLine: 1, endLine: maxLine, kind: 'modified' }],
     beforeDecorations: [{ startLine: 1, endLine: beforeMaxLine, kind: 'modified' }],

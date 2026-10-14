@@ -1,6 +1,7 @@
 import { test } from 'vite-plus/test';
 import assert from 'node:assert/strict';
 import { setImmediate } from 'node:timers/promises';
+import { setTimeout as delay } from 'node:timers/promises';
 import { DocumentCache } from '../electron/document-cache.ts';
 import { DiffRuntime } from '../electron/diff-runtime.ts';
 
@@ -123,4 +124,36 @@ test('diff computation runs in its own worker and preserves current-line highlig
   assert.equal(results[1].deletions, 1);
   assert.ok(results[0].decorations.some(change => change.kind === 'modified'));
   assert.equal(runtime.pending.size, 0);
+});
+
+test('idle diff workers are released and subsequent edits recreate them without stale exit failures', async t => {
+  const runtime = new DiffRuntime({ idleMs: 40 });
+  t.onTestFinished(() => runtime.dispose());
+  await runtime.calculate('before\n', 'after\n');
+  const first = runtime.worker;
+  assert.ok(first);
+  const deadline = Date.now() + 5000;
+  while (runtime.worker && Date.now() < deadline) await delay(10);
+  assert.equal(runtime.worker, null);
+  assert.equal(runtime.pending.size, 0);
+  assert.equal((await runtime.calculate('one\n', 'two\n')).additions, 1);
+  assert.notEqual(runtime.worker, first);
+  await runtime.dispose();
+  assert.equal(runtime.stopping.size, 0);
+  await assert.rejects(runtime.calculate('a', 'b'), /closed/);
+});
+
+test('closing a document cache rejects queued reads and never retains a late result', async () => {
+  const read = deferred();
+  const cache = new DocumentCache(() => read.promise, { concurrency: 1 });
+  const running = assert.rejects(cache.get('a', 'head'), /closed/);
+  const queued = assert.rejects(cache.get('b', 'head'), /closed/);
+  cache.dispose();
+  read.resolve({ after: 'late result' });
+  await Promise.all([running, queued]);
+  await setImmediate();
+  assert.equal(cache.stats().queued, 0);
+  assert.equal(cache.stats().running, 0);
+  assert.equal(cache.stats().bytes, 0);
+  assert.equal(cache.stats().entries, 0);
 });

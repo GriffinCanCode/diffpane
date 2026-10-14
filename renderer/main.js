@@ -19,8 +19,9 @@ import { isMarkdown } from './markdown-paths.ts';
 import { showMarkdownPreview } from './markdown-preview.ts';
 import './document-preview.css';
 import './navigator.css';
-import { subscribeLivePaths } from './live-updates.ts';
+import { LivePathBatch, subscribeLivePaths } from './live-updates.ts';
 import { Autosave } from './autosave.ts';
+import { countLines } from '../text-lines.ts';
 
 globalThis.MonacoEnvironment = { getWorker: () => new EditorWorker() };
 
@@ -668,7 +669,7 @@ function renderDocument(card, document) {
   card.previewCompared = false;
   const text = document.after ?? '';
   const state = card.editor?.saveViewState();
-  const lineCount = document.lineCount ?? Math.max(1, text.split('\n').length);
+  const lineCount = document.lineCount ?? countLines(text);
   card.note.textContent =
     document.note ||
     document.diffNote ||
@@ -1138,19 +1139,16 @@ else {
   });
   void howmany.analyze();
   let pendingSnapshot;
+  const snapshotPaths = new LivePathBatch();
   let snapshotFrame = null;
   const unsubscribe = api.onChange(next => {
-    if (!pendingSnapshot) pendingSnapshot = next;
-    else if (next.revision >= pendingSnapshot.revision)
-      pendingSnapshot = {
-        ...next,
-        changedPaths: [
-          ...new Set([...(pendingSnapshot.changedPaths ?? ['*']), ...(next.changedPaths ?? ['*'])]),
-        ],
-      };
+    if (!pendingSnapshot || next.revision >= pendingSnapshot.revision) {
+      pendingSnapshot = next;
+      snapshotPaths.add(next.changedPaths ?? ['*']);
+    }
     if (snapshotFrame === null)
       snapshotFrame = requestAnimationFrame(() => {
-        const next = pendingSnapshot;
+        const next = { ...pendingSnapshot, changedPaths: snapshotPaths.take() };
         pendingSnapshot = null;
         snapshotFrame = null;
         applySnapshot(next);

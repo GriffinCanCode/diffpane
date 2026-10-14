@@ -227,7 +227,7 @@ export function createHowMany(monaco, api, navigator, statusbar) {
   }
   async function refreshAnalysis() {
     await analyze(true);
-    if (active?.document) void updateFile(active, active.document);
+    if (active?.document) void updateFile(active, active.document, true);
   }
   panel.querySelector('.howmany-report-button').addEventListener('click', showReport);
   status.addEventListener('click', showReport);
@@ -285,11 +285,15 @@ export function createHowMany(monaco, api, navigator, statusbar) {
     if (!card || card !== active) return;
     fileRequest++;
     active = null;
+    card.howmanyVersion = null;
     if (card.model) monaco.editor.setModelMarkers(card.model, 'howmany', []);
     void api.howmany.close(card.file.path).catch(() => {});
   }
-  async function updateFile(card, document) {
+  async function updateFile(card, document, force = false) {
+    const version = card.model.getVersionId();
+    if (!force && !document.note && active === card && card.howmanyVersion === version) return;
     active = card;
+    card.howmanyVersion = version;
     const request = ++fileRequest;
     const counts = card.element.querySelector('.howmany-counts');
     const warnings = card.element.querySelector('.howmany-warnings');
@@ -299,7 +303,6 @@ export function createHowMany(monaco, api, navigator, statusbar) {
       clearFile(card);
       return;
     }
-    const version = card.model.getVersionId();
     try {
       const result = await api.howmany.file(card.file.path);
       if (
@@ -309,12 +312,14 @@ export function createHowMany(monaco, api, navigator, statusbar) {
         card.model?.getVersionId() !== version
       )
         return;
+      if (!result || result.message) card.howmanyVersion = null;
       counts.textContent = result?.title ?? '';
       counts.hidden = !counts.textContent;
       counts.title = result?.live
         ? 'Counted by HowMany from the displayed file'
         : 'Counted by HowMany from the saved file';
     } catch {
+      if (request === fileRequest) card.howmanyVersion = null;
       /* Missing tools never prevent a file from opening. */
     }
   }

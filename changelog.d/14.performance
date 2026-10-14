@@ -1,0 +1,1 @@
+Release file-search inventories and workers on close, retire idle diff workers after 30 seconds, and remove polling wakeups while native watching is healthy. Bound snapshot invalidations while rendering is throttled. Avoid repeated analysis of unchanged models and full-file line arrays; bounded text previews cannot retain their larger source strings.

@@ -43,6 +43,7 @@ export default defineConfig({
             'syntax/**',
             'syntax.ts',
             'media-types.ts',
+            'text-lines.ts',
             'public/**',
             '!dist/**',
           ],

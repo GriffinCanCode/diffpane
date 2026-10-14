@@ -23,7 +23,7 @@ The repository module uses NUL-delimited Git output and bounded reads. Its inven
 
 The TypeScript file-content reader recognizes media signatures, decodes Unicode and legacy text, and supplies bounded text and hexadecimal previews for every regular file. Working media reads only a 64 KiB sample for inspection and streams playback separately. Historical media and PDFs use inline data capped at 16 MiB. Preview strings count toward the document cache budget.
 
-Diff calculation runs in a separate lazy worker so it cannot block watcher or language messages. Time and decoration budgets bound pathological diffs. Closing a window releases watcher subscriptions, caches, and both workers.
+Diff calculation runs in a separate lazy worker so it cannot block watcher or language messages. Time and decoration budgets bound pathological diffs. The worker releases its isolate after 30 seconds without diff work and restarts on demand. Healthy native watchers need no polling timer; a two-second fallback starts only after a subscription fails. Closing a window rejects queued document reads and releases watcher subscriptions, caches, and both workers.
 
 The language runtime discovers tools without launching them, selects the nearest project manifest, and starts servers only for opened documents. It owns framing, configuration, cancellation, diagnostics, idle eviction, and process-group shutdown. The main process tracks owned PIDs so closing a window also cleans up a stalled worker's servers.
 

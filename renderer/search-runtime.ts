@@ -32,6 +32,17 @@ export function createFileSearch<T extends SearchableFile>() {
     }
   }
 
+  function releaseWorker() {
+    const previous = worker;
+    worker = undefined;
+    if (previous) {
+      previous.onmessage = previous.onerror = null;
+      previous.terminate();
+    }
+    running?.resolve(null);
+    running = undefined;
+  }
+
   return {
     setFiles(next: T[]) {
       files = next;
@@ -62,7 +73,7 @@ export function createFileSearch<T extends SearchableFile>() {
           };
         }
         worker.postMessage({ files: files.map((file, index) => ({ path: file.path, index })) });
-      }
+      } else releaseWorker();
     },
     search(query: string): Hit<T>[] | Promise<Hit<T>[] | null> {
       if (files.length < 5000 || !query.trim()) {
@@ -84,10 +95,8 @@ export function createFileSearch<T extends SearchableFile>() {
     dispose() {
       generation++;
       cancelQueued();
-      running?.resolve(null);
-      running = undefined;
-      worker?.terminate();
-      worker = undefined;
+      releaseWorker();
+      files = [];
     },
   };
 }

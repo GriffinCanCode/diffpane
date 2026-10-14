@@ -14,3 +14,14 @@ test('overlapping native events retain all invalidations with a fixed path bound
   batch.add(['fresh']);
   assert.deepEqual(batch.take(), ['fresh']);
 });
+
+test('separate bursts across a throttled frame stay bounded and wildcard invalidation dominates', () => {
+  const batch = new LivePathBatch();
+  for (let burst = 0; burst < 1000; burst++) batch.add([`save${burst}`]);
+  assert.deepEqual(batch.take(), ['*']);
+  batch.add(['first', '*', 'last']);
+  batch.add(['later']);
+  assert.deepEqual(batch.take(), ['*']);
+  batch.add(['next-frame']);
+  assert.deepEqual(batch.take(), ['next-frame']);
+});
