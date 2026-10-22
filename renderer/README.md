@@ -19,6 +19,8 @@ doc_radar:
 
 # Viewer
 
+Opening the desktop app without a target shows a welcome screen with Open Folder and Open File buttons backed by native pickers. Recently opened files and folders appear as keyboard-accessible cards with floating icons and muted paths. Hover motion follows the system's reduced-motion preference. History survives restarts, and missing targets can be located through the native pickers. The explorer, branch, and analysis stay hidden until a project opens. Startup failures keep those actions available so another project can be chosen. An explicit target shows a loading screen while its first snapshot loads.
+
 Markdown opens in a reading view with balanced typography, highlighted code and copy buttons, scrollable GFM tables, task lists, callouts, local images, and heading links. The explorer outline lists document headings. Frontmatter stays available under Document metadata. Preview and Source switch between the rendered document and Monaco; Compare opens the full source diff. Saves refresh the reading view while keeping its scroll position.
 
 File navigation can start its read while an earlier file is still loading. Completed document reads and explorer scans paint during ongoing edits, then reconcile queued changes; stale responses from a previous file cannot replace the active view. Local unsaved edits remain protected from incoming reads.

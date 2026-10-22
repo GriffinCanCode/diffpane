@@ -1,0 +1,1 @@
+Open untargeted desktop windows on a welcome screen with native file and folder pickers and persistent recently opened targets instead of starting Git in an unrelated directory. Allow clean windows to close and quit after startup or backend failures while retaining unsaved edits when a save fails. Drain starting file watchers and allow workers to exit gracefully during shutdown.

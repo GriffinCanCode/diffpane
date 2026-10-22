@@ -335,6 +335,9 @@ parentPort.on('message', async ({ id, method, args = [] }) => {
       clearTimeout(timer);
       clearTimeout(fallbackTimer);
       documents.dispose();
+      // A renderer can request its first snapshot while native subscriptions
+      // are still starting. Let that work finish before tearing down its isolate.
+      await watchSetup;
       await Promise.all(subscriptions.map(subscription => subscription.unsubscribe()));
       await currentRefresh?.catch(() => {});
       await Promise.all([languages.dispose(), diffs.dispose(), howmany.dispose()]);
@@ -347,70 +350,80 @@ parentPort.on('message', async ({ id, method, args = [] }) => {
       value = { documents: documents.stats(), inventoryRevision: catalogRevision, revision };
     else throw new Error('Unknown request');
     parentPort.postMessage({ id, value });
-    if (shuttingDown) parentPort.close();
+    if (method === 'language-dispose') parentPort.close();
   } catch (error) {
     parentPort.postMessage({ id, error: error.message });
   }
 });
 
-for (const directory of new Set([repository.scope, repository.gitDir, repository.commonDir])) {
-  try {
-    const subscription = await watcher.subscribe(directory, (error, events) => {
-      if (shuttingDown) return;
-      if (error) {
-        watchFailed(`Live watcher failed: ${error.message}`);
-        return;
-      }
-      const livePaths = new Set();
-      for (const event of events) {
-        const metadata = gitMetadata(event.path);
-        if (metadata === true || event.path === repository.scope) {
-          force = true;
-          documents.invalidate();
-        } else if (metadata === null && event.path.startsWith(repository.scope + path.sep)) {
-          const relative = path.relative(repository.root, event.path);
-          // Build and dependency churn below a closed ignored folder is not a
-          // repository change. Filter it before it can become a wildcard batch;
-          // explicitly opened ignored documents must still receive updates.
-          const known = catalogIndex.has(relative);
-          if (
-            !documents.hasPath(relative) &&
-            !affectsRequestedDocument(relative) &&
-            ((!known && !snapshotIndex.has(relative) && collapsedIgnoredParent(relative)) ||
-              (event.type === 'update' &&
-                repository.inventoryMetadata.get(relative)?.directory &&
-                !repository.expandedIgnored.has(relative)))
-          )
-            continue;
-          documents.invalidate([relative]);
-          if (!livePaths.has('*')) {
-            if (livePaths.size < 256) livePaths.add(relative);
-            else {
-              livePaths.clear();
-              livePaths.add('*');
-            }
-          }
-          // FSEvents can retain FileCreated on existing paths; atomic saves also reuse paths.
-          if (
-            path.basename(event.path) === '.gitignore' ||
-            (event.type === 'create' && (!known || !catalog || catalogLoading)) ||
-            event.type === 'delete'
-          )
-            inventoryDirty = true;
-          if (languageChanges.size < 4096) languageChanges.set(event.path, event);
-          if (changes.size < 4096) changes.add(event.path);
-          else broadChanges = true;
+const watchSetup = (async () => {
+  for (const directory of new Set([repository.scope, repository.gitDir, repository.commonDir])) {
+    if (shuttingDown) break;
+    try {
+      const subscription = await watcher.subscribe(directory, (error, events) => {
+        if (shuttingDown) return;
+        if (error) {
+          watchFailed(`Live watcher failed: ${error.message}`);
+          return;
         }
+        const livePaths = new Set();
+        for (const event of events) {
+          const metadata = gitMetadata(event.path);
+          if (metadata === true || event.path === repository.scope) {
+            force = true;
+            documents.invalidate();
+          } else if (metadata === null && event.path.startsWith(repository.scope + path.sep)) {
+            const relative = path.relative(repository.root, event.path);
+            // Build and dependency churn below a closed ignored folder is not a
+            // repository change. Filter it before it can become a wildcard batch;
+            // explicitly opened ignored documents must still receive updates.
+            const known = catalogIndex.has(relative);
+            if (
+              !documents.hasPath(relative) &&
+              !affectsRequestedDocument(relative) &&
+              ((!known && !snapshotIndex.has(relative) && collapsedIgnoredParent(relative)) ||
+                (event.type === 'update' &&
+                  repository.inventoryMetadata.get(relative)?.directory &&
+                  !repository.expandedIgnored.has(relative)))
+            )
+              continue;
+            documents.invalidate([relative]);
+            if (!livePaths.has('*')) {
+              if (livePaths.size < 256) livePaths.add(relative);
+              else {
+                livePaths.clear();
+                livePaths.add('*');
+              }
+            }
+            // FSEvents can retain FileCreated on existing paths; atomic saves also reuse paths.
+            if (
+              path.basename(event.path) === '.gitignore' ||
+              (event.type === 'create' && (!known || !catalog || catalogLoading)) ||
+              event.type === 'delete'
+            )
+              inventoryDirty = true;
+            if (languageChanges.size < 4096) languageChanges.set(event.path, event);
+            if (changes.size < 4096) changes.add(event.path);
+            else broadChanges = true;
+          }
+        }
+        // Editor reads can proceed while status and inventory subprocesses run.
+        if (force || livePaths.size)
+          parentPort.postMessage({ event: 'paths', value: force ? ['*'] : [...livePaths] });
+        if (force || changes.size) schedule();
+      });
+      if (shuttingDown) {
+        await subscription.unsubscribe();
+        break;
       }
-      // Editor reads can proceed while status and inventory subprocesses run.
-      if (force || livePaths.size)
-        parentPort.postMessage({ event: 'paths', value: force ? ['*'] : [...livePaths] });
-      if (force || changes.size) schedule();
-    });
-    subscriptions.push(subscription);
-  } catch (error) {
-    watchFailed(`Live watcher unavailable: ${error.message}`);
+      subscriptions.push(subscription);
+    } catch (error) {
+      if (!shuttingDown) watchFailed(`Live watcher unavailable: ${error.message}`);
+    }
   }
+})();
+await watchSetup;
+if (!shuttingDown) {
+  force = true;
+  await refresh();
 }
-force = true;
-await refresh();

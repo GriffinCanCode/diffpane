@@ -10,7 +10,7 @@
     "build": "vp run bundle",
     "start": "electron .",
     "test": "vp test",
-    "test:app": "node tests/app.e2e.mjs && node tests/files.e2e.mjs && node tests/explorer-actions.e2e.mjs && node tests/ignored.e2e.mjs && node tests/ide.e2e.mjs && node tests/configs.e2e.mjs && node tests/diff.e2e.mjs && node tests/media.e2e.mjs && node tests/filetypes.e2e.mjs && node tests/markdown.e2e.mjs && node tests/autosave.e2e.mjs && node tests/live-loading.e2e.mjs",
+    "test:app": "node tests/startup.e2e.mjs && node tests/app.e2e.mjs && node tests/files.e2e.mjs && node tests/explorer-actions.e2e.mjs && node tests/ignored.e2e.mjs && node tests/ide.e2e.mjs && node tests/configs.e2e.mjs && node tests/diff.e2e.mjs && node tests/media.e2e.mjs && node tests/filetypes.e2e.mjs && node tests/markdown.e2e.mjs && node tests/autosave.e2e.mjs && node tests/live-loading.e2e.mjs",
     "install:app": "node install.ts",
     "setup:languages": "node setup-languages.ts",
     "setup:howmany": "node setup-howmany.ts",

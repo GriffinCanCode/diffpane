@@ -13,9 +13,15 @@ doc_radar:
       contains: ['ls-files', 'billy-filetypes.json']
     - file: tests/repository.test.mjs
       contains: ['Repository.open', 'vite-plus/test']
+    - file: tests/startup.e2e.mjs
+      contains: ['expectWelcome', 'showOpenDialog', 'closeWindow', 'quitApplication']
 ---
 
 # Checks
+
+`node tests/startup.e2e.mjs` checks empty launches from Git and non-Git working directories, a welcome screen without workspace errors, native Open File and Open Folder picker cancellation and selection, and replacement of the welcome window. A shared isolated profile verifies persisted recent files and folders, ordering, deduplication, reopening, and exclusion of failed targets. It checks native Close and Quit after empty launches and explicit non-Git target errors, plus Close when the renderer entry script fails to load. Clean project windows still flush before Close and freeze editing through final Quit. It runs first in `test:app`; screenshots are saved as `test-results/startup-welcome.png`, `test-results/startup-recents.png`, and `test-results/startup-recents-narrow.png`.
+
+Session shutdown unit checks hold watcher startup and unsubscribe independently, complete snapshots on either side of disposal, and require the worker to acknowledge cleanup before exiting naturally. Recents unit checks cover corrupt history, storage failures, ordering and limits, and concurrent app instances sharing one history file.
 
 `npm run test:markdown` builds and drives the real Electron Markdown view through Mermaid flowcharts and sequence diagrams, malformed input, code highlighting, copy, expansion and zoom, source/diff transitions, local links and images, live saves, narrow panes, HTML sanitization, and cleanup. Screenshots are saved as `test-results/markdown.png` and `test-results/markdown-narrow.png`. Markdown path tests cover encoded links, anchors, and project traversal boundaries.
 

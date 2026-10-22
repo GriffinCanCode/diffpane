@@ -159,6 +159,215 @@ button svg,
   flex: 1;
   container-type: inline-size;
 }
+.start-screen {
+  display: grid;
+  place-items: center;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 48px 24px;
+  background: #181818;
+  text-align: center;
+}
+.start-content {
+  width: min(100%, 880px);
+}
+.start-mark {
+  display: inline-flex;
+  width: 60px;
+  height: 60px;
+  margin-bottom: 18px;
+  color: var(--green);
+}
+.start-screen h1 {
+  margin: 0;
+  font-size: 25px;
+  font-weight: 500;
+  letter-spacing: -0.7px;
+}
+.start-screen p {
+  margin: 12px 0 28px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+.start-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+}
+.start-actions button {
+  min-width: 136px;
+  padding: 10px 18px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-raised);
+}
+.start-actions button:hover {
+  background: oklch(28% 0.009 265);
+}
+.recent-targets {
+  margin-top: 52px;
+  text-align: left;
+}
+.recent-targets h2 {
+  margin: 0 0 15px 2px;
+  color: #aaa;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.1px;
+}
+.recent-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+.recent-list li {
+  min-width: 0;
+}
+.recent-target {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 20px 16px;
+  border: 1px solid #ffffff09;
+  border-radius: 10px;
+  background: #ffffff02;
+  text-align: left;
+  transition:
+    transform 180ms ease,
+    background 180ms ease,
+    border-color 180ms ease;
+}
+.recent-target:hover {
+  transform: translateY(-3px);
+  background: #ffffff06;
+  border-color: #ffffff14;
+}
+.recent-glyph {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 42px;
+  height: 48px;
+  color: #89aaa2;
+}
+.recent-glyph::after {
+  content: '';
+  position: absolute;
+  width: 28px;
+  height: 4px;
+  bottom: 0;
+  border-radius: 50%;
+  background: #0004;
+  filter: blur(3px);
+}
+.recent-glyph svg {
+  width: 42px;
+  height: 42px;
+  transform: translateY(-3px) rotate(-6deg);
+  filter: drop-shadow(0 5px 3px #0002);
+  transition: transform 180ms ease;
+}
+.recent-list li:nth-child(3n + 2) .recent-glyph {
+  color: #92a8c2;
+}
+.recent-list li:nth-child(3n) .recent-glyph {
+  color: #aa9bb8;
+}
+.recent-list li:nth-child(even) .recent-glyph svg {
+  transform: translateY(-3px) rotate(5deg);
+}
+.recent-target:hover .recent-glyph svg {
+  transform: translateY(-6px) rotate(0deg);
+}
+.recent-target[data-kind='file'] .recent-glyph svg {
+  width: 29px;
+  height: 35px;
+}
+.recent-label {
+  flex: 1;
+  min-width: 0;
+}
+.recent-label strong,
+.recent-location {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.recent-label strong {
+  color: #c7c7c7;
+  font-size: 13px;
+  font-weight: 500;
+}
+.recent-location {
+  margin-top: 6px;
+  color: #818181;
+  font-size: 11px;
+}
+.recent-arrow {
+  align-self: flex-start;
+  color: #555;
+  font-size: 14px;
+}
+.recent-target:hover .recent-arrow {
+  color: #aaa;
+}
+.recent-targets #recent-status {
+  margin: 16px 2px 0;
+  font-size: 12px;
+}
+@container (max-width: 760px) {
+  .recent-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@container (max-width: 480px) {
+  .recent-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-height: 600px) {
+  .start-screen {
+    padding: 24px;
+  }
+  .start-mark {
+    display: none;
+  }
+  .start-screen h1 {
+    font-size: 22px;
+  }
+  .start-screen p {
+    margin: 8px 0 18px;
+  }
+  .start-actions button {
+    padding: 8px 16px;
+  }
+  .recent-targets {
+    margin-top: 28px;
+  }
+  .recent-target {
+    padding: 14px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .recent-target,
+  .recent-glyph svg {
+    transition: none;
+    transform: none;
+  }
+  .recent-target:hover,
+  .recent-target:hover .recent-glyph svg,
+  .recent-list li:nth-child(even) .recent-glyph svg {
+    transform: none;
+  }
+}
 #navigator-resize {
   width: 2px;
   flex: 0 0 2px;

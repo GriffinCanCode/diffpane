@@ -84,6 +84,8 @@ const icons = {
     '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="4" cy="3" r="1.7" stroke="currentColor"/><circle cx="4" cy="13" r="1.7" stroke="currentColor"/><circle cx="12" cy="3" r="1.7" stroke="currentColor"/><path d="M4 5v6m8-6v1a4 4 0 0 1-4 4H4" stroke="currentColor" stroke-width="1.2"/></svg>',
   down: '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 3v10m-4-4 4 4 4-4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   file: '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M9.5 1.8H4a1 1 0 0 0-1 1v10.4a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V5.3l-3.5-3.5Z" stroke="currentColor" stroke-width="1.15"/><path d="M9 2v4h4" stroke="currentColor" stroke-width="1.15"/></svg>',
+  folder:
+    '<svg viewBox="0 0 48 48" fill="none" aria-hidden="true"><path d="M5 12a4 4 0 0 1 4-4h10l5 5h15a4 4 0 0 1 4 4v19a4 4 0 0 1-4 4H9a4 4 0 0 1-4-4V12Z" fill="currentColor" opacity=".22"/><path d="M5 19a4 4 0 0 1 4-4h30a4 4 0 0 1 4 4v17a4 4 0 0 1-4 4H9a4 4 0 0 1-4-4V19Z" fill="currentColor" opacity=".72"/><path d="M9 15h30a4 4 0 0 1 4 4v1H5v-1a4 4 0 0 1 4-4Z" fill="white" opacity=".12"/><path d="M10 33h12" stroke="white" stroke-opacity=".3" stroke-width="1.5" stroke-linecap="round"/></svg>',
 };
 
 const app =
@@ -92,17 +94,20 @@ app.innerHTML = `
   <header class="titlebar">
     <div class="brand" role="img" aria-label="diffpane"><span class="brand-mark">${icons.mark}</span></div>
     <span class="title-divider"></span>
-    <div class="project"><span id="project-name">Opening project</span><span id="project-path"></span></div>
-    <span class="branch">${icons.branch}<span id="branch-name">…</span></span>
+    <div class="project"><span id="project-name">Diffpane</span><span id="project-path"></span></div>
+    <span class="branch" hidden>${icons.branch}<span id="branch-name"></span></span>
   </header>
   <div class="workspace" id="workspace">
-    <aside id="navigator"></aside>
-    <div id="navigator-resize" role="separator" aria-label="Explorer width" aria-orientation="vertical" tabindex="0"></div>
+    <aside id="navigator" hidden></aside>
+    <div id="navigator-resize" role="separator" aria-label="Explorer width" aria-orientation="vertical" tabindex="0" hidden></div>
     <section class="workbench">
   <div class="message" id="message" role="status" hidden></div>
-  <main class="feed-scroll" id="feed-scroll"><div class="feed" id="feed"></div><div class="empty-state" id="empty-state"><span class="empty-symbol">${icons.mark}</span><h2>Open a file</h2><p>Select a file in the explorer, or press ⌘P.</p></div></main>
+  <main class="start-screen" id="start-screen" aria-labelledby="start-title" aria-busy="true">
+    <div class="start-content"><span class="start-mark">${icons.mark}</span><h1 id="start-title">Opening workspace…</h1><p id="start-description" role="status">Your files will appear here in a moment.</p><div class="start-actions" id="start-actions" hidden><button type="button" id="open-folder">Open Folder…</button><button type="button" id="open-file">Open File…</button></div><section class="recent-targets" id="recent-targets" aria-labelledby="recent-title" hidden><h2 id="recent-title">Recently opened</h2><ul class="recent-list" id="recent-list"></ul><p id="recent-status" role="status" hidden></p></section></div>
+  </main>
+  <main class="feed-scroll" id="feed-scroll" hidden><div class="feed" id="feed"></div><div class="empty-state" id="empty-state"><span class="empty-symbol">${icons.mark}</span><h2>Open a file</h2><p>Select a file in the explorer, or press ⌘P.</p></div></main>
   </section></div>
-  <footer class="statusbar"><span id="status-text">Connecting to Git…</span><span class="statusbar-end"><span class="current-only">Current file contents</span><span class="status-dot"></span><span id="save-state" role="status">Autosave on</span></span></footer>
+  <footer class="statusbar"><span id="status-text">Opening workspace…</span><span class="statusbar-end" hidden><span class="current-only">Current file contents</span><span class="status-dot"></span><span id="save-state" role="status">Autosave on</span></span></footer>
 `;
 
 const ui = Object.fromEntries(
@@ -117,6 +122,15 @@ const ui = Object.fromEntries(
     'feed-scroll',
     'feed',
     'empty-state',
+    'start-screen',
+    'start-title',
+    'start-description',
+    'start-actions',
+    'open-file',
+    'open-folder',
+    'recent-targets',
+    'recent-list',
+    'recent-status',
     'status-text',
   ].map(id => [id.replaceAll('-', '_'), document.getElementById(id)]),
 );
@@ -131,6 +145,98 @@ let documentFrame = null;
 let navigationVersion = 0;
 const savedViews = new Map();
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+let recentVersion = 0;
+let recentSignature = '';
+
+function showStartScreen(failed = false) {
+  ui.start_screen.hidden = false;
+  ui.start_screen.setAttribute('aria-busy', 'false');
+  ui.start_title.textContent = failed ? 'Couldn’t open this project' : 'Welcome to Diffpane';
+  ui.start_description.textContent = 'Open a file or folder in a Git working tree to get started.';
+  ui.start_actions.hidden = false;
+  ui.status_text.textContent = failed ? 'Choose another file or folder' : 'No project open';
+  document.title = 'Diffpane';
+  void loadRecentTargets();
+}
+
+async function loadRecentTargets() {
+  const version = ++recentVersion;
+  try {
+    const targets = await api.recentTargets();
+    if (version !== recentVersion || closed || snapshot) return;
+    const signature = JSON.stringify(
+      targets.map(target => [target.path, target.name, target.kind]),
+    );
+    if (signature === recentSignature) return;
+    recentSignature = signature;
+    const focusedPath = ui.recent_list.contains(document.activeElement)
+      ? document.activeElement.dataset.path
+      : null;
+    const items = targets.map(target => {
+      const item = document.createElement('li');
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'recent-target';
+      button.dataset.kind = target.kind;
+      button.dataset.path = target.path;
+      button.title = target.path;
+      button.setAttribute('aria-label', `Open ${target.name}, ${target.path}`);
+      button.innerHTML = `<span class="recent-glyph">${target.kind === 'folder' ? icons.folder : icons.file}</span><span class="recent-label"><strong></strong><span class="recent-location"></span></span><span class="recent-arrow" aria-hidden="true">↗</span>`;
+      button.querySelector('strong').textContent = target.name;
+      button.querySelector('.recent-location').textContent = target.path;
+      button.addEventListener('click', () => void openRecentTarget(button, target.path));
+      item.append(button);
+      return item;
+    });
+    ui.recent_list.replaceChildren(...items);
+    ui.recent_targets.hidden = !items.length && ui.recent_status.hidden;
+    ui.start_screen.classList.toggle('has-recents', items.length > 0);
+    if (focusedPath)
+      [...ui.recent_list.querySelectorAll('button')]
+        .find(button => button.dataset.path === focusedPath)
+        ?.focus({ preventScroll: true });
+  } catch {
+    // History is optional; native pickers remain available if it cannot be read.
+  }
+}
+
+async function openRecentTarget(button, pathname) {
+  button.disabled = true;
+  ui.recent_status.hidden = true;
+  try {
+    if (!(await api.openRecent(pathname))) {
+      ui.recent_status.textContent =
+        'This item is no longer available. Open a file or folder to locate it.';
+      ui.recent_status.hidden = false;
+      await loadRecentTargets();
+    }
+  } catch (error) {
+    ui.recent_status.textContent = error.message || String(error);
+    ui.recent_status.hidden = false;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function chooseTarget(kind) {
+  ui.open_file.disabled = ui.open_folder.disabled = true;
+  try {
+    await (kind === 'file' ? api.openFile() : api.openFolder());
+  } catch (error) {
+    showError(error.message || error);
+  } finally {
+    ui.open_file.disabled = ui.open_folder.disabled = false;
+  }
+}
+ui.open_file.addEventListener('click', () => void chooseTarget('file'));
+ui.open_folder.addEventListener('click', () => void chooseTarget('folder'));
+window.addEventListener('focus', () => {
+  if (!snapshot && ui.start_screen.getAttribute('aria-busy') === 'false') void loadRecentTargets();
+});
+
+function syncSaveState() {
+  api.setSaveState([...cards.values()].some(card => card.autosave?.pending));
+}
 
 // Coalesce saves per card; a previous file's slow read must not block navigation.
 function scheduleDocument() {
@@ -363,6 +469,7 @@ function showMarkdownOutline(card, list) {
 }
 
 function toggleNavigator() {
+  if (!snapshot) return;
   navigator.toggle();
   ui.workspace.classList.toggle('navigator-hidden', ui.navigator.hidden);
 }
@@ -471,7 +578,11 @@ function createCard(file) {
 }
 
 function applySnapshot(next) {
-  if (closed || !next) return;
+  if (closed) return;
+  if (!next) {
+    if (!snapshot) showStartScreen();
+    return;
+  }
   if (next.error) {
     showError(next.error);
     return;
@@ -481,6 +592,14 @@ function applySnapshot(next) {
   const allDirty =
     !next.changedPaths || next.changedPaths.includes('*') || next.root !== snapshot?.root;
   snapshot = next;
+  ui.start_screen.hidden = true;
+  ui.feed_scroll.hidden = false;
+  if (first) {
+    ui.navigator.hidden = false;
+    ui.navigator_resize.hidden = false;
+    document.querySelector('.branch').hidden = false;
+    document.querySelector('.statusbar-end').hidden = false;
+  }
   navigator.update(next);
   ui.project_name.textContent =
     next.scope?.split('/').filter(Boolean).pop() ||
@@ -749,6 +868,7 @@ function renderDocument(card, document) {
       text,
       (value, expected) => api.save(card.file.path, value, expected),
       (state, error) => {
+        syncSaveState();
         if (!card.active) return;
         card.saveError = state === 'error' ? error?.message || String(error) : null;
         globalThis.document.getElementById('save-state').textContent =
@@ -771,6 +891,7 @@ function renderDocument(card, document) {
       card.text = card.model.getValue(undefined, true);
       card.document = { ...card.document, after: card.text };
       card.autosave.edit(card.text);
+      syncSaveState();
     });
     card.decorationCollection = card.editor.createDecorationsCollection();
     card.languageCleanup = languageFeatures.attach(card.editor, card.model, card.file.path, {
@@ -1034,6 +1155,7 @@ function releaseEditor(card) {
 }
 
 function showError(error) {
+  if (!snapshot) showStartScreen(true);
   ui.message.textContent = String(error);
   ui.message.hidden = false;
 }
@@ -1043,6 +1165,7 @@ function clearError() {
 }
 
 async function refresh() {
+  if (!snapshot) return;
   try {
     const result = await api.refresh();
     if (result?.files) applySnapshot(result);
@@ -1066,15 +1189,17 @@ document.addEventListener('keydown', event => {
   }
   if (event.key.toLowerCase() === 'p') {
     event.preventDefault();
-    void openFilePicker();
+    if (snapshot) void openFilePicker();
+    else void chooseTarget('file');
   }
   if (event.key.toLowerCase() === 'k') {
     event.preventDefault();
-    void openFilePicker();
+    if (snapshot) void openFilePicker();
+    else void chooseTarget('file');
   }
   if (event.key.toLowerCase() === 'o') {
     event.preventDefault();
-    void api.openFolder().catch(error => showError(error.message || error));
+    void chooseTarget(event.shiftKey ? 'file' : 'folder');
   }
   if (event.key.toLowerCase() === 'r') {
     event.preventDefault();
@@ -1124,12 +1249,14 @@ else {
       card.editor?.updateOptions({ readOnly: true, domReadOnly: true });
     try {
       await Promise.all([...cards.values()].map(card => card.autosave?.flush()));
+      syncSaveState();
       api.savesFlushed(true);
     } catch {
       resumeEditing();
       api.savesFlushed(false);
     }
   });
+  api.rendererReady();
   const unsubscribePaths = subscribeLivePaths(api, paths => {
     const card = cards.get(openedFile?.path);
     if (
