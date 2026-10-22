@@ -1,0 +1,1 @@
+Keep files and explorer results loading during continuous edits. Bound document retries, publish completed inventories during refreshes, avoid overlapping fallback scans, and filter collapsed dependency-folder churn before it triggers editor reloads.

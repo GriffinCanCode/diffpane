@@ -4,12 +4,12 @@ import { test } from 'vite-plus/test';
 import assert from 'node:assert/strict';
 import { Worker } from 'node:worker_threads';
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, realpath, rm } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
 
-async function fixture(t) {
+async function fixture(t, { fileCount = 1000, setup = '' } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'diffpane-session-'));
   const git = (...args) =>
     execFileSync('git', ['-C', root, ...args], {
@@ -19,7 +19,7 @@ async function fixture(t) {
   git('init', '-q');
   await mkdir(path.join(root, 'src'));
   await Promise.all(
-    Array.from({ length: 1000 }, (_, index) =>
+    Array.from({ length: fileCount }, (_, index) =>
       write(`src/file${index}.txt`, `baseline ${index}\n`),
     ),
   );
@@ -37,15 +37,40 @@ async function fixture(t) {
       'baseline',
     );
   commit();
-  const worker = new Worker(new URL('../electron/session.mjs', import.meta.url), {
+  const sessionUrl = new URL('../electron/session.mjs', import.meta.url);
+  // An alternative native backend makes integration checks possible when the
+  // host's shared FSEvents stream is dropping events during unrelated builds.
+  const backend = process.env.DIFFPANE_TEST_WATCH_BACKEND;
+  const watcherSetup = backend
+    ? `const subscribe = watcher.subscribe;
+       watcher.subscribe = (directory, callback) => subscribe(directory, callback, { backend: ${JSON.stringify(backend)} });`
+    : '';
+  const workerUrl =
+    setup || watcherSetup
+      ? new URL(
+          `data:text/javascript,${encodeURIComponent(`
+          import watcher from ${JSON.stringify(import.meta.resolve('@parcel/watcher'))};
+          import { Repository } from ${JSON.stringify(new URL('../electron/repository.mjs', import.meta.url).href)};
+          import { parentPort as testPort } from 'node:worker_threads';
+          ${watcherSetup}
+          ${setup}
+          await import(${JSON.stringify(sessionUrl.href)});
+        `)}`,
+        )
+      : sessionUrl;
+  const worker = new Worker(workerUrl, {
     workerData: { directory: root },
   });
   const pending = new Map();
   const snapshots = [];
+  const pathEvents = [];
+  const notices = new Set();
   let nextId = 0;
   let failure;
   worker.on('message', message => {
     if (message.event === 'change') snapshots.push(message.value);
+    if (message.event === 'paths') pathEvents.push(...message.value);
+    if (message.event?.startsWith('test-')) notices.add(message.event);
     const request = pending.get(message.id);
     if (!request) return;
     clearTimeout(request.timer);
@@ -84,7 +109,20 @@ async function fixture(t) {
     throw new Error('Timed out waiting for filesystem snapshot');
   };
   await waitFor(snapshot => snapshot.revision > 0);
-  return { root, write, git, commit, call, waitFor };
+  const canonicalRoot = await realpath(root);
+  const emit = events =>
+    worker.postMessage({
+      testEvents: events.map(event => ({ ...event, path: path.join(canonicalRoot, event.path) })),
+    });
+  const waitNotice = async event => {
+    const deadline = Date.now() + 10000;
+    while (!notices.has(event)) {
+      if (Date.now() >= deadline) throw new Error(`Timed out waiting for ${event}`);
+      await delay(10);
+    }
+  };
+  const signal = message => worker.postMessage(message);
+  return { root, write, git, commit, call, waitFor, pathEvents, emit, waitNotice, signal };
 }
 
 test('editor saves invalidate cached text and sync Git status without waiting for the watcher', async t => {
@@ -225,4 +263,158 @@ test('tracked deletions leave the inventory, retain Git status, and reappear aft
       snapshot.revision > deleted.revision && snapshot.changedPaths.includes('src/file0.txt'),
   );
   assert.ok((await repo.call('files')).some(file => file.path === 'src/file0.txt'));
+});
+
+test('watcher fallback delivers inventories slower than its polling interval and keeps detecting edits', async t => {
+  const repo = await fixture(t, {
+    fileCount: 10,
+    setup: `
+      watcher.subscribe = async (_directory, callback) => {
+        setTimeout(() => callback(new Error('dropped filesystem events'), []), 20).unref();
+        return { unsubscribe: async () => {} };
+      };
+      const files = Repository.prototype.files;
+      Repository.prototype.files = async function () {
+        const result = await files.call(this);
+        await new Promise(resolve => setTimeout(resolve, 2400));
+        return result;
+      };
+    `,
+  });
+  await repo.waitFor(snapshot => snapshot.watchError?.includes('dropped filesystem events'));
+  assert.equal((await repo.call('files')).length, 10);
+  await repo.write('src/new.txt', 'discovered by fallback\n');
+  await repo.waitFor(snapshot => snapshot.files.some(file => file.path === 'src/new.txt'));
+  assert.equal((await repo.call('files')).length, 11);
+  assert.equal(
+    (await repo.call('document', 'src/new.txt', 'head')).after,
+    'discovered by fallback\n',
+  );
+}, 20000);
+
+test('inventories settle and share one scan while refreshes continue', async t => {
+  const repo = await fixture(t, {
+    fileCount: 10,
+    setup: `
+      const files = Repository.prototype.files;
+      let scanning = false;
+      Repository.prototype.files = async function () {
+        if (scanning) throw new Error('overlapping inventory scans');
+        scanning = true;
+        try {
+          const result = await files.call(this);
+          await new Promise(resolve => setTimeout(resolve, 300));
+          return result;
+        } finally { scanning = false; }
+      };
+    `,
+  });
+  const inventories = [repo.call('files')];
+  for (let index = 0; index < 4; index++) {
+    await delay(35);
+    await repo.call('refresh');
+    inventories.push(repo.call('files'));
+  }
+  assert.ok((await Promise.all(inventories)).every(inventory => inventory.length === 10));
+});
+
+test('an edit during a catalog scan queues reconciliation after the first useful inventory', async t => {
+  const repo = await fixture(t, {
+    fileCount: 10,
+    setup: `
+      watcher.subscribe = async () => ({ unsubscribe: async () => {} });
+      const files = Repository.prototype.files;
+      let first = true;
+      Repository.prototype.files = async function () {
+        const result = await files.call(this);
+        if (first) {
+          first = false;
+          testPort.postMessage({ event: 'test-inventory-read' });
+          await new Promise(resolve => {
+            const release = message => {
+              if (!message.testReleaseInventory) return;
+              testPort.off('message', release);
+              resolve();
+            };
+            testPort.on('message', release);
+          });
+        }
+        return result;
+      };
+    `,
+  });
+  const first = repo.call('files-delta', null);
+  await repo.waitNotice('test-inventory-read');
+  await repo.write('src/created-during-scan.txt', 'created after the scan started\n');
+  const refreshed = await repo.call('refresh');
+  repo.signal({ testReleaseInventory: true });
+  const inventory = await first;
+  assert.ok(!inventory.files.some(file => file.path === 'src/created-during-scan.txt'));
+  await repo.waitFor(snapshot => snapshot.inventoryRevision > refreshed.inventoryRevision);
+  const reconciled = await repo.call('files-delta', inventory.revision);
+  assert.ok(reconciled.files.some(file => file.path === 'src/created-during-scan.txt'));
+});
+
+test('collapsed ignored churn cannot invalidate unrelated documents while opened ignored files stay live', async t => {
+  const repo = await fixture(t, {
+    fileCount: 10,
+    setup: `
+      const callbacks = [];
+      watcher.subscribe = async (_directory, callback) => {
+        callbacks.push(callback);
+        return { unsubscribe: async () => {} };
+      };
+      testPort.on('message', message => {
+        if (message.testEvents) callbacks[0](null, message.testEvents);
+      });
+    `,
+  });
+  await repo.write('.gitignore', 'cache/\n');
+  await mkdir(path.join(repo.root, 'cache'));
+  await repo.write('cache/open.txt', 'opened ignored file\n');
+  await repo.call('refresh');
+  await repo.call('files');
+  await repo.call('document', 'src/file0.txt', 'head');
+  await repo.call('document', 'cache/open.txt', 'head');
+  const before = await repo.call('performance');
+  repo.pathEvents.length = 0;
+  repo.emit(
+    Array.from({ length: 512 }, (_, index) => ({
+      path: `cache/noise${index}.txt`,
+      type: 'create',
+    })),
+  );
+  await repo.call('performance');
+  assert.ok(
+    !repo.pathEvents.includes('*'),
+    'ignored churn must not become a wildcard invalidation',
+  );
+  assert.ok(!repo.pathEvents.some(file => file.startsWith('cache/noise')));
+  await repo.call('document', 'src/file0.txt', 'head');
+  assert.equal((await repo.call('performance')).documents.loads, before.documents.loads);
+  await repo.call('document', 'cache/open.txt', 'head');
+  await repo.write('cache/open.txt', 'updated ignored file\n');
+  repo.emit([{ path: 'cache/open.txt', type: 'update' }]);
+  const updated = await repo.waitFor(snapshot => snapshot.changedPaths.includes('cache/open.txt'));
+  assert.equal(
+    (await repo.call('document', 'cache/open.txt', 'head')).after,
+    'updated ignored file\n',
+  );
+  await rm(path.join(repo.root, 'cache/open.txt'));
+  repo.emit([{ path: 'cache/open.txt', type: 'delete' }]);
+  const deleted = await repo.waitFor(
+    snapshot =>
+      snapshot.revision > updated.revision && snapshot.changedPaths.includes('cache/open.txt'),
+  );
+  await assert.rejects(repo.call('document', 'cache/open.txt', 'head'), /no longer available/);
+  await repo.write('cache/open.txt', 'restored ignored file\n');
+  repo.emit([{ path: 'cache/open.txt', type: 'create' }]);
+  await repo.waitFor(
+    snapshot =>
+      snapshot.revision > deleted.revision && snapshot.changedPaths.includes('cache/open.txt'),
+  );
+  assert.equal(
+    (await repo.call('document', 'cache/open.txt', 'head')).after,
+    'restored ignored file\n',
+  );
 });

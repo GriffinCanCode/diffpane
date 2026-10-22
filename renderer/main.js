@@ -128,18 +128,17 @@ let openedFile = null;
 let closed = false;
 let closingRequested = false;
 let documentFrame = null;
-let documentLoading = false;
 let navigationVersion = 0;
 const savedViews = new Map();
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 
-// Navigation and save bursts keep one read in flight and only queue the current file.
+// Coalesce saves per card; a previous file's slow read must not block navigation.
 function scheduleDocument() {
   if (documentFrame !== null || closed) return;
   documentFrame = requestAnimationFrame(() => {
     documentFrame = null;
     const card = cards.get(openedFile?.path);
-    if (!documentLoading && card?.active && card.dirty && !card.autosave?.pending)
+    if (card?.active && !card.loading && card.dirty && !card.autosave?.pending)
       void loadDocument(card);
   });
 }
@@ -220,7 +219,7 @@ const navigator = createNavigator(ui.navigator, api, openFile, {
 const languageFeatures = createLanguageFeatures(monaco, api, { onState: updateLanguageState });
 const howmany = createHowMany(monaco, api, ui.navigator, document.querySelector('.statusbar-end'));
 function startBackgroundAnalysis() {
-  if (closed || !snapshot || navigator.stats().loading || documentLoading) return;
+  if (closed || !snapshot || navigator.stats().loading) return;
   const card = cards.get(openedFile?.path);
   if (card?.dirty || card?.loading) return;
   howmany.start();
@@ -516,7 +515,6 @@ function applySnapshot(next) {
 async function loadDocument(card) {
   if (card.loading || !card.active || closed || card.autosave?.pending) return;
   card.loading = true;
-  documentLoading = true;
   card.dirty = false;
   const generation = card.generation;
   const editVersion = card.editVersion ?? 0;
@@ -532,7 +530,7 @@ async function loadDocument(card) {
       return;
     }
     if (document.error) throw new Error(document.error);
-    if (document.revision < (snapshot?.revision ?? 0) && card.dirty) return;
+    // Paint completed reads during edit storms, then reconcile any newer invalidation.
     card.currentMedia = media;
     renderDocument(card, document);
   } catch (error) {
@@ -550,7 +548,6 @@ async function loadDocument(card) {
     }
   } finally {
     card.loading = false;
-    documentLoading = false;
     card.element.classList.remove('is-loading');
     scheduleDocument();
     startBackgroundAnalysis();
@@ -1095,7 +1092,7 @@ document.addEventListener('keydown', event => {
 window.__diffpane = {
   stats: () => ({
     files: cards.size,
-    documentLoading,
+    documentLoading: Boolean(cards.get(openedFile?.path)?.loading),
     snapshotRevision: snapshot?.revision ?? 0,
     activeEditors: [...cards.values()].filter(card => card.editor).length,
     models: monaco.editor.getModels().length,

@@ -316,8 +316,8 @@ export function createNavigator(
     if (!query) summary.textContent = 'Reading files…';
     try {
       let generation;
-      const prior = tree;
       do {
+        const prior = tree;
         generation = wanted;
         catalogRequests++;
         if (api.filesDelta) {
@@ -334,13 +334,14 @@ export function createNavigator(
             reconcileNavigationTree(tree, inventory, scopePrefix(snapshot)) ??
             buildNavigationTree(inventory, scopePrefix(snapshot));
         }
+        // Publish each completed scan even when edits have already queued another one.
+        if (prior.root.path !== tree.root.path) expanded = new Set([tree.root.path]);
+        filters.update([...tree.files.values()].map(node => node.file));
+        markChanges();
+        if (generation === wanted) loading = false;
+        refreshProjection();
+        if (revealPath && ensureVisible(revealPath)) revealPath = null;
       } while (generation !== wanted);
-      if (prior.root.path !== tree.root.path) expanded = new Set([tree.root.path]);
-      filters.update([...tree.files.values()].map(node => node.file));
-      markChanges();
-      loading = false;
-      refreshProjection();
-      if (revealPath && ensureVisible(revealPath)) revealPath = null;
     } catch (error) {
       if (!disposed) summary.textContent = error.message || String(error);
     } finally {

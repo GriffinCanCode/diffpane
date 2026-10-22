@@ -45,6 +45,10 @@ The media check opens real PNG and SVG images and a Chromium-encoded WebM video 
 
 The HowMany startup check holds idle callbacks until the real explorer and editor render, then stalls both workspace and per-file analysis responses. It verifies that background analysis waits for rendered files, navigation remains usable while analysis is stalled, and late counts for the previous file are discarded. Scheduler unit checks cover paint ordering and cancellation, including the timer fallback.
 
+The live-loading check (`node tests/live-loading.e2e.mjs`, included in `test:app`) holds document and inventory responses while more edits arrive. It verifies navigation past a stalled read, stale-response isolation, immediate Markdown rendering, and explorer publication before a queued scan finishes. Cache and session tests cover bounded retries, refresh overlap, and ignored-directory event storms.
+
+Session fixtures can select the alternate native backend with `DIFFPANE_TEST_WATCH_BACKEND=kqueue` on macOS when FSEvents is degraded. This changes only the test fixture. Forced-failure and event-storm regressions inject deterministic watcher events independently of the host event service.
+
 The file-types check (`node tests/filetypes.e2e.mjs`, included in `test:app`) exercises arbitrary extensions, UTF-16, Windows-1252, binary comparisons, real audio decoding, the embedded PDF viewer, live text/binary transitions, and resource disposal. Reader tests cover native format recognition, malformed encodings, bounded payloads, and preview cache accounting.
 
 The TypeScript k6 suite drives ten concurrent virtual agents against an isolated repository and the actual desktop app. `npm run test:k6:smoke` runs a short check; `npm run test:k6` uses 50,000 files; `npm run test:k6:soak` runs ten minutes; `npm run test:k6:languages` includes a real TypeScript server. `npm run check:k6` checks the harness and workload types. See [the k6 guide](k6/README.md) for measured rendering latency, fixed budgets, whole-process RSS accounting, limitations, and CI. The 100 MB budget remains a failing gate on the current Electron architecture; correctness results do not waive it.

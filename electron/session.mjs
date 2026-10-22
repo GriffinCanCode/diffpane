@@ -26,9 +26,11 @@ const howmany = new HowManyRuntime(repository.root, repository.scope, value =>
 );
 let snapshot;
 let catalog;
+let catalogLoading;
 let catalogRevision = 0;
 let catalogIndex = new Map();
 let snapshotIndex = new Map();
+let requestedDocumentPath;
 let inventoryDirty = false;
 let broadChanges = false;
 let revision = 0;
@@ -39,6 +41,7 @@ let pending = false;
 let force = false;
 let watchError;
 let fallbackTimer;
+let fallbackActive = false;
 let shuttingDown = false;
 let directoryChanges = Promise.resolve();
 const changes = new Set();
@@ -92,6 +95,10 @@ function collapsedIgnoredParent(filename) {
   return false;
 }
 
+function affectsRequestedDocument(filename) {
+  return requestedDocumentPath === filename || requestedDocumentPath?.startsWith(`${filename}/`);
+}
+
 function schedule(all = false) {
   if (shuttingDown) return;
   force ||= all;
@@ -106,8 +113,33 @@ function schedule(all = false) {
 function watchFailed(message) {
   watchError = `${message}; using a 2s refresh.`;
   // Healthy native subscriptions need no polling or periodic wakeups.
-  fallbackTimer ??= setInterval(() => schedule(true), 2000).unref();
+  if (fallbackActive) return;
+  fallbackActive = true;
+  queueFallback();
   schedule(true);
+}
+
+function queueFallback() {
+  fallbackTimer = setTimeout(async () => {
+    try {
+      // A large inventory may take longer than the polling interval. Let its
+      // callers receive that scan before invalidating it for the next poll.
+      await currentRefresh?.catch(() => {});
+      await catalogLoading?.catch(() => {});
+      if (shuttingDown) return;
+      force = true;
+      await refresh().catch(() => {});
+    } finally {
+      if (!shuttingDown) queueFallback();
+    }
+  }, 2000).unref();
+}
+
+function invalidateCatalog() {
+  // Never start overlapping inventories or discard an in-flight result. It is
+  // a useful filesystem snapshot even when more edits arrive while it loads.
+  if (!catalogLoading) catalog = undefined;
+  catalogRevision++;
 }
 
 function refresh() {
@@ -131,7 +163,16 @@ async function performRefresh() {
   inventoryDirty = false;
   force = false;
   try {
-    if (!all && paths.length && !(await repository.hasRelevantPaths(paths))) return snapshot;
+    // Invalidate before starting slow Git work, so a document read completed
+    // during the refresh can still be delivered to the editor.
+    if (all) documents.invalidate();
+    if (
+      !all &&
+      paths.length &&
+      !paths.some(file => affectsRequestedDocument(path.relative(repository.root, file))) &&
+      !(await repository.hasRelevantPaths(paths))
+    )
+      return snapshot;
     languages.changed(languageEvents);
     const start = performance.now();
     const result = await repository.snapshot();
@@ -139,13 +180,7 @@ async function performRefresh() {
     const changedPaths = all ? ['*'] : paths.map(file => path.relative(repository.root, file));
     howmany.changed(changedPaths);
     snapshotIndex = new Map(result.files.map(file => [file.path, file]));
-    // Watch events invalidate paths before the editor's fast notification is sent.
-    if (all) documents.invalidate();
-    if (refreshInventory) {
-      catalog = undefined;
-      catalogIndex = new Map();
-      catalogRevision++;
-    }
+    if (refreshInventory) invalidateCatalog();
     snapshot = {
       ...result,
       root: repository.root,
@@ -169,21 +204,34 @@ async function performRefresh() {
 }
 
 async function files() {
-  for (;;) {
+  if (!catalog) {
     const requestedRevision = catalogRevision;
-    if (!catalog) {
-      const result = repository.files();
-      catalog = result;
-      result.catch(() => {
+    const result = repository.files();
+    catalog = catalogLoading = result;
+    result.then(
+      inventory => {
+        catalogIndex = new Map(inventory.map(file => [file.path, file]));
+        catalogLoading = undefined;
+        // A later request reconciles changes observed during this scan. Waiting
+        // for a completely quiet filesystem here starves reads during edits.
+        if (requestedRevision !== catalogRevision) {
+          catalog = undefined;
+          // A final create/delete may have arrived after Git read the catalog.
+          // Wake consumers once more even if no further native event follows.
+          catalogRevision++;
+          if (snapshot && !shuttingDown) {
+            snapshot = { ...snapshot, changedPaths: [], inventoryRevision: catalogRevision };
+            parentPort.postMessage({ event: 'change', value: snapshot });
+          }
+        }
+      },
+      () => {
+        catalogLoading = undefined;
         if (catalog === result) catalog = undefined;
-      });
-    }
-    const inventory = await catalog;
-    if (requestedRevision !== catalogRevision) continue;
-    if (!catalogIndex.size && inventory.length)
-      catalogIndex = new Map(inventory.map(file => [file.path, file]));
-    return inventory;
+      },
+    );
   }
+  return catalog;
 }
 
 async function findFile(filePath) {
@@ -193,10 +241,11 @@ async function findFile(filePath) {
   return file?.directory ? undefined : (file ?? (await repository.ignoredFile(filePath)));
 }
 
-async function document(filePath, comparison) {
+async function document(filePath, comparison, priority = false) {
   if (typeof filePath !== 'string' || !['head', 'unstaged', 'staged'].includes(comparison))
     throw new Error('Invalid document request');
-  const result = await documents.get(filePath, comparison);
+  if (priority) requestedDocumentPath = filePath;
+  const result = await documents.get(filePath, comparison, { priority });
   return { ...result, revision };
 }
 
@@ -224,13 +273,10 @@ parentPort.on('message', async ({ id, method, args = [] }) => {
         if (await repository.setDirectoryExpanded(...args)) {
           if (!args[1]) documents.invalidate([args[0] || '*']);
           // Expansions touch only one directory; keep the regular inventory cached.
-          if (base === catalogRevision) {
+          if (base === catalogRevision && !catalogLoading) {
             catalogIndex = repository.inventoryMetadata;
             catalog = Promise.resolve([...catalogIndex.values()]);
-          } else {
-            catalog = undefined;
-            catalogIndex = new Map();
-          }
+          } else if (!catalogLoading) catalog = undefined;
           catalogRevision++;
           snapshot = { ...snapshot, changedPaths: [], inventoryRevision: catalogRevision };
           parentPort.postMessage({ event: 'change', value: snapshot });
@@ -245,7 +291,7 @@ parentPort.on('message', async ({ id, method, args = [] }) => {
         throw new Error('Invalid inventory revision');
       await files();
       value = inventoryDelta.update(base, catalogRevision, catalogIndex);
-    } else if (method === 'document') value = await document(...args);
+    } else if (method === 'document') value = await document(args[0], args[1], true);
     else if (method === 'save') {
       const [filePath, text, expected] = args;
       const file = await findFile(filePath);
@@ -287,7 +333,7 @@ parentPort.on('message', async ({ id, method, args = [] }) => {
     else if (method === 'language-dispose') {
       shuttingDown = true;
       clearTimeout(timer);
-      clearInterval(fallbackTimer);
+      clearTimeout(fallbackTimer);
       documents.dispose();
       await Promise.all(subscriptions.map(subscription => subscription.unsubscribe()));
       await currentRefresh?.catch(() => {});
@@ -323,6 +369,19 @@ for (const directory of new Set([repository.scope, repository.gitDir, repository
           documents.invalidate();
         } else if (metadata === null && event.path.startsWith(repository.scope + path.sep)) {
           const relative = path.relative(repository.root, event.path);
+          // Build and dependency churn below a closed ignored folder is not a
+          // repository change. Filter it before it can become a wildcard batch;
+          // explicitly opened ignored documents must still receive updates.
+          const known = catalogIndex.has(relative);
+          if (
+            !documents.hasPath(relative) &&
+            !affectsRequestedDocument(relative) &&
+            ((!known && !snapshotIndex.has(relative) && collapsedIgnoredParent(relative)) ||
+              (event.type === 'update' &&
+                repository.inventoryMetadata.get(relative)?.directory &&
+                !repository.expandedIgnored.has(relative)))
+          )
+            continue;
           documents.invalidate([relative]);
           if (!livePaths.has('*')) {
             if (livePaths.size < 256) livePaths.add(relative);
@@ -332,17 +391,9 @@ for (const directory of new Set([repository.scope, repository.gitDir, repository
             }
           }
           // FSEvents can retain FileCreated on existing paths; atomic saves also reuse paths.
-          const known = catalogIndex.has(relative);
-          if (
-            (!known && !snapshotIndex.has(relative) && collapsedIgnoredParent(relative)) ||
-            (event.type === 'update' &&
-              repository.inventoryMetadata.get(relative)?.directory &&
-              !repository.expandedIgnored.has(relative))
-          )
-            continue;
           if (
             path.basename(event.path) === '.gitignore' ||
-            (event.type === 'create' && !known) ||
+            (event.type === 'create' && (!known || !catalog || catalogLoading)) ||
             event.type === 'delete'
           )
             inventoryDirty = true;
