@@ -68,6 +68,40 @@ test('workspace analysis coalesces calls and catches saves arriving during an an
   assert.equal(events.length, previous, 'unchanged reports reuse the result');
 });
 
+test('expensive workspace scans leave an idle interval while explicit refresh stays immediate', async t => {
+  const { runtime, events } = await fixture(t, { wait: 150 });
+  await runtime.analyze();
+  const report = runtime.state.report;
+  const started = () =>
+    events.filter(event => event.type === 'process' && event.status === 'started').length;
+
+  runtime.changed(['a.js']);
+  runtime.changed(['b.js']);
+  await delay(150);
+  assert.equal(started(), 1, 'saves must not immediately restart an expensive full scan');
+  assert.equal(runtime.state.report, report, 'the previous report remains available');
+
+  const manual = runtime.analyze(true);
+  assert.equal(started(), 2, 'an explicit refresh bypasses the automatic cooldown');
+  await manual;
+  runtime.changed(['c.js']);
+  await until(() => events.filter(event => event.status === 'ready').length === 3);
+  assert.equal(started(), 3, 'pending saves eventually receive one fresh report');
+});
+
+test('timed-out workspace scans also back off before retrying automatically', async t => {
+  const { runtime, events } = await fixture(t, { wait: 30_000 });
+  runtime.options.timeoutMs = 100;
+  assert.match((await runtime.analyze()).message, /timed out/);
+  runtime.changed(['a.js']);
+  await delay(150);
+  assert.equal(
+    events.filter(event => event.type === 'process' && event.status === 'started').length,
+    1,
+    'an analysis that times out must not become a tight retry loop',
+  );
+});
+
 test('older CLI counts files with literal argument paths and never launches its missing LSP', async t => {
   const { runtime } = await fixture(t);
   const result = await runtime.file('name with spaces;echo.js', '');

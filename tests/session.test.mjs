@@ -292,6 +292,261 @@ test('watcher fallback delivers inventories slower than its polling interval and
   );
 }, 20000);
 
+const controlledFallbackSetup = `
+      const watchCallbacks = [];
+      watcher.subscribe = async (_directory, callback) => {
+        watchCallbacks.push(callback);
+        return { unsubscribe: async () => {} };
+      };
+      const timeout = globalThis.setTimeout;
+      let nextPoll;
+      let pollCount = 0;
+      globalThis.setTimeout = (callback, milliseconds, ...args) => {
+        if (milliseconds !== 2000) return timeout(callback, milliseconds, ...args);
+        const timer = timeout(() => {}, 60000);
+        nextPoll = async () => {
+          clearTimeout(timer);
+          await callback(...args);
+          testPort.postMessage({ event: 'test-poll-finished-' + ++pollCount });
+        };
+        testPort.postMessage({ event: 'test-poll-ready' });
+        return timer;
+      };
+      testPort.on('message', message => {
+        if (message.testFailWatcher)
+          watchCallbacks[0](new Error('dropped filesystem events'), []);
+        if (message.testPoll) void nextPoll();
+      });
+      const waitForRelease = (notice, key) => new Promise(resolve => {
+        const release = message => {
+          if (!message[key]) return;
+          testPort.off('message', release);
+          resolve();
+        };
+        testPort.on('message', release);
+        testPort.postMessage({ event: notice });
+      });
+`;
+
+test('quiet fallback polls retain caches while content, ignored files and inventory changes stay live', async t => {
+  const repo = await fixture(t, {
+    fileCount: 10,
+    setup: controlledFallbackSetup,
+  });
+  let pollCount = 0;
+  const poll = async () => {
+    repo.signal({ testPoll: true });
+    await repo.waitNotice(`test-poll-finished-${++pollCount}`);
+  };
+  repo.signal({ testFailWatcher: true });
+  await repo.waitFor(snapshot => snapshot.watchError?.includes('dropped filesystem events'));
+  await repo.waitNotice('test-poll-ready');
+  await repo.write('.gitignore', 'cache/\n');
+  await mkdir(path.join(repo.root, 'cache'));
+  await repo.write('cache/open.txt', 'opened ignored file\n');
+  await repo.write('src/file0.txt', 'first dirty contents\n');
+  await poll();
+  await repo.call('files');
+  await repo.call('directory-expanded', 'cache', true);
+  await repo.call('document', 'cache/open.txt', 'head');
+  await repo.call('document', 'src/file0.txt', 'head');
+  await repo.write('cache/before-first-poll.txt', 'created before the first directory stamp\n');
+  await poll();
+  assert.ok(
+    (await repo.call('files-delta', null)).files.some(
+      file => file.path === 'cache/before-first-poll.txt',
+    ),
+  );
+  const baseline = await repo.call('performance');
+  for (let index = 0; index < 5; index++) await poll();
+  await repo.call('document', 'src/file0.txt', 'head');
+  await repo.call('document', 'cache/open.txt', 'head');
+  const quiet = await repo.call('performance');
+  assert.equal(quiet.revision, baseline.revision, 'quiet polls do not publish new snapshots');
+  assert.equal(quiet.inventoryRevision, baseline.inventoryRevision);
+  assert.equal(
+    quiet.documents.loads,
+    baseline.documents.loads,
+    'quiet polls retain document caches',
+  );
+  await repo.write('src/file0.txt', 'second dirty contents\n');
+  await poll();
+  assert.deepEqual((await repo.call('snapshot')).changedPaths, ['src/file0.txt']);
+  assert.equal(
+    (await repo.call('document', 'src/file0.txt', 'head')).after,
+    'second dirty contents\n',
+  );
+  assert.equal((await repo.call('performance')).inventoryRevision, quiet.inventoryRevision);
+  await repo.write('cache/open.txt', 'updated ignored contents\n');
+  await poll();
+  assert.equal(
+    (await repo.call('document', 'cache/open.txt', 'head')).after,
+    'updated ignored contents\n',
+  );
+  await repo.write('cache/new.txt', 'new ignored file\n');
+  await poll();
+  const ignored = await repo.call('files-delta', null);
+  assert.ok(ignored.files.some(file => file.path === 'cache/new.txt'));
+  await repo.write('src/new.txt', 'new regular file\n');
+  await poll();
+  assert.ok((await repo.call('files')).some(file => file.path === 'src/new.txt'));
+  repo.git('add', '.');
+  repo.commit();
+  await poll();
+  assert.deepEqual((await repo.call('document', 'src/file0.txt', 'head')).decorations, []);
+  await mkdir(path.join(repo.root, 'empty'));
+  await repo.write('.gitignore', 'cache/\n# first dirty version\n');
+  await poll();
+  await repo.call('files');
+  await repo.write('.gitignore', 'cache/\nempty/\n');
+  await poll();
+  assert.ok(
+    (await repo.call('files-delta', null)).files.some(
+      file => file.path === 'empty' && file.ignored && file.directory,
+    ),
+    'same-status gitignore edits refresh ignored directory inventory',
+  );
+  await mkdir(path.join(repo.root, 'local-cache'));
+  await repo.write('local-cache/open.txt', 'ignored contents\n');
+  await repo.write('.git/info/exclude', 'local-cache/*\n');
+  await poll();
+  assert.ok(
+    (await repo.call('files-delta', null)).files.some(
+      file => file.path === 'local-cache/open.txt' && file.ignored,
+    ),
+  );
+  await repo.write('.git/info/exclude', 'local-cache/\n');
+  await poll();
+  assert.ok(
+    (await repo.call('files-delta', null)).files.some(
+      file => file.path === 'local-cache' && file.ignored && file.directory,
+    ),
+    'local Git exclude edits refresh inventory when porcelain status is unchanged',
+  );
+});
+
+async function fallbackIgnoredFixture(t, setup) {
+  const repo = await fixture(t, { fileCount: 2, setup: controlledFallbackSetup + setup });
+  await repo.write('.gitignore', 'cache/\n');
+  await mkdir(path.join(repo.root, 'cache'));
+  await repo.write('cache/open.txt', 'before edit\n');
+  await repo.call('refresh');
+  await repo.call('files');
+  return repo;
+}
+
+test('a document read during the first fallback refresh retains its pre-read metadata', async t => {
+  const repo = await fallbackIgnoredFixture(
+    t,
+    `
+    const snapshot = Repository.prototype.snapshot;
+    let pauseSnapshot = false;
+    testPort.on('message', message => {
+      if (message.testPauseSnapshot) pauseSnapshot = true;
+    });
+    Repository.prototype.snapshot = async function () {
+      const result = await snapshot.call(this);
+      if (pauseSnapshot) {
+        pauseSnapshot = false;
+        await waitForRelease('test-snapshot-paused', 'testReleaseSnapshot');
+      }
+      return result;
+    };
+  `,
+  );
+  repo.signal({ testPauseSnapshot: true, testFailWatcher: true });
+  await repo.waitNotice('test-snapshot-paused');
+  assert.equal((await repo.call('document', 'cache/open.txt', 'head')).after, 'before edit\n');
+  await repo.write('cache/open.txt', 'after edit\n');
+  repo.signal({ testReleaseSnapshot: true });
+  await repo.waitFor(snapshot => snapshot.watchError?.includes('dropped filesystem events'));
+  assert.equal((await repo.call('document', 'cache/open.txt', 'head')).after, 'after edit\n');
+  repo.signal({ testPoll: true });
+  await repo.waitNotice('test-poll-finished-1');
+  assert.equal((await repo.call('document', 'cache/open.txt', 'head')).after, 'after edit\n');
+});
+
+test('a document opened after a poll captures paths keeps its independent read baseline', async t => {
+  const repo = await fallbackIgnoredFixture(
+    t,
+    `
+    import fsPromises from 'node:fs/promises';
+    import { syncBuiltinESMExports } from 'node:module';
+    const lstat = fsPromises.lstat;
+    let pausePoll = false;
+    testPort.on('message', message => {
+      if (message.testPausePoll) pausePoll = true;
+    });
+    fsPromises.lstat = async (...args) => {
+      const result = await lstat(...args);
+      if (pausePoll && args[1]?.bigint) {
+        pausePoll = false;
+        await waitForRelease('test-poll-paused', 'testReleasePoll');
+      }
+      return result;
+    };
+    syncBuiltinESMExports();
+  `,
+  );
+  repo.signal({ testFailWatcher: true });
+  await repo.waitFor(snapshot => snapshot.watchError?.includes('dropped filesystem events'));
+  repo.signal({ testPausePoll: true, testPoll: true });
+  await repo.waitNotice('test-poll-paused');
+  assert.equal((await repo.call('document', 'cache/open.txt', 'head')).after, 'before edit\n');
+  await repo.write('cache/open.txt', 'after edit\n');
+  repo.signal({ testReleasePoll: true });
+  await repo.waitNotice('test-poll-finished-1');
+  assert.equal((await repo.call('document', 'cache/open.txt', 'head')).after, 'after edit\n');
+  repo.signal({ testPoll: true });
+  await repo.waitNotice('test-poll-finished-2');
+  assert.equal((await repo.call('document', 'cache/open.txt', 'head')).after, 'after edit\n');
+});
+
+test('an in-flight read begun before watcher failure keeps its baseline through the first fallback', async t => {
+  const repo = await fallbackIgnoredFixture(
+    t,
+    `
+    const snapshot = Repository.prototype.snapshot;
+    const contents = Repository.prototype.contents;
+    let pauseSnapshot = false;
+    let pauseContents = true;
+    testPort.on('message', message => {
+      if (message.testPauseSnapshot) pauseSnapshot = true;
+    });
+    Repository.prototype.snapshot = async function () {
+      const result = await snapshot.call(this);
+      if (pauseSnapshot) {
+        pauseSnapshot = false;
+        await waitForRelease('test-snapshot-paused', 'testReleaseSnapshot');
+      }
+      return result;
+    };
+    Repository.prototype.contents = async function (...args) {
+      const result = await contents.apply(this, args);
+      if (pauseContents && args[0].path === 'cache/open.txt') {
+        pauseContents = false;
+        await waitForRelease('test-contents-paused', 'testReleaseContents');
+      }
+      return result;
+    };
+  `,
+  );
+  const document = repo.call('document', 'cache/open.txt', 'head');
+  await repo.waitNotice('test-contents-paused');
+  repo.signal({ testPauseSnapshot: true, testFailWatcher: true });
+  await repo.waitNotice('test-snapshot-paused');
+  repo.signal({ testReleaseContents: true });
+  assert.equal((await document).after, 'before edit\n');
+  assert.equal((await repo.call('performance')).documents.retries, 1);
+  await repo.write('cache/open.txt', 'after edit\n');
+  repo.signal({ testReleaseSnapshot: true });
+  await repo.waitFor(snapshot => snapshot.watchError?.includes('dropped filesystem events'));
+  assert.equal((await repo.call('document', 'cache/open.txt', 'head')).after, 'after edit\n');
+  repo.signal({ testPoll: true });
+  await repo.waitNotice('test-poll-finished-1');
+  assert.equal((await repo.call('document', 'cache/open.txt', 'head')).after, 'after edit\n');
+});
+
 test('inventories settle and share one scan while refreshes continue', async t => {
   const repo = await fixture(t, {
     fileCount: 10,
@@ -316,6 +571,54 @@ test('inventories settle and share one scan while refreshes continue', async t =
     inventories.push(repo.call('files'));
   }
   assert.ok((await Promise.all(inventories)).every(inventory => inventory.length === 10));
+});
+
+test('known clean documents load without waiting for an inventory replacement', async t => {
+  const repo = await fixture(t, {
+    fileCount: 2,
+    setup: `
+      watcher.subscribe = async () => ({ unsubscribe: async () => {} });
+      const files = Repository.prototype.files;
+      let holdInventory = false;
+      testPort.on('message', message => {
+        if (message.testHoldInventory) holdInventory = true;
+      });
+      Repository.prototype.files = async function () {
+        const result = await files.call(this);
+        if (holdInventory) {
+          holdInventory = false;
+          testPort.postMessage({ event: 'test-inventory-held' });
+          await new Promise(resolve => {
+            const release = message => {
+              if (!message.testReleaseInventory) return;
+              testPort.off('message', release);
+              resolve();
+            };
+            testPort.on('message', release);
+          });
+        }
+        return result;
+      };
+    `,
+  });
+  await repo.call('files');
+  await repo.call('refresh');
+  repo.signal({ testHoldInventory: true });
+  const inventory = repo.call('files');
+  await repo.waitNotice('test-inventory-held');
+  try {
+    const document = await Promise.race([
+      repo.call('document', 'src/file0.txt', 'head'),
+      delay(1500).then(() => {
+        throw new Error('Known document waited for the held inventory');
+      }),
+    ]);
+    assert.equal(document.after, 'baseline 0\n');
+    assert.equal((await repo.call('performance')).documents.loads, 1);
+  } finally {
+    repo.signal({ testReleaseInventory: true });
+    await inventory;
+  }
 });
 
 test('an edit during a catalog scan queues reconciliation after the first useful inventory', async t => {

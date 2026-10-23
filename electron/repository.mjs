@@ -48,6 +48,9 @@ export class Repository {
       MAX_STATUS_BYTES,
     );
     const snapshot = parseStatus(bytes);
+    // Polling also needs HEAD and staged blob changes that keep the same status
+    // letters. Keep this internal instead of resending Git records to the UI.
+    this.statusFingerprint = bytes.toString('utf8');
     const scope = path.relative(this.root, this.scope).split(path.sep).join('/');
     const scoped = name => !scope || name === scope || name.startsWith(`${scope}/`);
     snapshot.files = snapshot.files.filter(

@@ -42,10 +42,13 @@ let force = false;
 let watchError;
 let fallbackTimer;
 let fallbackActive = false;
+let polling = false;
+let fallbackState;
 let shuttingDown = false;
 let directoryChanges = Promise.resolve();
 const changes = new Set();
 const languageChanges = new Map();
+const documentStamps = new Map();
 const subscriptions = [];
 const diffs = new DiffRuntime();
 const documents = new DocumentCache(async (filePath, comparison) => {
@@ -127,12 +130,90 @@ function queueFallback() {
       await currentRefresh?.catch(() => {});
       await catalogLoading?.catch(() => {});
       if (shuttingDown) return;
-      force = true;
+      polling = true;
       await refresh().catch(() => {});
     } finally {
       if (!shuttingDown) queueFallback();
     }
   }, 2000).unref();
+}
+
+async function pollState(result) {
+  const filePaths = new Set(result.files.map(file => file.path));
+  for (const entry of documents.entries.values()) filePaths.add(entry.path);
+  for (const work of documents.pending.values()) filePaths.add(work.path);
+  if (requestedDocumentPath) filePaths.add(requestedDocumentPath);
+  for (const [filename, entry] of documentStamps) {
+    if (entry.readers || filePaths.has(filename)) filePaths.add(filename);
+    else documentStamps.delete(filename);
+  }
+  const directoryPaths = new Set([
+    path.relative(repository.root, repository.scope),
+    ...(repository.inventoryDirectories ?? []),
+    ...repository.expandedIgnored,
+  ]);
+  const metadataPaths = new Set(
+    [repository.gitDir, repository.commonDir].flatMap(directory =>
+      ['config', 'info/exclude'].map(filename =>
+        path.relative(repository.root, path.join(directory, filename)),
+      ),
+    ),
+  );
+  const entries = [
+    ...[...filePaths].map(file => [file, 'file']),
+    ...[...directoryPaths].map(directory => [directory, 'directory']),
+    ...[...metadataPaths].map(filename => [filename, 'metadata']),
+  ];
+  const files = new Map();
+  const directories = new Map();
+  const metadata = new Map();
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(8, entries.length) }, async () => {
+      while (next < entries.length) {
+        const [filename, kind] = entries[next++];
+        const stamp = await pollStamp(filename);
+        (kind === 'metadata' ? metadata : kind === 'directory' ? directories : files).set(
+          filename,
+          stamp,
+        );
+      }
+    }),
+  );
+  return { status: repository.statusFingerprint, files, directories, metadata };
+}
+
+async function pollStamp(filename) {
+  try {
+    const metadata = await lstat(path.join(repository.root, filename), { bigint: true });
+    return `${metadata.ino}:${metadata.size}:${metadata.mtimeNs}:${metadata.ctimeNs}:${metadata.mode}`;
+  } catch (error) {
+    return error.code;
+  }
+}
+
+function polledPaths(before, after) {
+  // A newly selected document or expanded directory is observed for the first
+  // time here; adding it to the polling baseline is not a filesystem change.
+  return [...after]
+    .filter(([name, stamp]) => before.has(name) && before.get(name) !== stamp)
+    .map(([name]) => name);
+}
+
+async function polledDocuments(observed) {
+  const changes = [];
+  // Read-start stamps live independently of a polling snapshot. A document can
+  // open while that snapshot is collecting paths, or before the first fallback
+  // baseline exists, and must not lose the metadata that predates its text.
+  const reads = [...documentStamps];
+  for (const [filename, entry] of reads) {
+    const baseline = entry.stamp;
+    if (!observed.files.has(filename)) observed.files.set(filename, await pollStamp(filename));
+    const stamp = observed.files.get(filename);
+    if ((await baseline) !== stamp) changes.push(filename);
+    if (entry.stamp === baseline) entry.stamp = Promise.resolve(stamp);
+  }
+  return changes;
 }
 
 function invalidateCatalog() {
@@ -157,8 +238,10 @@ async function performRefresh() {
   changes.clear();
   const languageEvents = [...languageChanges.values()];
   languageChanges.clear();
-  const all = force || broadChanges;
-  const refreshInventory = inventoryDirty || force;
+  let all = force || broadChanges;
+  let refreshInventory = inventoryDirty || force;
+  const poll = polling;
+  polling = false;
   broadChanges = false;
   inventoryDirty = false;
   force = false;
@@ -176,8 +259,55 @@ async function performRefresh() {
     languages.changed(languageEvents);
     const start = performance.now();
     const result = await repository.snapshot();
+    let changedPaths = paths.map(file => path.relative(repository.root, file));
+    if (fallbackActive && (poll || !fallbackState)) {
+      const observed = await pollState(result);
+      const documentChanges = await polledDocuments(observed);
+      if (documentChanges.length) documents.invalidate(documentChanges);
+      changedPaths.push(...documentChanges);
+      if (poll && fallbackState) {
+        const statusChanged = observed.status !== fallbackState.status;
+        const metadataChanged = polledPaths(fallbackState.metadata, observed.metadata).length > 0;
+        const fileChanges = polledPaths(fallbackState.files, observed.files);
+        const directoryChanges = polledPaths(fallbackState.directories, observed.directories);
+        const newDirectories = [...observed.directories.keys()].some(
+          name => !fallbackState.directories.has(name),
+        );
+        // Lost native events require polling, but a quiet poll must not reload
+        // the editor, rebuild a large explorer or restart repository analysis.
+        if (
+          !all &&
+          !refreshInventory &&
+          !changedPaths.length &&
+          !statusChanged &&
+          !metadataChanged &&
+          !fileChanges.length &&
+          !directoryChanges.length &&
+          !newDirectories &&
+          watchError === snapshot?.watchError
+        ) {
+          fallbackState = observed;
+          return snapshot;
+        }
+        if ((statusChanged || metadataChanged) && !all) {
+          all = true;
+          documents.invalidate();
+        } else if (fileChanges.length) documents.invalidate(fileChanges);
+        // Newly cataloged or expanded directories need one reconciliation: a
+        // create may have happened after their entries were read but before
+        // their first polling stamp was available.
+        refreshInventory ||=
+          statusChanged ||
+          metadataChanged ||
+          directoryChanges.length > 0 ||
+          newDirectories ||
+          fileChanges.some(filename => path.basename(filename) === '.gitignore');
+        changedPaths = [...new Set([...changedPaths, ...fileChanges, ...directoryChanges])];
+      }
+      fallbackState = observed;
+    }
     revision++;
-    const changedPaths = all ? ['*'] : paths.map(file => path.relative(repository.root, file));
+    if (all) changedPaths = ['*'];
     howmany.changed(changedPaths);
     snapshotIndex = new Map(result.files.map(file => [file.path, file]));
     if (refreshInventory) invalidateCatalog();
@@ -236,6 +366,17 @@ async function files() {
 
 async function findFile(filePath) {
   if (snapshotIndex.has(filePath)) return snapshotIndex.get(filePath);
+  // An existing catalog remains useful while its replacement scans. Known
+  // clean files must not queue behind a full inventory of a large repository.
+  const known = catalogIndex.get(filePath);
+  if (known && !known.ignored) {
+    try {
+      const metadata = await lstat(path.join(repository.root, filePath));
+      if (!metadata.isDirectory() || known.submodule) return known;
+    } catch (error) {
+      if (!['ENOENT', 'ENOTDIR'].includes(error.code)) throw error;
+    }
+  }
   await files();
   const file = snapshotIndex.get(filePath) ?? catalogIndex.get(filePath);
   return file?.directory ? undefined : (file ?? (await repository.ignoredFile(filePath)));
@@ -245,8 +386,24 @@ async function document(filePath, comparison, priority = false) {
   if (typeof filePath !== 'string' || !['head', 'unstaged', 'staged'].includes(comparison))
     throw new Error('Invalid document request');
   if (priority) requestedDocumentPath = filePath;
-  const result = await documents.get(filePath, comparison, { priority });
-  return { ...result, revision };
+  let observed = documentStamps.get(filePath);
+  if (!observed) {
+    // Reads can begin before the watcher fails. Retain their initial metadata
+    // too, while bounding stamps to cached, requested and in-flight documents.
+    for (const [filename, entry] of documentStamps)
+      if (!entry.readers && !documents.hasPath(filename) && filename !== requestedDocumentPath)
+        documentStamps.delete(filename);
+    observed = { stamp: pollStamp(filePath), readers: 0 };
+    documentStamps.set(filePath, observed);
+  }
+  observed.readers++;
+  try {
+    await observed.stamp;
+    const result = await documents.get(filePath, comparison, { priority });
+    return { ...result, revision };
+  } finally {
+    observed.readers--;
+  }
 }
 
 parentPort.on('message', async ({ id, method, args = [] }) => {

@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { accessSync, constants } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
+import { performance } from 'node:perf_hooks';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LanguageRuntime } from './language.mjs';
@@ -16,6 +17,7 @@ const ANALYSIS_ARGS = [
   '2',
 ];
 const MAX_OUTPUT = 16 * 1024 * 1024;
+const MAX_AUTOMATIC_COOLDOWN_MS = 60_000;
 const MISSING_TOOL =
   'HowMany is unavailable. Reinstall Diffpane, or run npm run setup:howmany for source development.';
 
@@ -103,6 +105,7 @@ export class HowManyRuntime {
     this.fileGeneration = 0;
     this.disposed = false;
     this.enabled = false;
+    this.nextAutomaticAnalysisAt = 0;
     this.languages = this.createLanguages();
   }
 
@@ -205,6 +208,7 @@ export class HowManyRuntime {
       return Promise.resolve(this.state);
     this.command = this.options.command ?? discoverHowMany();
     const generation = this.generation;
+    const startedAt = performance.now();
     this.publish({ status: 'analyzing', message: '' });
     this.analysis = (async () => {
       try {
@@ -214,6 +218,12 @@ export class HowManyRuntime {
       } catch (error) {
         this.publish({ status: 'error', message: error.message });
       } finally {
+        // A large workspace must spend more time idle than counting. Repeated
+        // saves (or watcher recovery) can otherwise keep a full scan running
+        // continuously. Explicit refreshes still start immediately.
+        const finishedAt = performance.now();
+        this.nextAutomaticAnalysisAt =
+          finishedAt + Math.min(MAX_AUTOMATIC_COOLDOWN_MS, (finishedAt - startedAt) * 4);
         this.analysis = null;
         if (!this.disposed && generation !== this.generation) this.schedule();
       }
@@ -225,7 +235,10 @@ export class HowManyRuntime {
   schedule() {
     clearTimeout(this.timer);
     if (this.enabled && !this.disposed)
-      this.timer = setTimeout(() => void this.analyze(true), this.options.debounceMs ?? 1200);
+      this.timer = setTimeout(
+        () => void this.analyze(true),
+        Math.max(this.options.debounceMs ?? 1200, this.nextAutomaticAnalysisAt - performance.now()),
+      );
   }
 
   changed(paths) {

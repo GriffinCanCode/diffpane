@@ -1,0 +1,1 @@
+Keep long-running windows responsive after watcher failures by leaving quiet fallback polls idle. Open known files while the explorer rescans, detect real file and directory changes, and space out expensive automatic workspace analyses while preserving manual refresh.

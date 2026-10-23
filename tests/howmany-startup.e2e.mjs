@@ -10,9 +10,13 @@ const root = await mkdtemp(path.join(os.tmpdir(), 'diffpane-howmany-startup-'));
 const profile = await mkdtemp(path.join(os.tmpdir(), 'diffpane-howmany-startup-profile-'));
 const git = (...args) => execFileSync('git', ['-C', root, ...args]);
 let application;
-async function waitForRequests(count) {
+async function waitForRequests(count, releaseBackground = false) {
   const deadline = Date.now() + 5000;
   while (Date.now() < deadline) {
+    if (releaseBackground) {
+      const page = await application.firstWindow();
+      await page.evaluate(() => window.releaseBackgroundWork());
+    }
     if ((await application.evaluate(() => globalThis.howmanyProbe.requests.length)) === count)
       return;
     await new Promise(resolve => setTimeout(resolve, 20));
@@ -90,8 +94,9 @@ try {
         ?.textContent.replaceAll('\u00a0', ' ')
         .includes('SECOND FILE') && window.pendingBackgroundWork() > 0,
   );
-  await page.evaluate(() => window.releaseBackgroundWork());
-  await waitForRequests(3);
+  // The editor paints before its counting callback is queued. Other idle work
+  // can already be pending, so keep releasing idle turns until that request starts.
+  await waitForRequests(3, true);
   await application.evaluate(() => {
     const basic = {
       total_files: 2,
