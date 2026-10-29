@@ -4,7 +4,7 @@ import { mkdtemp, writeFile, mkdir, rm, realpath, symlink, readFile } from 'node
 import { existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { HowManyRuntime, discoverHowMany } from '../electron/howmany.mjs';
+import { HowManyRuntime, discoverHowMany, validateReport } from '../electron/howmany.mjs';
 import { verifyHowManySource } from '../setup-howmany.ts';
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -16,22 +16,46 @@ async function until(predicate) {
   }
   assert.fail('Timed out waiting for HowMany');
 }
-async function fixture(t, { wait = 0, output = 'valid' } = {}) {
+function sourceReport() {
+  const source = {
+    file_count: 1,
+    total_lines: 4,
+    code_lines: 2,
+    comment_lines: 1,
+    doc_lines: 0,
+    blank_lines: 1,
+    total_size: 50,
+  };
+  const { file_count, ...counts } = source;
+  return {
+    basic: { ...counts, total_files: file_count, stats_by_extension: {} },
+    source,
+    breakdown: { rows: [{ ...source, language: 'JavaScript', category: 'code' }] },
+    metadata: { version: '3.1.0' },
+  };
+}
+
+async function fixture(t, { wait = 0, output = 'valid', version = '3.1.0' } = {}) {
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'diffpane-howmany-')));
   const command = path.join(root, 'howmany-fixture');
+  const report = sourceReport();
+  report.metadata.version = version;
+  if (version === '3.0.0') {
+    delete report.source;
+    delete report.breakdown;
+  }
   // Protocol boundary fixture: check argument passing, subprocess ownership and retry behavior.
   await writeFile(
     command,
     `#!${process.execPath}
 const fs = require('node:fs');
 const args = process.argv.slice(2);
-if (args[0] === '--version') { console.log('howmany 3.0.0'); process.exit(0); }
+if (args[0] === '--version') { console.log(${JSON.stringify(`howmany ${version}`)}); process.exit(0); }
 if (args.includes('lsp')) process.exit(99);
 if (!args.includes('--no-cache') || !args.includes('--no-interactive')) process.exit(98);
 setTimeout(() => {
   if (${JSON.stringify(output)} === 'invalid') { console.log('{}'); return; }
-  const basic = { total_files: 1, total_lines: 4, code_lines: 2, comment_lines: 1, doc_lines: 0, blank_lines: 1, total_size: 50, stats_by_extension: {} };
-  console.log(JSON.stringify({basic, metadata:{version:'3.0.0'}}));
+  console.log(${JSON.stringify(JSON.stringify(report))});
 }, ${wait});
 `,
     { mode: 0o755 },
@@ -103,11 +127,58 @@ test('timed-out workspace scans also back off before retrying automatically', as
 });
 
 test('older CLI counts files with literal argument paths and never launches its missing LSP', async t => {
-  const { runtime } = await fixture(t);
+  const { runtime } = await fixture(t, { version: '3.0.0' });
   const result = await runtime.file('name with spaces;echo.js', '');
   assert.equal(result.live, false);
   assert.equal(result.title, '4 lines · 2 code · 1 comment · 1 blank');
   assert.equal(runtime.languages.servers.size, 0);
+});
+
+test('workspace reports require source totals instead of relabeling older all-content totals', async t => {
+  const { runtime } = await fixture(t, { version: '3.0.0' });
+  const state = await runtime.analyze();
+  assert.equal(state.status, 'error');
+  assert.equal(state.report, null);
+  assert.match(state.message, /source totals are unavailable/);
+});
+
+test('report validation keeps data outside source totals and rejects inconsistent counts', () => {
+  const report = sourceReport();
+  const data = {
+    language: 'JSON',
+    category: 'data',
+    file_count: 1,
+    total_lines: 100,
+    code_lines: 100,
+    comment_lines: 0,
+    doc_lines: 0,
+    blank_lines: 0,
+    total_size: 1000,
+  };
+  report.breakdown.rows.push(data);
+  report.basic.total_files += data.file_count;
+  report.basic.total_lines += data.total_lines;
+  report.basic.code_lines += data.code_lines;
+  report.basic.total_size += data.total_size;
+  assert.equal(validateReport(report), report);
+  assert.equal(report.source.code_lines, 2);
+  assert.equal(report.basic.code_lines, 102);
+
+  for (const mutate of [
+    value => (value.source.code_lines = -1),
+    value => (value.source.file_count = 1.5),
+    value => (value.source.total_size = Infinity),
+    value => (value.source.file_count = 2),
+    value => (value.basic.total_lines += 1),
+    value => (value.breakdown.rows[0].language = null),
+    value => (value.breakdown.rows[0].category = 'unknown'),
+    value => (value.breakdown.rows[1].file_count = 2),
+    value => (value.breakdown.rows = null),
+  ]) {
+    const invalid = structuredClone(report);
+    mutate(invalid);
+    assert.throws(() => validateReport(invalid), /invalid report/);
+  }
 });
 
 test('file requests reject traversal and symlink escapes before launching HowMany', async t => {

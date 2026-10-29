@@ -60,19 +60,58 @@ export function discoverHowMany(env = process.env) {
   return null;
 }
 
-export function validateReport(report) {
+const COUNT_FIELDS = [
+  'file_count',
+  'total_lines',
+  'code_lines',
+  'doc_lines',
+  'comment_lines',
+  'blank_lines',
+  'total_size',
+];
+
+function validCounts(value, fileKey = 'file_count') {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    COUNT_FIELDS.every(key => {
+      const count = value[key === 'file_count' ? fileKey : key];
+      return Number.isSafeInteger(count) && count >= 0;
+    }) &&
+    value.total_lines ===
+      value.code_lines + value.doc_lines + value.comment_lines + value.blank_lines
+  );
+}
+
+export function validateReport(report, requireSource = true) {
   const basic = report?.basic;
+  if (!validCounts(basic, 'total_files')) throw new Error('HowMany returned an invalid report');
+  if (!report.source && !requireSource) return report;
+  if (!report.source)
+    throw new Error(
+      'HowMany source totals are unavailable. Reinstall Diffpane or run npm run setup:howmany.',
+    );
+  const rows = report.breakdown?.rows;
   if (
-    !basic ||
-    ![
-      'total_files',
-      'total_lines',
-      'code_lines',
-      'doc_lines',
-      'comment_lines',
-      'blank_lines',
-      'total_size',
-    ].every(key => Number.isFinite(basic[key]) && basic[key] >= 0)
+    !validCounts(report.source) ||
+    !Array.isArray(rows) ||
+    !rows.every(
+      row =>
+        validCounts(row) &&
+        typeof row.language === 'string' &&
+        row.language.length > 0 &&
+        ['code', 'config', 'data', 'docs'].includes(row.category),
+    ) ||
+    !COUNT_FIELDS.every(key => {
+      const sourceTotal = rows
+        .filter(row => row.category === 'code')
+        .reduce((total, row) => total + row[key], 0);
+      const total = rows.reduce((sum, row) => sum + row[key], 0);
+      return (
+        report.source[key] === sourceTotal &&
+        basic[key === 'file_count' ? 'total_files' : key] === total
+      );
+    })
   )
     throw new Error('HowMany returned an invalid report');
   return report;
@@ -307,6 +346,7 @@ export class HowManyRuntime {
       }
       const report = validateReport(
         JSON.parse(await this.run([absolute, ...ANALYSIS_ARGS], signal)),
+        false,
       );
       if (signal.aborted) return null;
       return {

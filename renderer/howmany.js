@@ -10,28 +10,9 @@ const bytes = value =>
     : value < 1024 * 1024
       ? `${number(value / 1024)} KB`
       : `${number(value / (1024 * 1024))} MB`;
-const languages = {
-  js: 'JavaScript',
-  mjs: 'JavaScript modules',
-  cjs: 'CommonJS',
-  ts: 'TypeScript',
-  tsx: 'TSX',
-  jsx: 'JSX',
-  py: 'Python',
-  rs: 'Rust',
-  go: 'Go',
-  ex: 'Elixir',
-  exs: 'Elixir scripts',
-  swift: 'Swift',
-  md: 'Markdown',
-  css: 'CSS',
-  html: 'HTML',
-  json: 'JSON',
-  no_ext: 'Extensionless',
-};
 const categories = [
   ['code_lines', 'Code'],
-  ['doc_lines', 'Documentation'],
+  ['doc_lines', 'Source documentation'],
   ['comment_lines', 'Comments'],
   ['blank_lines', 'Blank'],
 ];
@@ -121,27 +102,27 @@ export function createHowMany(monaco, api, navigator, statusbar) {
       );
       return;
     }
-    const { basic, ratios, complexity } = state.report;
-    const overview = section(count(basic.total_lines, 'line'));
+    const { source, breakdown, ratios, complexity } = state.report;
+    const overview = section(count(source.code_lines, 'source code line'));
     overview.append(
       node(
         'p',
         'howmany-muted',
-        `${count(basic.total_files, 'file')} · ${bytes(basic.total_size)} · ${number(basic.average_lines_per_file)} lines per file`,
+        `${count(source.file_count, 'source file')} · ${count(source.total_lines, 'physical line')} · ${bytes(source.total_size)} · ${number(source.file_count ? source.total_lines / source.file_count : 0)} lines per file`,
       ),
-      composition(basic),
+      composition(source),
     );
     for (const [key, label] of categories)
       overview.append(
         row(
           label,
-          `${number(basic[key])} · ${basic.total_lines ? ((basic[key] / basic.total_lines) * 100).toFixed(1) : '0'}%`,
+          `${number(source[key])} · ${source.total_lines ? ((source[key] / source.total_lines) * 100).toFixed(1) : '0'}%`,
           key,
         ),
       );
     content.append(overview);
     const quality = ratios?.quality_metrics;
-    if (Number.isFinite(quality?.overall_quality_score) && basic.total_files > 0) {
+    if (Number.isFinite(quality?.overall_quality_score) && source.file_count > 0) {
       const group = section(`Quality ${Math.round(quality.overall_quality_score)} / 100`);
       group.dataset.band = band(quality.overall_quality_score);
       for (const [key, label] of scores)
@@ -149,17 +130,28 @@ export function createHowMany(monaco, api, navigator, statusbar) {
           group.append(row(label, `${Math.round(quality[key])} / 100`));
       content.append(group);
     }
-    const extensions = Object.entries(basic.stats_by_extension ?? {})
-      .filter(([, stats]) => Number.isFinite(stats.total_lines))
-      .sort((a, b) => b[1].total_lines - a[1].total_lines);
-    if (extensions.length) {
-      const group = section('Languages');
-      for (const [extension, stats] of extensions) {
-        const line = row(
-          languages[extension] ?? extension,
-          `${count(stats.total_lines, 'line')} · ${count(stats.file_count, 'file')}`,
+    for (const [category, label] of [
+      ['code', 'Languages'],
+      ['config', 'Configuration'],
+      ['data', 'Data'],
+      ['docs', 'Standalone documentation'],
+    ]) {
+      const rows = breakdown.rows
+        .filter(stats => stats.category === category)
+        .sort((a, b) =>
+          category === 'code'
+            ? b.code_lines - a.code_lines || a.language.localeCompare(b.language)
+            : b.total_lines - a.total_lines || a.language.localeCompare(b.language),
         );
-        line.title = `${basic.total_lines ? ((stats.total_lines / basic.total_lines) * 100).toFixed(1) : 0}% of all lines`;
+      if (!rows.length) continue;
+      const group = section(label);
+      for (const stats of rows) {
+        const line = row(
+          stats.language,
+          `${category === 'code' ? `${number(stats.code_lines)} code` : count(stats.total_lines, 'line')} · ${count(stats.file_count, 'file')}`,
+        );
+        if (category === 'code')
+          line.title = `${source.code_lines ? ((stats.code_lines / source.code_lines) * 100).toFixed(1) : 0}% of source code lines · ${count(stats.total_lines, 'physical line')}`;
         group.append(line);
       }
       content.append(group);
@@ -192,24 +184,24 @@ export function createHowMany(monaco, api, navigator, statusbar) {
     summary.textContent = running
       ? 'Analyzing…'
       : report
-        ? count(report.basic.total_lines, 'line')
+        ? `${number(report.source.code_lines)} code`
         : '';
     status.textContent = running
       ? 'HowMany…'
       : report
-        ? `${number(report.basic.code_lines)} code`
+        ? `${number(report.source.code_lines)} code`
         : 'HowMany';
     status.title = message || 'Open HowMany workspace analysis';
     if (report) {
-      const { basic } = report;
+      const { source } = report;
       body.append(
-        row(count(basic.total_files, 'file'), count(basic.total_lines, 'line')),
-        composition(basic),
+        row(count(source.file_count, 'source file'), count(source.total_lines, 'line')),
+        composition(source),
       );
       for (const [key, label] of categories)
-        if (basic[key]) body.append(row(label, number(basic[key])));
+        if (source[key]) body.append(row(label, number(source[key])));
       const quality = report.ratios?.quality_metrics?.overall_quality_score;
-      if (Number.isFinite(quality) && basic.total_files > 0) {
+      if (Number.isFinite(quality) && source.file_count > 0) {
         const score = row('Quality', `${Math.round(quality)} / 100`, 'howmany-quality');
         score.dataset.band = band(quality);
         body.append(score);

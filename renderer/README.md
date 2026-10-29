@@ -15,6 +15,8 @@ doc_radar:
       contains: ['searchFiles', 'toLocaleLowerCase']
     - file: renderer/icons.ts
       contains: ['material-icon-theme']
+    - file: renderer/howmany.js
+      contains: ['report.source.code_lines', 'breakdown.rows', 'Standalone documentation']
 ---
 
 # Viewer
@@ -38,6 +40,8 @@ The TypeScript document-preview module renders images, audio, video, PDF documen
 Language providers attach to visible models. Syntax grammars load on demand; real language servers supply only the features they advertise. Requests cancel when models change or close, and stale results never replace newer content.
 
 HowMany adds a collapsible explorer summary, a status-bar report action, and a per-file breakdown above the editor. Its report uses the app's native typography, composition bars, quality scores, language rows, and structural metrics only when the analyzer actually returned structural data. A native save dialog exports JSON. HowMany owns separate Monaco diagnostic markers, and file switches cancel its pending counts.
+
+The sidebar and status bar count source code. The full report separates source languages from configuration, data and standalone documentation; comments, documentation within source, and blank lines remain visible in the source composition. Language names and categories come from HowMany.
 
 Files load before automatic HowMany workspace analysis starts. The explorer and initial document finish loading, then analysis yields through a paint opportunity and runs during an idle turn. Per-file counts also wait for a paint opportunity; switching files cancels queued counts, and delayed results cannot replace counts for a newer selection. A slow or unavailable analyzer leaves browsing and editing usable.
 

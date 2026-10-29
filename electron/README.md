@@ -7,6 +7,8 @@ doc_radar:
       contains: ['new Worker', 'languageProcesses', 'before-quit']
     - file: electron/language.mjs
       contains: ['LanguageRuntime', 'textDocument/didOpen', 'textDocument/didClose']
+    - file: electron/howmany.mjs
+      contains: ['validCounts', 'report.source', 'report.breakdown?.rows']
 ---
 
 # Desktop, Git, and languages
@@ -34,3 +36,5 @@ Diff calculation runs in a separate lazy worker so it cannot block watcher or la
 The language runtime discovers tools without launching them, selects the nearest project manifest, and starts servers only for opened documents. It owns framing, configuration, cancellation, diagnostics, idle eviction, and process-group shutdown. The main process tracks owned PIDs so closing a window also cleans up a stalled worker's servers.
 
 HowMany runs in the session worker with a separate language runtime, so its all-language counts and diagnostics do not displace either language server. Workspace analyses coalesce, run without a shell or disk cache, cap output at 16 MiB, time out after 30 seconds, and use two threads. The main process tracks both analysis and LSP processes for window cleanup. The binary bundled by `setup-howmany.ts` takes precedence over PATH and is unpacked from ASAR so the installed app can execute it without shell setup.
+
+We bundle the released HowMany counter by revision and source checksum. Workspace reports must include consistent source totals and category rows before they reach the renderer; older reports cannot silently supply the code headline. Normal ignore rules apply, and new untracked source files remain part of the analysis.

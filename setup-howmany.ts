@@ -72,6 +72,8 @@ export async function setupHowMany() {
           'build',
           '--locked',
           '--release',
+          '--jobs',
+          '2',
           '--manifest-path',
           path.join(source, 'Cargo.toml'),
           '--target-dir',

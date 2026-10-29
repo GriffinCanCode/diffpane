@@ -107,10 +107,29 @@ try {
       blank_lines: 0,
       total_size: 25,
     };
+    const source = {
+      file_count: 0,
+      total_lines: 0,
+      code_lines: 0,
+      doc_lines: 0,
+      comment_lines: 0,
+      blank_lines: 0,
+      total_size: 0,
+    };
     for (const work of globalThis.howmanyProbe.pending) {
       work.resolve(
         work.channel === 'howmany-analyze'
-          ? { status: 'ready', report: { basic }, message: '' }
+          ? {
+              status: 'ready',
+              report: {
+                basic,
+                source,
+                breakdown: {
+                  rows: [{ ...basic, file_count: 2, language: 'Text', category: 'data' }],
+                },
+              },
+              message: '',
+            }
           : { title: work.filename === 'second.txt' ? 'SECOND COUNTS' : 'STALE FIRST COUNTS' },
       );
     }
