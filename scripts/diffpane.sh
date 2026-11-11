@@ -18,7 +18,7 @@ prepare_app() {
   trap '/bin/rm -rf "$staging"' EXIT
   trap 'exit 1' HUP INT TERM
   /usr/bin/ditto -x -k "$archive" "$staging"
-  /usr/bin/codesign --verify --deep --strict -R 'anchor apple generic' "$staging/Diffpane.app"
+  /usr/bin/codesign --verify --deep --strict -R='anchor apple generic' "$staging/Diffpane.app"
   /bin/mv -n "$staging/Diffpane.app" "$payload/"
   test -x "$app/Contents/MacOS/Diffpane"
   /bin/rm -rf "$staging"
