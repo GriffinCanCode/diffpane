@@ -91,29 +91,35 @@ try {
     'live saves retain the visible code',
   );
   assert.equal(await page.evaluate(() => window.__diffpane.stats().models), 1);
-  await page.evaluate(
-    () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))),
-  );
-  const overview = await page.locator('#feed .decorationsOverviewRuler').evaluate(canvas => {
-    const { data, width, height } = canvas
-      .getContext('2d')
-      .getImageData(0, 0, canvas.width, canvas.height);
-    const colors = new Set(['71,125,146', '82,120,91', '172,98,102']);
-    let widest = 0;
-    for (let row = 0; row < height; row++) {
-      let pixels = 0;
-      for (let column = 0; column < width; column++) {
-        const offset = (row * width + column) * 4;
-        if (
-          data[offset + 3] &&
-          colors.has(`${data[offset]},${data[offset + 1]},${data[offset + 2]}`)
-        )
-          pixels++;
+  // Monaco can resize the ruler after the text updates and repaint it on a later frame.
+  const paintedOverview = await page.waitForFunction(
+    () => {
+      const canvas = document.querySelector('#feed .decorationsOverviewRuler');
+      if (!(canvas instanceof HTMLCanvasElement) || !canvas.width || !canvas.height) return null;
+      const context = canvas.getContext('2d');
+      if (!context) return null;
+      const { data, width, height } = context.getImageData(0, 0, canvas.width, canvas.height);
+      const colors = new Set(['71,125,146', '82,120,91', '172,98,102']);
+      let widest = 0;
+      for (let row = 0; row < height; row++) {
+        let pixels = 0;
+        for (let column = 0; column < width; column++) {
+          const offset = (row * width + column) * 4;
+          if (
+            data[offset + 3] &&
+            colors.has(`${data[offset]},${data[offset + 1]},${data[offset + 2]}`)
+          )
+            pixels++;
+        }
+        widest = Math.max(widest, pixels);
       }
-      widest = Math.max(widest, pixels);
-    }
-    return { widest, width };
-  });
+      return widest ? { widest, width } : null;
+    },
+    undefined,
+    { timeout: 5000 },
+  );
+  const overview = await paintedOverview.jsonValue();
+  await paintedOverview.dispose();
   assert.ok(
     overview.widest > 0 && overview.widest <= overview.width / 3 + 1,
     JSON.stringify(overview),

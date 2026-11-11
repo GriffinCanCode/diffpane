@@ -1,4 +1,4 @@
-import { _electron as electron } from 'playwright';
+import { _electron as electron, errors as playwrightErrors } from 'playwright';
 import executablePath from 'electron';
 import { execFileSync } from 'node:child_process';
 import { mkdtemp, writeFile, mkdir, rm } from 'node:fs/promises';
@@ -252,10 +252,21 @@ try {
     0,
     'unchanged documents should not acquire diff highlights',
   );
-  await card('docs/long.md').locator('.monaco-editor').hover();
-  await page.mouse.wheel(0, 950);
-  await page.waitForTimeout(350);
-  const firstLineBefore = await card('docs/long.md').locator('.view-line').first().innerText();
+  const longEditor = card('docs/long.md').locator('.monaco-editor');
+  const firstLine = longEditor.locator('.view-line').first();
+  assert.match(await firstLine.innerText(), /LINE_0000/);
+  // A background analysis update can relayout the editor during smooth scrolling.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await longEditor.hover({ position: { x: 120, y: 120 } });
+    await page.mouse.wheel(0, 950);
+    try {
+      await firstLine.filter({ hasNotText: 'LINE_0000' }).waitFor({ timeout: 1000 });
+      break;
+    } catch (error) {
+      if (!(error instanceof playwrightErrors.TimeoutError)) throw error;
+    }
+  }
+  const firstLineBefore = await firstLine.innerText();
   assert.equal(
     firstLineBefore.includes('LINE_0000'),
     false,
