@@ -1,6 +1,8 @@
 ---
 doc_radar:
   sentinels:
+    - file: Boxfile
+      contains: ['id = "diffpane"', 'platforms = ["macos-aarch64"]']
     - file: electron/main.mjs
       contains: ['contextIsolation: true', 'nodeIntegration: false', 'sandbox: true']
     - file: renderer/main.js
@@ -44,7 +46,20 @@ Git changes are marked beside the line numbers. You can open a side-by-side comp
 
 It includes search, a file picker, language tools, line counts, and previews for images, audio, video, and PDFs. Your agent runs separately. Diffpane reads and edits the files on disk.
 
-## Setup
+## Install from Box
+
+On an Apple Silicon Mac with macOS 13 or later, install Git and connect Box to The Billy Company's registry. Then run:
+
+```sh
+box unpack diffpane
+export PATH="$(box env):$PATH"
+cd /path/to/your/project
+diffpane
+```
+
+The first launch unpacks the signed app. Electron and HowMany come bundled. To make `diffpane` available in new terminals, add the Box directory to your shell's PATH.
+
+## Build from source
 
 Use the Node.js version in `.node-version`. Building the macOS app also requires Rust 1.88+ and the Xcode command-line tools.
 
@@ -72,4 +87,12 @@ make dev     # run from source
 make test    # run tests
 make build   # build the app
 make verify  # formatting, lint, tests, and build
+```
+
+To prepare a Box release, set `DIFFPANE_SIGN_IDENTITY` to a Developer ID Application identity. Supply the App Store Connect key path, key ID, and issuer through `APPLE_API_KEY`, `APPLE_API_KEY_ID`, and `APPLE_API_ISSUER`. Keep the Boxfile and package.json versions in sync.
+
+```sh
+npm run package:box
+box pack --dry-run
+box pack
 ```
