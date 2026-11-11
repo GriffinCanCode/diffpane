@@ -18,7 +18,7 @@
     "test:languages": "node tests/languages.integration.mjs",
     "test:howmany": "npm run build && node tests/howmany-startup.e2e.mjs && node tests/howmany.e2e.mjs",
     "test:billy": "node tests/billy.integration.mjs",
-    "prepare": "vp config --no-agent && node scripts/emit-preload.ts",
+    "prepare": "vp config --no-agent && node scripts/emit-preload.ts && vp fmt electron/preload.cjs",
     "dev": "node scripts/dev.ts",
     "preview": "vp preview",
     "check": "vp check",
