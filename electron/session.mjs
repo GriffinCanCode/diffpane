@@ -553,9 +553,11 @@ const watchSetup = (async () => {
               }
             }
             // FSEvents can retain FileCreated on existing paths; atomic saves also reuse paths.
+            // A coalesced delete and restore can arrive as an update after Git saw the deletion.
             if (
               path.basename(event.path) === '.gitignore' ||
               (event.type === 'create' && (!known || !catalog || catalogLoading)) ||
+              (event.type === 'update' && snapshotIndex.get(relative)?.worktree === 'D') ||
               event.type === 'delete'
             )
               inventoryDirty = true;

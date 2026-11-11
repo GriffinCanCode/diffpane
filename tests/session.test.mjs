@@ -125,6 +125,17 @@ async function fixture(t, { fileCount = 1000, setup = '' } = {}) {
   return { root, write, git, commit, call, waitFor, pathEvents, emit, waitNotice, signal };
 }
 
+const injectedWatchSetup = `
+      const callbacks = [];
+      watcher.subscribe = async (_directory, callback) => {
+        callbacks.push(callback);
+        return { unsubscribe: async () => {} };
+      };
+      testPort.on('message', message => {
+        if (message.testEvents) callbacks[0](null, message.testEvents);
+      });
+    `;
+
 test('editor saves invalidate cached text and sync Git status without waiting for the watcher', async t => {
   const repo = await fixture(t);
   const initial = await repo.call('document', 'src/file0.txt', 'head');
@@ -263,6 +274,32 @@ test('tracked deletions leave the inventory, retain Git status, and reappear aft
       snapshot.revision > deleted.revision && snapshot.changedPaths.includes('src/file0.txt'),
   );
   assert.ok((await repo.call('files')).some(file => file.path === 'src/file0.txt'));
+});
+
+test('a watcher update restores a deleted tracked file to the inventory', async t => {
+  const repo = await fixture(t, { fileCount: 1, setup: injectedWatchSetup });
+  const tracked = 'src/file0.txt';
+  await repo.call('files');
+  await rm(path.join(repo.root, tracked));
+  repo.emit([{ path: tracked, type: 'delete' }]);
+  const deleted = await repo.waitFor(snapshot =>
+    snapshot.files.some(file => file.path === tracked && file.worktree === 'D'),
+  );
+  assert.deepEqual(await repo.call('files'), []);
+
+  await repo.write(tracked, 'baseline 0\n');
+  repo.emit([{ path: tracked, type: 'update' }]);
+  const restored = await repo.waitFor(
+    snapshot =>
+      snapshot.revision > deleted.revision &&
+      snapshot.changedPaths.includes(tracked) &&
+      snapshot.files.length === 0,
+  );
+  assert.ok(restored.inventoryRevision > deleted.inventoryRevision);
+  assert.deepEqual(
+    (await repo.call('files')).map(file => file.path),
+    [tracked],
+  );
 });
 
 test('watcher fallback delivers inventories slower than its polling interval and keeps detecting edits', async t => {
@@ -659,19 +696,7 @@ test('an edit during a catalog scan queues reconciliation after the first useful
 });
 
 test('collapsed ignored churn cannot invalidate unrelated documents while opened ignored files stay live', async t => {
-  const repo = await fixture(t, {
-    fileCount: 10,
-    setup: `
-      const callbacks = [];
-      watcher.subscribe = async (_directory, callback) => {
-        callbacks.push(callback);
-        return { unsubscribe: async () => {} };
-      };
-      testPort.on('message', message => {
-        if (message.testEvents) callbacks[0](null, message.testEvents);
-      });
-    `,
-  });
+  const repo = await fixture(t, { fileCount: 10, setup: injectedWatchSetup });
   await repo.write('.gitignore', 'cache/\n');
   await mkdir(path.join(repo.root, 'cache'));
   await repo.write('cache/open.txt', 'opened ignored file\n');

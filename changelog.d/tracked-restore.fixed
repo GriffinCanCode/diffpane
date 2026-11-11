@@ -1,0 +1,1 @@
+Show restored Git-tracked files in the explorer when the filesystem watcher reports their return as an update.
