@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; base-uri 'none'; form-action 'none'"
+    />
+    <title>Diffpane Terminal</title>
+    <link rel="stylesheet" href="/renderer/shell/workspace/theme-tokens.css" />
+    <link rel="stylesheet" href="/renderer/shell/workspace/theme.css" />
+  </head>
+  <body>
+    <header class="terminal-toolbar">
+      <h1>Terminal</h1>
+      <p id="terminal-status" role="status" aria-atomic="true">Connecting to Diffpane…</p>
+      <div class="terminal-controls">
+        <button id="terminal-start" type="button" disabled>Start shell</button>
+        <button id="terminal-stop" type="button" hidden>Stop shell</button>
+        <button id="terminal-hide" type="button" disabled>Hide</button>
+      </div>
+    </header>
+    <main class="terminal-body" aria-label="Shell terminal">
+      <div id="terminal-viewport"></div>
+    </main>
+    <dialog id="terminal-paste-dialog" aria-labelledby="terminal-paste-title" aria-describedby="terminal-paste-detail">
+      <h2 id="terminal-paste-title">Paste multiple lines?</h2>
+      <p id="terminal-paste-detail">Pasting multiple lines can run commands in the active shell.</p>
+      <div class="terminal-controls">
+        <button id="terminal-paste-cancel" type="button" autofocus>Cancel</button>
+        <button id="terminal-paste-confirm" type="button">Paste</button>
+      </div>
+    </dialog>
+    <script type="module" src="/renderer/panels/terminal/terminal.ts"></script>
+  </body>
+</html>

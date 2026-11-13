@@ -189,6 +189,10 @@ button svg,
   min-height: 0;
   min-width: 0;
 }
+#terminal-dock {
+  flex: 0 0 clamp(128px, 36vh, 340px);
+  background: var(--canvas);
+}
 #sidebar {
   display: flex;
   min-height: 0;

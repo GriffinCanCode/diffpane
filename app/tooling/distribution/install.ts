@@ -1,6 +1,6 @@
 import { execFileSync, spawn } from 'node:child_process'
 import { constants } from 'node:fs'
-import { cp, lstat, mkdir, mkdtemp, writeFile, rename, readFile, readlink, rm, symlink } from 'node:fs/promises'
+import { chmod, cp, lstat, mkdir, mkdtemp, writeFile, rename, readFile, readlink, rm, symlink } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { packager } from '@electron/packager'
@@ -76,9 +76,16 @@ const [bundle] = await (async () => {
       icon: 'branding/desktop/diffpane.icns',
       appVersion: version,
       overwrite: true,
-      asar: { unpack: '**/*.node' },
+      asar: { unpack: '**/{*.node,spawn-helper}' },
       beforeAsar: [
-        async ({ buildPath }) => {
+        async ({ buildPath, arch }) => {
+          const pty = path.join(buildPath, 'node_modules/node-pty')
+          const helper = path.join(pty, 'prebuilds', `darwin-${arch}`, 'spawn-helper')
+          const info = await lstat(helper).catch((error: unknown) => {
+            if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return undefined
+            throw error
+          })
+          if (info?.isFile()) await chmod(helper, (info.mode & 0o777) | 0o111)
           // Child processes already use these physical paths. Move the staged
           // payloads directly so ASAR does not index and copy them a second time.
           const unpacked = `${buildPath}.asar.unpacked`

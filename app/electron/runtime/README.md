@@ -13,3 +13,4 @@ doc_radar:
 
 - [Window](window/README.md) owns Electron startup, native menus and dialogs, renderer IPC, and shutdown coordination.
 - [Session](session/README.md) owns a workspace worker's lifetime, watches, inventory snapshots, and request dispatch.
+- [Terminal](terminal/README.md) owns the terminal view, shell authorization, and PTY lifetime.

@@ -72,6 +72,8 @@ The app goes in `~/Applications`. The `dp` and `diffpane` commands go in `~/.loc
 
 The terminal command opens the current directory when it belongs to a Git working tree. Running it outside Git or opening Diffpane from Finder or the Dock shows the welcome screen. Choose Open Folder or Open File to browse a Git working tree, or reopen a recent file or folder.
 
+Open **Terminal** from the title bar and choose **Start shell**. After you confirm, an interactive shell opens in the folder shown in the prompt and runs with your user account’s permissions. **Hide** keeps the shell running. **Stop shell** or closing the workspace ends the terminal session. Diffpane asks before pasting multiple lines.
+
 Open **Settings → Appearance** from the title-bar gear or press ⌘, to choose the theme, text diff layout, and editor typography. Changes apply immediately and are saved for future windows.
 
 Open **Settings → Keyboard shortcuts** from the title-bar gear or the Diffpane menu to see the current and default bindings. Select a binding to change it, or restore the defaults at any time. By default, ⌘N opens a new window, ⌘O opens the folder picker, and ⌘P finds files in the project.

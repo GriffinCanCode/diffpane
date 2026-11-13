@@ -526,6 +526,11 @@ const API = {
   savesFlushed: (success, id) => electron_1.ipcRenderer.send('saves-flushed', success, id),
   setSaveState: dirty => electron_1.ipcRenderer.send('save-state', dirty),
   rendererReady: () => electron_1.ipcRenderer.send('renderer-ready'),
+  terminal: {
+    toggle: () => invoke('terminal-toggle', isBoolean),
+    layout: (height, bottom, theme) => electron_1.ipcRenderer.send('terminal-layout', height, bottom, theme),
+    onVisibility: callback => listen('terminal-visibility', isBoolean, callback),
+  },
   reportDiagnostic: event => reportDiagnostic(event),
   media: path => invoke('media', isMedia, path),
   refresh: () => invoke('refresh', isSnapshot),

@@ -26,7 +26,7 @@ export default defineConfig({
     plugins: ['eslint', 'typescript', 'unicorn', 'oxc', 'import', 'promise', 'node'],
     categories: { correctness: 'error', suspicious: 'error', perf: 'error' },
     env: { node: true },
-    ignorePatterns: ['app/electron/runtime/window/preload.cjs'],
+    ignorePatterns: ['app/electron/runtime/*/preload.cjs'],
     jsPlugins: [{ name: 'vite-plus', specifier: 'vite-plus/oxlint-plugin' }],
     rules: {
       'vite-plus/prefer-vite-plus-imports': 'error',
@@ -76,6 +76,9 @@ export default defineConfig({
   publicDir: '../branding/public',
   base: './',
   build: {
+    rolldownOptions: {
+      input: { workspace: 'app/index.html', terminal: 'app/terminal.html' },
+    },
     target: 'esnext',
     chunkSizeWarningLimit: 2500,
     outDir: '../dist',
@@ -103,6 +106,7 @@ export default defineConfig({
           input: [
             { auto: true },
             'app/index.html',
+            'app/terminal.html',
             'app/tsconfig.json',
             'app/renderer/**',
             'app/shared/**',

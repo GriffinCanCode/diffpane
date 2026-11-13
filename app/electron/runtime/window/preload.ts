@@ -614,6 +614,12 @@ const API = {
   savesFlushed: (success: boolean, id: number) => ipcRenderer.send('saves-flushed', success, id),
   setSaveState: (dirty: boolean) => ipcRenderer.send('save-state', dirty),
   rendererReady: () => ipcRenderer.send('renderer-ready'),
+  terminal: {
+    toggle: () => invoke('terminal-toggle', isBoolean),
+    layout: (height: number, bottom: number, theme?: 'light' | 'dark') =>
+      ipcRenderer.send('terminal-layout', height, bottom, theme),
+    onVisibility: (callback: (visible: boolean) => void) => listen('terminal-visibility', isBoolean, callback),
+  },
   reportDiagnostic: (event: DiagnosticEvent) => reportDiagnostic(event),
   media: (path: string) => invoke('media', isMedia, path),
   refresh: () => invoke('refresh', isSnapshot),

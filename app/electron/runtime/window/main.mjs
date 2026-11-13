@@ -36,6 +36,7 @@ import { ClaudeSession } from '../../tools/assistant/claude-session.mjs'
 import { mediaResponse } from '../../workspace/documents/media.ts'
 import { startDesktopMetrics } from '../diagnostics/desktop-metrics.ts'
 import { createDiagnosticLog } from '../diagnostics/diagnostic-log.ts'
+import { createTerminalDock, terminalScheme } from '../terminal/dock.ts'
 import { openPickerOptions, pickMacTarget } from './open-picker.ts'
 
 /** @import { IpcMainEvent, IpcMainInvokeEvent, SaveDialogOptions, WebContents } from 'electron' */
@@ -53,6 +54,8 @@ const here = path.dirname(fileURLToPath(import.meta.url))
 const invokeChannels = new Set()
 /** @type {Map<number, WindowSession>} */
 const sessions = new Map()
+/** @type {WeakMap<WindowSession, ReturnType<typeof createTerminalDock>>} */
+const terminals = new WeakMap()
 /** @type {WeakMap<WindowSession, number>} */
 const rendererNavigationStarts = new WeakMap()
 /** @type {Map<string, WindowSession>} */
@@ -61,6 +64,7 @@ const mediaSessions = new Map()
 const fileChanges = new Map()
 protocol.registerSchemesAsPrivileged([
   { scheme: 'diffpane-media', privileges: { standard: true, secure: true, stream: true } },
+  { scheme: terminalScheme, privileges: { standard: true, secure: true } },
 ])
 let nextRequest = 0
 let nextFlush = 0
@@ -371,6 +375,7 @@ function createWindow(directory = null) {
     })
     scoped.error('workspace-worker', fatal)
     killLanguageProcesses()
+    runBackground('stop-terminal', () => terminal.reset())
     for (const request of requests.values()) request.reject(fatal)
     requests.clear()
     session.finishFlush?.(false)
@@ -596,7 +601,8 @@ function createWindow(directory = null) {
       if (this.stopping) return this.stopping
       this.claude.reset()
       this.stopping = (async () => {
-        if (!worker) return
+        const terminalStopped = terminal.reset()
+        if (!worker) return terminalStopped
         /** @type {NodeJS.Timeout | undefined} */
         let timer
         let graceful = false
@@ -632,7 +638,9 @@ function createWindow(directory = null) {
           // environment. Force termination is reserved for failed or stuck workers.
           if (!graceful) {
             scoped.event('workspace-worker-forced-stop', 'warn')
-            await worker.terminate()
+            await Promise.all([worker.terminate(), terminalStopped])
+          } else {
+            await terminalStopped
           }
         }
       })()
@@ -648,6 +656,14 @@ function createWindow(directory = null) {
       return this.stopping
     },
   }
+  const terminal = createTerminalDock({
+    window,
+    eligible: () =>
+      Boolean(directory && session.rendererReady && !fatal && !session.stopping && quitPhase === 'running'),
+    workspace: async () => (await session.reviewWorkspace()).scope,
+    onVisibility: visible => send(session.contents, 'terminal-visibility', visible),
+  })
+  terminals.set(session, terminal)
   sessions.set(windowId, session)
   mediaSessions.set(session.mediaToken, session)
   if (directory) startWorker()
@@ -680,6 +696,7 @@ function createWindow(directory = null) {
   function detachRenderer() {
     const wasReady = session.rendererReady
     session.rendererReady = false
+    runBackground('stop-terminal', () => terminal.reset())
     session.claude.reset()
     session.finishFlush?.(false)
     if (directory && wasReady && !fatal)
@@ -1091,6 +1108,10 @@ onRenderer('renderer-ready', session => {
   session.rendererReady = true
   session.announceFatal()
   if (session.settingsRequested && send(session.contents, 'open-settings')) session.settingsRequested = false
+})
+handle('terminal-toggle', session => terminals.get(session)?.toggle() ?? false)
+onRenderer('terminal-layout', (session, height, bottom, theme) => {
+  terminals.get(session)?.layout(height, bottom, theme)
 })
 /** @type {Record<string, (sender: WebContents, ...args: unknown[]) => unknown>} */
 const shortcutHandlers = {

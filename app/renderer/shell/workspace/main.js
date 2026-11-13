@@ -152,6 +152,8 @@ const icons = {
   more: '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="3.5" cy="8" r="1"/><circle cx="8" cy="8" r="1"/><circle cx="12.5" cy="8" r="1"/></svg>',
   search:
     '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="7" cy="7" r="4.2" stroke="currentColor" stroke-width="1.35"/><path d="m10 10 3.5 3.5" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/></svg>',
+  terminal:
+    '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="11" rx="2"/><path d="m4 6 2 2-2 2m4 0h3.5"/></svg>',
   review:
     '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 5h5.5M8 10h5.5"/><path class="review-idle-mark" d="m2 5 1.25 1.25L5.5 4M2 10l1.25 1.25L5.5 9"/><path class="review-pending-mark" d="M2 5h3.5M2 10h3.5M3.75 8.25v3.5"/></svg>',
   note: '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3.5 2.5h9a1 1 0 0 1 1 1v6L9.5 13.5h-6a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1Z" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round"/><path d="M9.5 13.5v-3a1 1 0 0 1 1-1h3M5 5.5h6M5 8h3" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"/></svg>',
@@ -177,6 +179,7 @@ app.innerHTML = `
       <button type="button" id="review-toggle" class="titlebar-button" aria-label="Review changes" aria-controls="change-review" aria-pressed="false" data-pending="false" hidden>${icons.review}<span>Changes</span></button>
       <button type="button" id="review-notes-toggle" class="titlebar-button" aria-label="Review notes" aria-controls="review-notes-panel" aria-expanded="false" hidden>${icons.note}<span>Notes</span><span class="review-notes-count" aria-hidden="true" hidden></span></button>
       <button type="button" id="claude-toggle" class="titlebar-button" aria-label="The Creature" aria-controls="claude-panel" aria-expanded="false" hidden>${creatureGlyph}<span>The Creature</span></button>
+      <button type="button" id="terminal-toggle" class="titlebar-button" aria-label="Terminal" aria-controls="terminal-dock" aria-expanded="false" hidden>${icons.terminal}<span>Terminal</span></button>
       <button type="button" id="settings-toggle" class="titlebar-button" aria-label="Settings" aria-haspopup="dialog" aria-controls="app-settings" hidden>${icons.settings}</button>
     </div>
   </header>
@@ -235,6 +238,7 @@ app.innerHTML = `
     <aside id="claude-panel" hidden></aside>
     <aside id="review-notes-panel" hidden></aside>
   </div>
+  <section id="terminal-dock" aria-label="Workspace terminal" hidden></section>
   <footer class="statusbar"><span id="status-text">Opening workspace…</span><span class="statusbar-end" hidden><span class="current-only">Current file contents</span><span class="status-dot"></span><span id="save-state" role="status">Autosave on</span></span></footer>
 `
 
@@ -252,6 +256,8 @@ const ui = {
   claudePanel: requireElement(app, '#claude-panel', HTMLElement),
   claudeToggle: requireElement(app, '#claude-toggle', HTMLButtonElement),
   settingsToggle: requireElement(app, '#settings-toggle', HTMLButtonElement),
+  terminalToggle: requireElement(app, '#terminal-toggle', HTMLButtonElement),
+  terminalDock: requireElement(app, '#terminal-dock', HTMLElement),
   projectName: requireElement(app, '#project-name', HTMLElement),
   projectPath: requireElement(app, '#project-path', HTMLElement),
   branchName: requireElement(app, '#branch-name', HTMLElement),
@@ -333,12 +339,36 @@ let focusBeforeIdeas = null
 
 /** @type {'light' | 'dark' | undefined} */
 let activeScheme
+function syncTerminalLayout() {
+  if (!api.terminal || ui.terminalDock.hidden) return
+  const bounds = ui.terminalDock.getBoundingClientRect()
+  api.terminal.layout(
+    document.querySelector('dialog[open]') ? 0 : bounds.height,
+    window.innerHeight - bounds.bottom,
+    activeScheme,
+  )
+}
+const terminalBounds = new ResizeObserver(syncTerminalLayout)
+const terminalDialogs = new MutationObserver(records => {
+  if (records.some(record => record.target instanceof HTMLDialogElement)) syncTerminalLayout()
+})
+const unsubscribeTerminal = api.terminal?.onVisibility(visible => {
+  ui.terminalDock.hidden = !visible
+  ui.terminalToggle.setAttribute('aria-expanded', String(visible))
+  if (visible) syncTerminalLayout()
+})
+terminalBounds.observe(ui.terminalDock)
+terminalDialogs.observe(document.body, { subtree: true, attributes: true, attributeFilter: ['open'] })
+ui.terminalToggle.addEventListener('click', event => {
+  if (event.isTrusted && !closingRequested) runTask('Toggle terminal', async () => void (await api.terminal?.toggle()))
+})
 const appearance = createAppearanceSettings(uiPreferences, (preferences, scheme) => {
   const themeChanged = activeScheme !== scheme
   if (themeChanged) {
     activeScheme = scheme
     syntax.setTheme(editorThemeName(scheme))
     recolorMarkdownPreviews(scheme)
+    syncTerminalLayout()
   }
   for (const card of cards.values()) {
     if (card.diffEditor) {
@@ -1513,6 +1543,7 @@ function renderSnapshot(next) {
     requireElement(document, '.branch', HTMLElement).hidden = false
     requireElement(document, '.statusbar-end', HTMLElement).hidden = false
     ui.contentSearchToggle.hidden = !contentSearch
+    ui.terminalToggle.hidden = !api.terminal
     ui.reviewToggle.hidden = false
     reviewNotes?.setContext(true)
     if (ideas) {
@@ -2853,6 +2884,9 @@ Object.assign(window, {
       closed = true
       window.clearTimeout(workspaceOpeningTimer)
       reducedMotion.removeEventListener('change', revealWorkspaceWhenReady)
+      terminalBounds.disconnect()
+      terminalDialogs.disconnect()
+      unsubscribeTerminal?.()
       howmany?.dispose()
       assistant?.dispose()
       reviewNotes?.dispose()
