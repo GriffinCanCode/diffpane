@@ -151,7 +151,7 @@ button svg,
 
   &#ideas-toggle {
     position: relative;
-    color: var(--violet);
+    color: var(--accent);
   }
 
   &#ideas-toggle::after {

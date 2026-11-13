@@ -145,7 +145,7 @@ const syntax = configureSyntax(monaco)
 const documentProcessor = createDocumentProcessor()
 
 const icons = {
-  mark: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3.5" fill="currentColor" opacity=".06"/><path d="M12 4v16" stroke="currentColor" opacity=".2"/><rect x="3" y="4" width="18" height="16" rx="3.5" stroke="currentColor" stroke-width="1.2" opacity=".5"/><path d="M6 9h3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity=".55"/><path d="M15 15h3m-1.5-1.5v3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>',
+  mark: '<svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14" stroke="currentColor" stroke-width="1.2" opacity=".5"/><path d="M4 9h4" stroke="var(--removed-edge)" stroke-width="1.7"/><path d="M16 15h4m-2-2v4" stroke="var(--added-edge)" stroke-width="1.7"/></svg>',
   branch:
     '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="4" cy="3" r="1.7" stroke="currentColor"/><circle cx="4" cy="13" r="1.7" stroke="currentColor"/><circle cx="12" cy="3" r="1.7" stroke="currentColor"/><path d="M4 5v6m8-6v1a4 4 0 0 1-4 4H4" stroke="currentColor" stroke-width="1.2"/></svg>',
   down: '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 3v10m-4-4 4 4 4-4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>',
@@ -195,7 +195,7 @@ app.innerHTML = `
           <path class="workspace-art-guide" d="M12 17h128M12 39h128M12 61h128" stroke-dasharray="1 5"/>
           <path class="workspace-art-branch" d="M15 39h37c17 0 24-22 42-22h43" stroke="var(--added-edge)"/>
           <path class="workspace-art-branch" d="M52 39c17 0 24 22 42 22h43" stroke="var(--removed-edge)"/>
-          <path d="M15 39h37m45 0h40" stroke="var(--accent)" stroke-width="2.5"/>
+          <path d="M15 39h122" stroke="var(--accent)" stroke-width="2"/>
           <circle cx="52" cy="39" r="4.5" fill="var(--workbench-background)" stroke="var(--accent)" stroke-width="2"/>
           <path d="M115 13v8m-4-4h8m-8 44h8" stroke="var(--workbench-background)" stroke-width="7"/>
           <path d="M115 13v8m-4-4h8" stroke="var(--added)" stroke-width="1.8"/>

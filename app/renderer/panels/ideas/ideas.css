@@ -3,8 +3,7 @@
   --idea-gutter: clamp(16px, 2.5cqi, 34px);
   --idea-column: 680px;
   --idea-divider: color-mix(in oklab, var(--line) 72%, var(--workbench-background));
-  --idea-rail: color-mix(in oklab, var(--surface) 96%, var(--violet-surface));
-  --idea-active: color-mix(in oklab, var(--violet-surface) 72%, var(--idea-rail));
+  --idea-active: color-mix(in oklab, var(--accent-surface) 62%, var(--surface));
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -50,7 +49,7 @@
   flex: none;
   width: 15px;
   height: 15px;
-  color: var(--violet);
+  color: var(--accent);
 }
 
 .idea-heading h2 {
@@ -126,17 +125,17 @@
 .idea-index-toggle[aria-expanded='true'],
 .idea-header:has(~ .idea-formats:popover-open) .idea-format-toggle {
   background: var(--idea-active);
-  color: var(--violet);
+  color: var(--accent);
 }
 
 .idea-button.idea-primary:not(:disabled) {
   background: var(--idea-active);
-  color: var(--violet);
+  color: var(--accent);
 }
 
 .idea-button.idea-primary:hover:not(:disabled) {
-  background: color-mix(in oklab, var(--idea-active) 86%, var(--violet));
-  color: var(--violet);
+  background: color-mix(in oklab, var(--idea-active) 86%, var(--accent));
+  color: var(--accent);
 }
 
 .idea-button.idea-destructive,
@@ -178,7 +177,7 @@
   flex-direction: column;
   gap: 11px;
   padding: 12px 10px 0;
-  background: var(--idea-rail);
+  background: var(--surface);
 }
 
 .idea-search {
@@ -196,11 +195,11 @@
 }
 
 .idea-search:focus-within {
-  border-color: var(--violet);
+  border-color: var(--focus-ring);
 }
 
 .idea-search:focus-within svg {
-  color: var(--violet);
+  color: var(--accent);
 }
 
 .idea-search svg {
@@ -282,7 +281,7 @@
   inset-inline-start: 0;
   inline-size: 2px;
   border-radius: 2px;
-  background: var(--violet);
+  background: var(--accent);
   content: '';
 }
 
@@ -300,7 +299,7 @@
 }
 
 .idea-row[aria-pressed='true'] .idea-row-icon {
-  color: var(--violet);
+  color: var(--accent);
 }
 
 .idea-row-content {
@@ -361,7 +360,7 @@
   background:
     radial-gradient(
       ellipse 640px 235px at 0 0,
-      color-mix(in oklab, var(--violet-surface) 36%, transparent),
+      color-mix(in oklab, var(--surface-raised) 30%, transparent),
       transparent
     ),
     var(--workbench-background);
@@ -382,15 +381,15 @@
 .idea-empty[data-state='browse'] {
   background: radial-gradient(
     ellipse at 50% 36%,
-    color-mix(in oklab, var(--violet-surface) 42%, transparent),
+    color-mix(in oklab, var(--accent-surface) 42%, transparent),
     transparent 55%
   );
 }
 
 .idea-empty-scene {
-  --page-edge: color-mix(in oklab, var(--violet) 58%, var(--line));
-  --page-rule: color-mix(in oklab, var(--violet) 46%, var(--line));
-  --page-fill: color-mix(in oklab, var(--violet-surface) 66%, var(--surface-raised));
+  --page-edge: color-mix(in oklab, var(--accent) 58%, var(--line));
+  --page-rule: color-mix(in oklab, var(--accent) 46%, var(--line));
+  --page-fill: color-mix(in oklab, var(--accent-surface) 66%, var(--surface-raised));
   position: relative;
   display: grid;
   grid-template-columns: repeat(2, 41px);
@@ -410,7 +409,7 @@
   border: 1px solid var(--page-edge);
   border-radius: 5px 10px 2px 5px;
   background:
-    linear-gradient(var(--violet), var(--violet)) 8px 12px / 14px 1px no-repeat,
+    linear-gradient(var(--accent), var(--accent)) 8px 12px / 14px 1px no-repeat,
     linear-gradient(var(--page-rule), var(--page-rule)) 8px 20px / 23px 1px no-repeat,
     linear-gradient(var(--page-rule), var(--page-rule)) 8px 26px / 20px 1px no-repeat,
     linear-gradient(var(--page-rule), var(--page-rule)) 8px 32px / 24px 1px no-repeat,
@@ -509,7 +508,7 @@
   font: var(--weight-semibold) clamp(26px, 3.7cqi, 34px) / 1.16 var(--font-prose);
   letter-spacing: -0.033em;
   text-overflow: ellipsis;
-  caret-color: var(--violet);
+  caret-color: var(--accent);
 }
 
 .idea-title-input:focus-visible {
@@ -522,7 +521,7 @@
   inset-inline-start: -9px;
   inline-size: 2px;
   border-radius: 2px;
-  background: var(--violet);
+  background: var(--focus-ring);
   pointer-events: none;
   content: '';
 }
@@ -673,7 +672,7 @@
   flex: 1;
   width: 100%;
   padding: 0;
-  caret-color: var(--violet);
+  caret-color: var(--accent);
 }
 
 .idea-editor .cm-content[aria-readonly='true'] {
@@ -919,7 +918,7 @@
   inline-size: var(--idea-index-width);
   padding-inline: 15px 10px;
   border-inline-end: 1px solid var(--idea-divider);
-  background: var(--idea-rail);
+  background: var(--surface);
 }
 
 .idea-panel[data-idea-mode='notebook'] .idea-library-actions {
