@@ -15,3 +15,5 @@ The workspace mounts this notebook and handles project links and Claude attachme
 - [`ideas.css`](ideas.css) — Styles the notebook, editor toolbar, and docking controls.
 
 Run `npm test -- app/tests/interface/ideas` for editing commands. Use `npm run dev -- .` to exercise the notebook and docking.
+
+The dock and full notebook share the workspace appearance tokens. Search highlights matching titles, note excerpts, or linked paths. Markdown headings use the shared type scale, and code blocks use the editor font and size from Appearance.

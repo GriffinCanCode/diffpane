@@ -136,6 +136,28 @@ function bodySummary(body: string) {
   return tokens.map(token => ('text' in token && typeof token.text === 'string' ? token.text : token.raw)).join('')
 }
 
+function markMatches(element: HTMLElement, text: string, pattern: RegExp) {
+  let end = 0
+  for (const match of text.matchAll(pattern)) {
+    element.append(text.slice(end, match.index), node('mark', '', match[0]))
+    end = match.index + match[0].length
+  }
+  element.append(text.slice(end))
+}
+
+function matchingExcerpt(text: string, pattern: RegExp) {
+  const match = text.matchAll(pattern).next().value
+  if (!match) return undefined
+  const start = Math.max(0, match.index - 12)
+  const end = Math.min(text.length, match.index + Math.max(match[0].length, 100))
+  const excerpt = text
+    .slice(start, end)
+    .replace(/^[\uDC00-\uDFFF]|[\uD800-\uDBFF]$/gu, '')
+    .replace(/\s+/gu, ' ')
+    .trim()
+  return `${start ? '…' : ''}${excerpt}${end < text.length ? '…' : ''}`
+}
+
 const NOTE_DATE = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' })
 
 const LIST_PREFIX = /^([\t ]*)([-+*]|\d{1,9}[.)])([\t ]+)(?:\[([ xX])\](?:([\t ]+)|$))?/u
@@ -269,8 +291,9 @@ export function mountIdeaBuilder(host: HTMLElement, options: IdeaBuilderOptions)
     </div>
     <div class="idea-workspace">
       <section class="idea-index" id="idea-index" aria-label="Idea index" hidden>
-        <label class="idea-search">${icon('search')}<input type="search" placeholder="Find an idea…" aria-label="Find an idea" autocomplete="off"></label>
+        <label class="idea-search">${icon('search')}<input type="search" maxlength="256" placeholder="Find an idea…" aria-label="Find an idea" autocomplete="off"></label>
         <div class="idea-list" role="group" aria-label="Saved ideas"></div>
+        <p class="idea-no-results" role="status" hidden>No matching ideas</p>
       </section>
       <div class="idea-stage">
         <div class="idea-empty" hidden>
@@ -302,6 +325,7 @@ export function mountIdeaBuilder(host: HTMLElement, options: IdeaBuilderOptions)
   const indexSection = select('.idea-index')
   const search = requireElement(host, '.idea-search input', HTMLInputElement)
   const list = select('.idea-list')
+  const noResults = select('.idea-no-results')
   const empty = select('.idea-empty')
   const emptyTitle = select('.idea-empty h3')
   const emptyDetail = select('.idea-empty p')
@@ -334,7 +358,7 @@ export function mountIdeaBuilder(host: HTMLElement, options: IdeaBuilderOptions)
   const confirmDelete = button('Delete')
   const retryLoad = button('Retry')
   const retrySave = button('Retry')
-  addFirst.classList.add('idea-primary')
+  for (const primary of [add, addFirst, retryLoad]) primary.classList.add('idea-primary')
   confirmDelete.classList.add('idea-destructive')
   showIndex.classList.add('idea-index-toggle')
   showIndex.setAttribute('aria-controls', indexSection.id)
@@ -408,7 +432,7 @@ export function mountIdeaBuilder(host: HTMLElement, options: IdeaBuilderOptions)
     feedback.hidden = !label && !confirming
     confirmation.hidden = !confirming
     statusGroup.hidden = !label
-    statusGroup.toggleAttribute('data-error', Boolean(saveError))
+    statusGroup.dataset.state = saveError ? 'error' : 'warning'
     if (status.textContent !== label) status.textContent = label
     retrySave.hidden = !saveError
     retrySave.disabled = readOnly
@@ -427,12 +451,17 @@ export function mountIdeaBuilder(host: HTMLElement, options: IdeaBuilderOptions)
   }
 
   function renderList() {
-    const terms = search.value.trim().toLocaleLowerCase().split(/\s+/u).filter(Boolean)
+    const terms = search.value.trim().split(/\s+/u).filter(Boolean)
+    const patterns = terms
+      .toSorted((left, right) => right.length - left.length)
+      .map(term => term.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'))
+    const termPatterns = patterns.map(pattern => new RegExp(pattern, 'iu'))
+    const highlight = patterns.length ? new RegExp(patterns.join('|'), 'giu') : undefined
     const matching = [...ideas.values()]
       .filter(idea => {
-        if (!terms.length) return true
-        const text = `${idea.title}\n${idea.body}\n${idea.links.map(link => link.path).join('\n')}`.toLocaleLowerCase()
-        return terms.every(term => text.includes(term))
+        if (!termPatterns.length) return true
+        const text = `${idea.title}\n${idea.body}\n${idea.links.map(link => link.path).join('\n')}`
+        return termPatterns.every(pattern => pattern.test(text))
       })
       .toSorted((left, right) => right.updatedAt - left.updatedAt)
     firstListed = matching[0]?.id
@@ -444,10 +473,21 @@ export function mountIdeaBuilder(host: HTMLElement, options: IdeaBuilderOptions)
       row.setAttribute('aria-pressed', String(idea.id === selected))
       const summary = bodySummary(idea.body)
       const label = idea.title.trim() || summary || 'Untitled idea'
-      const description = summary || (idea.links[0] && filename(idea.links[0].path))
       const content = node('span', 'idea-row-content')
-      content.append(node('span', 'idea-row-title', label))
-      if (description && description !== label) content.append(node('span', 'idea-row-summary', description))
+      const rowTitle = node('span', 'idea-row-title')
+      const bodyMatch = highlight && matchingExcerpt(idea.body, highlight)
+      const matchingLink = highlight && idea.links.find(link => termPatterns.some(pattern => pattern.test(link.path)))
+      const linkMatch = highlight && matchingLink && matchingExcerpt(matchingLink.path, highlight)
+      const description = bodyMatch ?? linkMatch ?? (summary || (idea.links[0] && filename(idea.links[0].path)))
+      if (highlight) markMatches(rowTitle, label, highlight)
+      else rowTitle.textContent = label
+      content.append(rowTitle)
+      if (description && description !== label) {
+        const rowSummary = node('span', 'idea-row-summary')
+        if (highlight) markMatches(rowSummary, description, highlight)
+        else rowSummary.textContent = description
+        content.append(rowSummary)
+      }
       row.append(content)
       if (idea.links.length) {
         const count = node('span', 'idea-row-count')
@@ -457,7 +497,7 @@ export function mountIdeaBuilder(host: HTMLElement, options: IdeaBuilderOptions)
       }
       rows.append(row)
     }
-    if (!matching.length && terms.length) rows.append(node('p', 'idea-no-results', 'No matching ideas'))
+    noResults.hidden = matching.length > 0 || !highlight
     const active = document.activeElement
     const focus = active instanceof HTMLButtonElement && list.contains(active) ? active.dataset.ideaId : undefined
     list.replaceChildren(rows)
@@ -502,9 +542,11 @@ export function mountIdeaBuilder(host: HTMLElement, options: IdeaBuilderOptions)
     const rows = document.createDocumentFragment()
     for (const [index, link] of idea.links.entries()) {
       const chip = node('div', 'idea-attachment')
+      if (link.side === 'head') chip.dataset.side = 'head'
       const label = linkLabel(link, filename(link.path))
       const open = button(label, 'file', true)
       open.title = linkLabel(link)
+      open.setAttribute('aria-label', open.title)
       open.addEventListener('click', () => runAction('Open idea attachment', () => options.openLink(link)))
       const unlink = button(`Remove ${label}`, 'close')
       unlink.disabled = readOnly
@@ -515,10 +557,8 @@ export function mountIdeaBuilder(host: HTMLElement, options: IdeaBuilderOptions)
         updateIdea(active, { links: next })
         const updated = current()
         if (updated) renderLinks(updated)
-        ;(
-          attachments.querySelectorAll<HTMLButtonElement>('button[aria-label]')[Math.min(index, next.length - 1)] ??
-          (attachCurrent.disabled ? title : attachCurrent)
-        ).focus()
+        const nextLink = attachments.children.item(Math.min(index, next.length - 1))?.querySelector('button')
+        ;(nextLink ?? (attachCurrent.disabled || attachCurrent.hidden ? title : attachCurrent)).focus()
       })
       chip.append(open, unlink)
       rows.append(chip)
