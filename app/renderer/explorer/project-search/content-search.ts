@@ -294,7 +294,15 @@ export function createContentSearch(api: SearchApi, onSelect: (match: ContentMat
     close()
   })
   dialog.addEventListener('click', event => {
-    if (event.target === dialog) close()
+    const bounds = dialog.getBoundingClientRect()
+    if (
+      event.target === dialog &&
+      (event.clientX < bounds.left ||
+        event.clientX > bounds.right ||
+        event.clientY < bounds.top ||
+        event.clientY > bounds.bottom)
+    )
+      close()
   })
 
   return {

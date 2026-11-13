@@ -112,15 +112,18 @@ function button(label: string, icon: keyof typeof GLYPHS | null, action: () => v
   return control
 }
 function copyButton(source: string, signal: AbortSignal) {
+  let request = 0
   const control = button(
     'Copy code',
     'copy',
     () =>
       runTask('Copy code', async () => {
+        const version = ++request
         const result = await attemptAsync(() => navigator.clipboard.writeText(source), {
           operation: 'Copy code',
         })
-        if (signal.aborted) return
+        if (signal.aborted || version !== request) return
+        control.toggleAttribute('data-copied', result.ok)
         if (result.ok) {
           control.dataset.copied = 'true'
           control.title = 'Copied'
@@ -442,6 +445,7 @@ function expandDiagram(graphic: SVGSVGElement, onClose: () => void) {
   const fit = () =>
     setZoom(Math.min(1, (viewport.clientWidth - 64) / bounds.width, (viewport.clientHeight - 64) / bounds.height))
   const close = () => {
+    if (!dialog.open) return
     dialog.close()
     dialog.remove()
     URL.revokeObjectURL(url)
@@ -459,7 +463,15 @@ function expandDiagram(graphic: SVGSVGElement, onClose: () => void) {
     close()
   })
   dialog.addEventListener('click', event => {
-    if (event.target === dialog) close()
+    const rectangle = dialog.getBoundingClientRect()
+    if (
+      event.target === dialog &&
+      (event.clientX < rectangle.left ||
+        event.clientX > rectangle.right ||
+        event.clientY < rectangle.top ||
+        event.clientY > rectangle.bottom)
+    )
+      close()
   })
   dialog.showModal()
   fit()
