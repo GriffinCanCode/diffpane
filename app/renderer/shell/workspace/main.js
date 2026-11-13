@@ -317,7 +317,7 @@ const appearance = createAppearanceSettings(uiPreferences, (preferences, scheme)
   if (themeChanged) {
     activeScheme = scheme
     syntax.setTheme(editorThemeName(scheme))
-    recolorMarkdownPreviews()
+    recolorMarkdownPreviews(scheme)
   }
   for (const card of cards.values()) {
     if (card.diffEditor) {

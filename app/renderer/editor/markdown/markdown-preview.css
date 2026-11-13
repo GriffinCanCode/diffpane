@@ -3,16 +3,16 @@
   display: flex;
   gap: 2px;
   padding: 3px;
-  background: light-dark(#2436470b, #ffffff05);
-  border: 1px solid light-dark(#24364714, #ffffff0b);
+  background: var(--surface-inset);
+  border: 1px solid var(--line);
   border-radius: 6px;
 }
 .markdown-toggle button {
-  border: 0;
+  border: 1px solid transparent;
   border-radius: 3px;
   background: transparent;
-  color: light-dark(#586671, #8c9299);
-  font-size: 11px;
+  color: var(--muted);
+  font-size: var(--text-caption);
   padding: 3px 10px;
 }
 .markdown-toggle button:hover:not([aria-pressed='true']) {
@@ -20,9 +20,9 @@
   color: var(--text);
 }
 .markdown-toggle button[aria-pressed='true'] {
-  color: light-dark(#315e57, #dde8e6);
-  background: light-dark(#e6efed, #ffffff0e);
-  box-shadow: 0 1px 2px light-dark(#26374720, #0003);
+  border-color: var(--control-border);
+  color: var(--accent);
+  background: var(--selection);
 }
 .markdown-preview {
   height: 100%;
@@ -36,15 +36,16 @@
   outline: none;
 }
 .markdown-preview:focus-visible {
-  box-shadow: inset 0 0 0 1px light-dark(#276f6755, #80cbc450);
+  box-shadow: inset 0 0 0 2px var(--focus-ring);
 }
 .markdown-body {
   max-width: 860px;
   margin: 0 auto;
   padding: 42px 48px 100px;
-  font-size: 15px;
-  line-height: 1.8;
-  color: light-dark(#343f49, #c6c9ce);
+  font-family: var(--font-prose);
+  font-size: var(--text-content);
+  line-height: var(--leading-prose);
+  color: var(--text);
   overflow-wrap: anywhere;
   -webkit-user-select: text;
   user-select: text;
@@ -59,36 +60,36 @@
 .markdown-body h5,
 .markdown-body h6 {
   position: relative;
-  color: light-dark(#252b33, #edf0f3);
+  color: var(--text);
   line-height: 1.3;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   letter-spacing: -0.025em;
   margin: 2em 0 0.7em;
   scroll-margin-top: 24px;
 }
 .markdown-body h1 {
-  font-size: 32px;
-  font-weight: 650;
+  font-size: var(--text-display);
+  font-weight: var(--weight-semibold);
   letter-spacing: -0.04em;
   margin-bottom: 24px;
 }
 .markdown-body h2 {
-  font-size: 23px;
+  font-size: var(--text-heading);
   padding-bottom: 12px;
-  border-bottom: 1px solid light-dark(#24364724, #ffffff0d);
+  border-bottom: 1px solid var(--line);
 }
 .markdown-body h3 {
-  font-size: 18px;
+  font-size: var(--text-subheading);
 }
 .markdown-body h4 {
-  font-size: 16px;
+  font-size: var(--text-subheading);
 }
 .markdown-body h5,
 .markdown-body h6 {
-  font-size: 14px;
+  font-size: var(--text-content);
 }
 .markdown-body h6 {
-  color: light-dark(#576470, #9ba2ac);
+  color: var(--muted);
 }
 .markdown-body p,
 .markdown-body ul,
@@ -96,21 +97,20 @@
   margin: 0 0 1.15em;
 }
 .markdown-body strong {
-  color: light-dark(#29343e, #e1e4e8);
-  font-weight: 600;
+  color: var(--text);
+  font-weight: var(--weight-semibold);
 }
 .markdown-body a {
-  color: light-dark(#246e66, #91ccc6);
+  color: var(--accent);
   text-decoration: underline;
-  text-decoration-color: light-dark(#246e6660, #91ccc64d);
+  text-decoration-color: color-mix(in oklab, currentColor 45%, transparent);
   text-underline-offset: 4px;
 }
 .markdown-body a:hover {
-  color: light-dark(#194e49, #c2ece7);
   text-decoration-color: currentColor;
 }
 .markdown-body a:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 3px;
   border-radius: 2px;
 }
@@ -135,7 +135,7 @@
   margin: 0.35em 0;
 }
 .markdown-body li::marker {
-  color: light-dark(#547a76, #6b8583);
+  color: var(--subtle);
 }
 .markdown-body li > :last-child {
   margin-bottom: 0;
@@ -158,8 +158,8 @@
 .markdown-body blockquote {
   margin: 24px 0;
   padding: 4px 0 4px 20px;
-  border-left: 3px solid light-dark(#7fa8a3, #597975);
-  color: light-dark(#4b626b, #9ba7ad);
+  border-left: 3px solid var(--control-border);
+  color: var(--muted);
 }
 .markdown-body blockquote > :last-child {
   margin-bottom: 0;
@@ -175,50 +175,50 @@
   font-size: var(--text-content);
 }
 .md-callout[data-tone='tip'] {
+  --callout-color: var(--added);
   --callout-surface: var(--added-surface);
-  --callout-color: light-dark(#367054, #91c6a3);
 }
 .md-callout[data-tone='important'] {
+  --callout-color: var(--violet);
   --callout-surface: var(--violet-surface);
-  --callout-color: light-dark(#715495, #b4a1d9);
 }
 .md-callout[data-tone='warning'] {
+  --callout-color: var(--warning);
   --callout-surface: var(--warning-surface);
-  --callout-color: light-dark(#79571c, #d3b97c);
 }
 .md-callout[data-tone='caution'] {
+  --callout-color: var(--removed);
   --callout-surface: var(--removed-surface);
-  --callout-color: light-dark(#a2494b, #d69595);
 }
 .md-callout-label {
   color: var(--callout-color);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   text-transform: capitalize;
   margin-bottom: 6px;
 }
 .markdown-body hr {
   border: 0;
   height: 1px;
-  background: light-dark(#24364724, #ffffff12);
+  background: var(--line);
   margin: 36px 0;
 }
 .markdown-body code,
 .markdown-body pre,
 .markdown-body kbd {
-  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+  font-family: var(--editor-font, var(--font-mono));
   font-size: 0.85em;
 }
 .markdown-body :not(pre) > code {
-  color: light-dark(#844670, #dfc2df);
-  background: light-dark(#f3eef4, #ffffff07);
-  border: 1px solid light-dark(#d9ccdc, #ffffff08);
+  color: var(--violet);
+  background: var(--violet-surface);
+  border: 1px solid var(--line);
   border-radius: 4px;
   padding: 0.15em 0.4em;
   box-decoration-break: clone;
 }
 .markdown-body kbd {
   padding: 2px 6px;
-  border: 1px solid light-dark(#24364738, #ffffff20);
+  border: 1px solid var(--control-border);
   border-bottom-width: 2px;
   border-radius: 4px;
 }
@@ -241,15 +241,12 @@
   gap: 16px;
 }
 .md-block-label {
-  color: light-dark(#526471, #858f9a);
-  font:
-    11px 'SFMono-Regular',
-    Consolas,
-    monospace;
+  color: var(--muted);
+  font: var(--text-caption) var(--font-mono);
   letter-spacing: 0.02em;
 }
 .md-diagram .md-block-label {
-  color: light-dark(#3d6c67, #8eaaa7);
+  color: var(--accent);
 }
 .md-diagram .md-block-label::before {
   content: '';
@@ -275,13 +272,13 @@
   padding: 5px 7px;
   min-height: 26px;
   background: transparent;
-  color: light-dark(#566873, #8d969f);
-  font-size: 11px;
+  color: var(--muted);
+  font-size: var(--text-caption);
   line-height: 1;
 }
 .md-action:hover {
-  background: light-dark(#24364714, #ffffff0b);
-  color: light-dark(#34404a, #e1e7ec);
+  background: var(--hover);
+  color: var(--text);
 }
 .md-action[data-copied='true'] {
   background: var(--added-surface);
@@ -296,9 +293,9 @@
   padding: 18px 20px;
   line-height: 1.75;
   overflow: auto;
-  scrollbar-color: light-dark(#24364738, #ffffff20) transparent;
+  scrollbar-color: var(--scrollbar) transparent;
   tab-size: 2;
-  color: light-dark(#303841, #d4d4d4);
+  color: var(--text);
 }
 .markdown-body pre code {
   font-size: inherit;
@@ -316,16 +313,12 @@
   width: 100%;
   height: auto;
 }
-/* Mermaid supplies its own colors for nodes, lines, and labels. */
-:root[data-theme='light'] :is(.md-diagram-canvas:has(> svg), .md-diagram-viewport) {
-  background: #1c1e21;
-}
 .md-diagram-status {
-  font-size: 12px;
-  color: light-dark(#526471, #858f9a);
+  font-size: var(--text-label);
+  color: var(--muted);
 }
 .md-diagram-error .md-diagram-status {
-  color: light-dark(#79571c, #d3b97c);
+  color: var(--warning);
 }
 .md-render-scratch {
   position: fixed;
@@ -338,26 +331,26 @@
   max-width: 100%;
   overflow: auto;
   margin: 24px 0;
-  border: 1px solid light-dark(#dce3e9, #ffffff10);
+  border: 1px solid var(--line);
   border-radius: 8px;
-  scrollbar-color: light-dark(#24364738, #ffffff20) transparent;
+  scrollbar-color: var(--scrollbar) transparent;
 }
 .markdown-body table {
   border-collapse: collapse;
   width: 100%;
-  font-size: 13px;
+  font-size: var(--text-body);
   line-height: 1.6;
 }
 .markdown-body th {
   text-align: left;
-  background: light-dark(#eff3f6, #ffffff04);
-  color: light-dark(#333f49, #dce1e5);
-  font-weight: 550;
+  background: var(--surface-raised);
+  color: var(--text);
+  font-weight: var(--weight-medium);
 }
 .markdown-body th,
 .markdown-body td {
   padding: 11px 16px;
-  border-bottom: 1px solid light-dark(#dce3e9, #ffffff0c);
+  border-bottom: 1px solid var(--line);
 }
 .md-table-cell {
   /* Give short labels their natural width while letting long values wrap. */
@@ -367,7 +360,7 @@
   border-bottom: 0;
 }
 .markdown-body tbody tr:hover {
-  background: light-dark(#24364706, #ffffff02);
+  background: var(--hover);
 }
 .markdown-body img {
   display: block;
@@ -378,19 +371,19 @@
 }
 .markdown-body .md-image-missing {
   min-height: 40px;
-  color: light-dark(#526471, #858f9a);
-  border: 1px dashed light-dark(#24364738, #ffffff20);
+  color: var(--muted);
+  border: 1px dashed var(--control-border);
   padding: 12px;
-  font-size: 12px;
+  font-size: var(--text-label);
 }
 .markdown-body details {
-  border: 1px solid light-dark(#24364724, #ffffff12);
+  border: 1px solid var(--line);
   padding: 12px 16px;
   border-radius: 8px;
   margin: 24px 0;
 }
 .markdown-body summary {
-  color: light-dark(#333f49, #dce1e5);
+  color: var(--text);
   cursor: pointer;
 }
 .markdown-body details[open] summary {
@@ -402,11 +395,11 @@
   height: 90vh;
   max-width: 94vw;
   max-height: 90vh;
-  border: 1px solid light-dark(#24364738, #ffffff20);
+  border: 1px solid var(--control-border);
   border-radius: 12px;
-  background: light-dark(#f5f7f9, #1c1e21);
-  color: light-dark(#303841, #d4d4d4);
-  box-shadow: 0 24px 100px light-dark(#26374744, #0008);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 24px 100px var(--shadow);
   overflow: hidden;
 }
 .md-diagram-dialog[open] {
@@ -414,7 +407,7 @@
   flex-direction: column;
 }
 .md-diagram-dialog::backdrop {
-  background: light-dark(#26374765, #080b10b3);
+  background: var(--backdrop);
   backdrop-filter: blur(5px);
 }
 .md-diagram-dialog .md-block-toolbar {
@@ -435,13 +428,6 @@
 @container (max-width: 660px) {
   .markdown-body {
     padding: 28px 24px 64px;
-    font-size: 14px;
-  }
-  .markdown-body h1 {
-    font-size: 27px;
-  }
-  .markdown-body h2 {
-    font-size: 21px;
   }
   .md-diagram-canvas {
     padding: 20px 12px;

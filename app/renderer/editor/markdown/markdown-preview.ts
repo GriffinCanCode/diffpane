@@ -1,5 +1,8 @@
 import DOMPurify from 'dompurify'
 import { marked } from 'marked'
+import type { Mermaid } from 'mermaid'
+import { colorHex } from '../../../shared/appearance/palette.ts'
+import type { ColorRole, ColorScheme } from '../../../shared/appearance/palette.ts'
 import { appError, attemptAsync } from '../../../shared/recovery/app-errors.ts'
 import { reportError, runTask } from '../../shell/recovery/errors.ts'
 import { requireElement } from '../../shell/workspace/dom.js'
@@ -19,76 +22,85 @@ interface MarkdownOptions {
 }
 
 let diagramId = 0
-let mermaidRuntime:
-  | Promise<{
-      render: (id: string, text: string, container: HTMLElement) => Promise<{ svg: string }>
-    }>
-  | undefined
+let mermaidRuntime: Promise<Mermaid> | undefined
+let mermaidScheme: ColorScheme | undefined
+let activeScheme: ColorScheme = 'dark'
 let diagramQueue = Promise.resolve()
-const MOUNTED_CODE_PREVIEWS = new Set<() => void>()
+const mountedPreviews = new Set<() => void>()
 
-export function recolorMarkdownPreviews() {
-  for (const recolor of MOUNTED_CODE_PREVIEWS) recolor()
+export function recolorMarkdownPreviews(scheme: ColorScheme) {
+  activeScheme = scheme
+  for (const recolor of mountedPreviews) recolor()
 }
 
 function loadMermaid() {
   return (mermaidRuntime ??= import('mermaid')
-    .then(({ default: mermaid }) => {
-      mermaid.initialize({
-        startOnLoad: false,
-        securityLevel: 'strict',
-        secure: [
-          'secure',
-          'securityLevel',
-          'startOnLoad',
-          'maxTextSize',
-          'maxEdges',
-          'suppressErrorRendering',
-          'dompurifyConfig',
-          'themeCSS',
-        ],
-        suppressErrorRendering: true,
-        theme: 'base',
-        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-        fontSize: 14,
-        flowchart: { htmlLabels: false, curve: 'basis', padding: 18 },
-        sequence: { useMaxWidth: true, actorMargin: 48, messageMargin: 36 },
-        themeVariables: {
-          darkMode: true,
-          background: '#1c1e21',
-          primaryColor: '#283c3c',
-          primaryTextColor: '#e2e8e8',
-          primaryBorderColor: '#517673',
-          secondaryColor: '#303047',
-          tertiaryColor: '#24272c',
-          lineColor: '#86aaa7',
-          textColor: '#d5dadd',
-          mainBkg: '#283c3c',
-          nodeBorder: '#517673',
-          clusterBkg: '#202629',
-          clusterBorder: '#414b50',
-          edgeLabelBackground: '#1c1e21',
-          actorBkg: '#283c3c',
-          actorBorder: '#517673',
-          actorTextColor: '#e2e8e8',
-          actorLineColor: '#4f5c63',
-          signalColor: '#a8c5c2',
-          signalTextColor: '#d5dadd',
-          labelBoxBkgColor: '#24272c',
-          labelBoxBorderColor: '#414b50',
-          labelTextColor: '#d5dadd',
-          loopTextColor: '#d5dadd',
-          noteBkgColor: '#33312b',
-          noteBorderColor: '#726849',
-          noteTextColor: '#e1d9bd',
-        },
-      })
-      return mermaid
-    })
+    .then(({ default: mermaid }) => mermaid)
     .catch((cause: unknown) => {
       mermaidRuntime = undefined
       throw appError(cause, { operation: 'Load Mermaid' })
     }))
+}
+
+function configureMermaid(mermaid: Mermaid, scheme: ColorScheme) {
+  if (mermaidScheme === scheme) return
+  const color = (role: ColorRole) => colorHex(scheme, role)
+  mermaid.initialize({
+    startOnLoad: false,
+    securityLevel: 'strict',
+    secure: [
+      'secure',
+      'securityLevel',
+      'startOnLoad',
+      'maxTextSize',
+      'maxEdges',
+      'suppressErrorRendering',
+      'dompurifyConfig',
+      'themeCSS',
+    ],
+    suppressErrorRendering: true,
+    theme: 'base',
+    fontFamily: getComputedStyle(document.documentElement).fontFamily,
+    fontSize: 14,
+    flowchart: { htmlLabels: false, curve: 'basis', padding: 18 },
+    sequence: { useMaxWidth: true, actorMargin: 48, messageMargin: 36 },
+    themeVariables: {
+      darkMode: scheme === 'dark',
+      dropShadow: 'none',
+      nodeShadow: false,
+      background: color('workbenchBackground'),
+      primaryColor: color('accentSurface'),
+      primaryTextColor: color('text'),
+      primaryBorderColor: color('focusRing'),
+      secondaryColor: color('violetSurface'),
+      secondaryTextColor: color('text'),
+      secondaryBorderColor: color('violet'),
+      tertiaryColor: color('surfaceRaised'),
+      tertiaryTextColor: color('text'),
+      tertiaryBorderColor: color('controlBorder'),
+      lineColor: color('subtle'),
+      textColor: color('text'),
+      mainBkg: color('accentSurface'),
+      nodeBorder: color('focusRing'),
+      clusterBkg: color('surface'),
+      clusterBorder: color('controlBorder'),
+      edgeLabelBackground: color('surface'),
+      actorBkg: color('accentSurface'),
+      actorBorder: color('focusRing'),
+      actorTextColor: color('text'),
+      actorLineColor: color('controlBorder'),
+      signalColor: color('subtle'),
+      signalTextColor: color('text'),
+      labelBoxBkgColor: color('surfaceRaised'),
+      labelBoxBorderColor: color('controlBorder'),
+      labelTextColor: color('text'),
+      loopTextColor: color('text'),
+      noteBkgColor: color('warningSurface'),
+      noteBorderColor: color('warningEdge'),
+      noteTextColor: color('warning'),
+    },
+  })
+  mermaidScheme = scheme
 }
 
 function node<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text?: string | null) {
@@ -143,11 +155,13 @@ function copyButton(source: string, signal: AbortSignal) {
 export function showMarkdownPreview(host: ParentNode, source: string, options: MarkdownOptions) {
   const lifetime = new AbortController()
   const events = { signal: lifetime.signal }
-  let expanded: (() => void) | null = null
+  let expanded: ReturnType<typeof expandDiagram> | null = null
   const diagrams: HTMLElement[] = []
+  const diagramRenders: Array<() => void> = []
   const codeBlocks: { code: HTMLElement; text: string; language: string }[] = []
   let colorizeVersion = 0
   function recolor() {
+    for (const render of diagramRenders) render()
     const { colorize } = options
     if (!colorize) return
     const version = ++colorizeVersion
@@ -181,10 +195,8 @@ export function showMarkdownPreview(host: ParentNode, source: string, options: M
     metadata.append(node('summary', '', 'Document metadata'), pre)
     article.append(metadata)
   }
-  root.append(article)
-  host.replaceChildren(root)
-
   const headings = new Map<string, HTMLElement>()
+  const nextHeadingSuffix = new Map<string, number>()
   for (const heading of article.querySelectorAll<HTMLHeadingElement>('h1, h2, h3, h4, h5, h6')) {
     const base =
       heading.textContent
@@ -193,7 +205,12 @@ export function showMarkdownPreview(host: ParentNode, source: string, options: M
         .trim()
         .replace(/\s/g, '-') || 'section'
     let id = base
-    for (let suffix = 1; headings.has(id); suffix++) id = `${base}-${suffix}`
+    if (headings.has(id)) {
+      let suffix = nextHeadingSuffix.get(base) ?? 1
+      do id = `${base}-${suffix++}`
+      while (headings.has(id))
+      nextHeadingSuffix.set(base, suffix)
+    }
     heading.id = id
     headings.set(id, heading)
     const anchor = node('a', 'md-heading-anchor', '#')
@@ -321,59 +338,83 @@ export function showMarkdownPreview(host: ParentNode, source: string, options: M
       'Source',
       null,
       () => {
-        pre.hidden = !pre.hidden
-        canvas.hidden = !pre.hidden
-        sourceToggle.textContent = pre.hidden ? 'Source' : 'Diagram'
-        sourceToggle.setAttribute('aria-label', sourceToggle.textContent)
-        sourceToggle.title = sourceToggle.textContent
-        sourceToggle.setAttribute('aria-pressed', String(!pre.hidden))
+        diagramLayout(() => {
+          pre.hidden = !pre.hidden
+          canvas.hidden = !pre.hidden
+          sourceToggle.textContent = pre.hidden ? 'Source' : 'Diagram'
+          sourceToggle.setAttribute('aria-label', sourceToggle.textContent)
+          sourceToggle.title = sourceToggle.textContent
+          sourceToggle.setAttribute('aria-pressed', String(!pre.hidden))
+        })
       },
       lifetime.signal,
     )
     sourceToggle.setAttribute('aria-pressed', 'false')
     actions.prepend(sourceToggle)
+    let renderVersion = 0
+    let graphic: SVGSVGElement | undefined
+    let expandedHere: ReturnType<typeof expandDiagram> | null = null
+    const expand = button(
+      'Expand diagram',
+      'expand',
+      () => {
+        if (!graphic) return
+        expanded?.close()
+        expandedHere = expanded = expandDiagram(graphic, () => {
+          expandedHere = expanded = null
+        })
+      },
+      lifetime.signal,
+    )
+    expand.hidden = true
+    actions.insertBefore(expand, actions.lastChild)
     // Mermaid serializes its render calls. Keep obsolete previews out of that
     // queue so a file switch only waits for the diagram already rendering.
-    diagramQueue = diagramQueue.then(renderDiagram).catch((cause: unknown) => {
-      reportError(cause, { operation: 'Render Mermaid diagram', silent: true })
+    diagramRenders.push(() => {
+      const version = ++renderVersion
+      diagramQueue = diagramQueue
+        .then(() => renderDiagram(version))
+        .catch((cause: unknown) => {
+          reportError(cause, { operation: 'Render Mermaid diagram', silent: true })
+        })
     })
 
-    async function renderDiagram() {
-      if (lifetime.signal.aborted) return
+    async function renderDiagram(version: number) {
+      const stale = () => lifetime.signal.aborted || version !== renderVersion
+      if (stale()) return
       const scratch = node('div', 'md-render-scratch')
       try {
         const mermaid = await loadMermaid()
-        if (lifetime.signal.aborted) return
+        if (stale()) return
+        configureMermaid(mermaid, activeScheme)
         document.body.append(scratch)
         const { svg } = await mermaid.render(`md-diagram-${++diagramId}`, text, scratch)
-        if (lifetime.signal.aborted) return
+        if (stale()) return
         diagramLayout(() => {
+          const recovering = block.classList.contains('md-diagram-error')
+          block.classList.remove('md-diagram-error')
+          sourceToggle.hidden = false
+          if (recovering) {
+            canvas.hidden = sourceToggle.getAttribute('aria-pressed') === 'true'
+            pre.hidden = !canvas.hidden
+          }
           canvas.innerHTML = svg
-          const graphic = requireElement(canvas, 'svg', SVGSVGElement)
+          graphic = requireElement(canvas, 'svg', SVGSVGElement)
           graphic.setAttribute('role', 'img')
           if (!graphic.querySelector('title')) graphic.setAttribute('aria-label', 'Mermaid diagram')
           // Fit wide diagrams in the reading column. Expansion restores their natural dimensions.
           graphic.removeAttribute('height')
           graphic.removeAttribute('width')
           canvas.style.minHeight = ''
-          actions.insertBefore(
-            button(
-              'Expand diagram',
-              'expand',
-              () => {
-                expanded?.()
-                expanded = expandDiagram(graphic, () => {
-                  expanded = null
-                })
-              },
-              lifetime.signal,
-            ),
-            actions.lastChild,
-          )
+          expand.hidden = false
+          expandedHere?.replaceGraphic(graphic)
         })
       } catch (error) {
-        if (!lifetime.signal.aborted) {
+        if (!stale()) {
           diagramLayout(() => {
+            expandedHere?.close()
+            graphic = undefined
+            expand.hidden = true
             status.removeAttribute('data-loading-status')
             status.textContent = 'This diagram could not be rendered. Check its Mermaid syntax.'
             const failure = appError(error)
@@ -393,8 +434,10 @@ export function showMarkdownPreview(host: ParentNode, source: string, options: M
       }
     }
   }
-  if (codeBlocks.length) {
-    MOUNTED_CODE_PREVIEWS.add(recolor)
+  root.append(article)
+  host.replaceChildren(root)
+  if (codeBlocks.length || diagramRenders.length) {
+    mountedPreviews.add(recolor)
     recolor()
   }
   root.scrollTop = options.scrollTop ?? 0
@@ -402,7 +445,7 @@ export function showMarkdownPreview(host: ParentNode, source: string, options: M
   return () => {
     if (lifetime.signal.aborted) return
     lifetime.abort()
-    MOUNTED_CODE_PREVIEWS.delete(recolor)
+    mountedPreviews.delete(recolor)
     try {
       options.onScroll?.(root.scrollTop)
       if (options.diagramHeights)
@@ -413,7 +456,7 @@ export function showMarkdownPreview(host: ParentNode, source: string, options: M
         )
     } finally {
       root.remove()
-      expanded?.()
+      expanded?.close()
     }
   }
 }
@@ -429,12 +472,11 @@ function expandDiagram(graphic: SVGSVGElement, onClose: () => void) {
   const viewport = node('div', 'md-diagram-viewport')
   const image = node('img', 'md-expanded-image')
   image.alt = 'Expanded Mermaid diagram'
-  const url = URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(graphic)], { type: 'image/svg+xml' }))
-  image.src = url
+  let url: string | undefined
   viewport.append(image)
   dialog.append(toolbar, viewport)
   document.body.append(dialog)
-  const bounds = graphic.viewBox.baseVal
+  let bounds = graphic.viewBox.baseVal
   let zoom = 1
   const setZoom = (value: number) => {
     if (!Number.isFinite(value)) return
@@ -448,7 +490,7 @@ function expandDiagram(graphic: SVGSVGElement, onClose: () => void) {
     if (!dialog.open) return
     dialog.close()
     dialog.remove()
-    URL.revokeObjectURL(url)
+    if (url) URL.revokeObjectURL(url)
     onClose()
     if (previous instanceof HTMLElement && previous.isConnected) previous.focus()
   }
@@ -474,6 +516,14 @@ function expandDiagram(graphic: SVGSVGElement, onClose: () => void) {
       close()
   })
   dialog.showModal()
+  function replaceGraphic(next: SVGSVGElement) {
+    if (url) URL.revokeObjectURL(url)
+    url = URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(next)], { type: 'image/svg+xml' }))
+    image.src = url
+    bounds = next.viewBox.baseVal
+    setZoom(zoom)
+  }
+  replaceGraphic(graphic)
   fit()
-  return close
+  return { close, replaceGraphic }
 }
