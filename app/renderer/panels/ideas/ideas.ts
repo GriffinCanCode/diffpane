@@ -607,7 +607,6 @@ export function mountIdeaBuilder(host: HTMLElement, options: IdeaBuilderOptions)
   }
 
   function newIdea(link?: IdeaLink) {
-    if (!ready || readOnly) return
     const now = Date.now()
     const id = crypto.randomUUID()
     const idea = {
@@ -626,8 +625,10 @@ export function mountIdeaBuilder(host: HTMLElement, options: IdeaBuilderOptions)
     update(idea)
     renderDetail()
     stage.scrollTop = 0
-    title.focus()
-    if (link) title.select()
+    if (!readOnly) {
+      title.focus()
+      if (link) title.select()
+    }
   }
 
   function attach(link: IdeaLink) {
@@ -882,8 +883,11 @@ export function mountIdeaBuilder(host: HTMLElement, options: IdeaBuilderOptions)
     return true
   }
 
-  add.addEventListener('click', () => newIdea(), events)
-  addFirst.addEventListener('click', () => newIdea(), events)
+  const addIdea = () => {
+    if (ready && !readOnly) newIdea()
+  }
+  add.addEventListener('click', addIdea, events)
+  addFirst.addEventListener('click', addIdea, events)
   showIndex.addEventListener(
     'click',
     () => {
