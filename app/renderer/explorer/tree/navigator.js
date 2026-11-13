@@ -3,7 +3,7 @@ import { IDEA_FILE_DRAG_TYPE } from '../../../shared/ideas/ideas.ts'
 import { attemptAsync } from '../../../shared/recovery/app-errors.ts'
 import { reportError, runTask } from '../../shell/recovery/errors.ts'
 import { requireElement } from '../../shell/workspace/dom.js'
-import { createSearchFilters, hasFilters, matchesFilters } from '../project-search/search-filters.ts'
+import { createSearchFilters, filterPredicate, hasFilters } from '../project-search/search-filters.ts'
 import { createFileActions } from './file-actions.ts'
 import { applyNavigationDelta, reconcileNavigationTree } from './navigation-reconcile.ts'
 
@@ -100,15 +100,29 @@ export function buildNavigationTree(inventory, basePath = '') {
 export function flattenNavigationTree(tree, expanded, query = '', filters, languageFor) {
   if (query || (filters && hasFilters(filters))) {
     const needle = query.toLocaleLowerCase()
-    tree.searchFiles ??= [...tree.files.values()].toSorted((a, b) => COLLATOR.compare(a.path, b.path))
-    return tree.searchFiles
-      .concat([...tree.nodes.values()].filter(node => node.kind === 'directory' && node !== tree.root))
-      .filter(
-        node =>
-          (!needle || (node.searchPath ??= node.path.toLocaleLowerCase()).includes(needle)) &&
-          (!filters || matchesFilters({ path: node.path, directory: node.kind === 'directory' }, filters, languageFor)),
-      )
-      .map(node => ({ node, depth: 1 }))
+    const matches = filters && filterPredicate(filters, languageFor)
+    /** @type {NavigationRow[]} */
+    const results = []
+    /** @param {NavigationNode[]} nodes @param {boolean} directory */
+    const scan = (nodes, directory) => {
+      for (const node of nodes) {
+        const folded = (node.searchPath ??= node.path.toLocaleLowerCase())
+        if (needle && !folded.includes(needle)) continue
+        if (!matches || matches({ path: node.path, directory }, folded)) results.push({ node, depth: 1 })
+      }
+    }
+    if (filters?.kind !== 'folders') {
+      if (!tree.searchFiles) {
+        tree.searchFiles = [...tree.files.values()]
+        tree.searchFiles.sort((a, b) => COLLATOR.compare(a.path, b.path))
+      }
+      scan(tree.searchFiles, false)
+    }
+    if (filters?.kind !== 'files' && !filters?.language && !filters?.extension) {
+      tree.searchDirectories ??= [...tree.nodes.values()].filter(node => node.children && node !== tree.root)
+      scan(tree.searchDirectories, true)
+    }
+    return results
   }
   /** @type {NavigationRow[]} */
   const visible = []
@@ -145,6 +159,19 @@ function scopePrefix(snapshot) {
   return scope.startsWith(`${root}/`) ? scope.slice(root.length + 1) : ''
 }
 
+/** @param {HTMLElement} label @param {string} text @param {number} offset @param {RegExpExecArray | null} match */
+function renderSearchText(label, text, offset, match) {
+  const start = match ? Math.max(0, match.index - offset) : text.length
+  const end = match ? Math.min(text.length, match.index + match[0].length - offset) : 0
+  if (end <= start) {
+    if (label.firstElementChild || label.textContent !== text) label.textContent = text
+    return
+  }
+  const mark = document.createElement('mark')
+  mark.textContent = text.slice(start, end)
+  label.replaceChildren(text.slice(0, start), mark, text.slice(end))
+}
+
 /**
  * @param {HTMLElement} container
  * @param {NavigatorApi} api
@@ -175,7 +202,9 @@ export function createNavigator(
   container.dataset.searching = 'false'
   container.innerHTML = `
     <div class="navigator-heading">
-      <button type="button" class="navigator-root" data-action="root" aria-expanded="true"><span class="navigator-chevron" aria-hidden="true"></span><span class="navigator-project">Project</span></button>
+      <button type="button" class="navigator-root" data-action="root" aria-expanded="true">
+        <span class="navigator-chevron" aria-hidden="true"></span><span class="navigator-project">Project</span>
+      </button>
       <div class="navigator-actions">
         <button type="button" class="navigator-action" data-action="open-file" aria-label="Search files" title="Search files">${ICONS.openFile}</button>
         <button type="button" class="navigator-action" data-action="open-folder" aria-label="Open folder" title="Open folder">${ICONS.openFolder}</button>
@@ -183,7 +212,10 @@ export function createNavigator(
         <button type="button" class="navigator-action" data-action="collapse" aria-label="Collapse folders" title="Collapse folders">${ICONS.collapse}</button>
       </div>
     </div>
-    <div class="navigator-search">${ICONS.search}<input type="search" placeholder="Find files or folders…" aria-label="Find files or folders in explorer" spellcheck="false" autocomplete="off"></div>
+    <div class="navigator-search">
+      ${ICONS.search}
+      <input type="search" placeholder="Find files or folders…" aria-label="Find files or folders in explorer" spellcheck="false" autocomplete="off">
+    </div>
     <div class="navigator-filter-host"></div>
     <div class="navigator-summary" role="status">Reading files…</div>
     <div class="navigator-tree" role="tree" aria-label="Project files" tabindex="0"><div class="navigator-rows"></div></div>
@@ -214,8 +246,6 @@ export function createNavigator(
   let snapshot = null
   /** @type {string | null} */
   let key = null
-  /** @type {Set<string> | null} */
-  let signature = null
   /** @type {number | undefined} */
   let inventoryRevision
   /** @type {number | null} */
@@ -236,11 +266,17 @@ export function createNavigator(
   /** @type {number | null} */
   let frame = null
   let query = ''
+  /** @type {RegExp | null} */
+  let queryPattern = null
   let catalogRequests = 0
+  let rowRevision = 0
   /** @type {Map<string, HTMLDivElement>} */
   const mounted = new Map()
+  /** @type {WeakMap<HTMLDivElement, number>} */
+  const rowRevisions = new WeakMap()
   const filters = createSearchFilters(
     requireElement(container, '.navigator-filter-host', HTMLDivElement),
+    `navigator-${id}-search-filters`,
     onSearch,
     languageFor,
   )
@@ -271,21 +307,30 @@ export function createNavigator(
   }
 
   function refreshProjection(preserve = true) {
+    rowRevision++
     const index = Math.floor(list.scrollTop / ROW_HEIGHT)
     const anchor = preserve ? visible[index]?.node.key : null
     const offset = list.scrollTop % ROW_HEIGHT
     visible = flattenNavigationTree(tree, expanded, query, filters.value(), languageFor)
     if (!searching()) visible.shift()
     container.dataset.searching = String(searching() || document.activeElement === input)
-    visibleIndex = new Map(visible.map((row, position) => [row.node.key, position]))
+    visibleIndex = new Map()
+    for (let position = 0; position < visible.length; position++) {
+      const item = visible[position]
+      if (item) visibleIndex.set(item.node.key, position)
+    }
     rootButton.setAttribute('aria-expanded', String(expanded.has(tree.root.path)))
     if (activeKey === null || !visibleIndex.has(activeKey)) activeKey = visible[0]?.node.key ?? null
     if (anchor) {
       const next = visibleIndex.get(anchor)
       if (next !== undefined) list.scrollTop = next * ROW_HEIGHT + offset
     }
+    delete summary.dataset.state
+    summary.removeAttribute('title')
     if (searching())
-      summary.textContent = `${visible.length.toLocaleString()} matching ${visible.length === 1 ? 'item' : 'items'}`
+      summary.textContent = visible.length
+        ? `${visible.length.toLocaleString()} matching ${visible.length === 1 ? 'item' : 'items'}`
+        : 'No matching files or folders'
     else
       summary.textContent = loading
         ? 'Reading files…'
@@ -298,8 +343,10 @@ export function createNavigator(
   function render() {
     if (disposed || container.hidden) return
     const height = list.clientHeight || 400
-    const start = Math.max(0, Math.floor(list.scrollTop / ROW_HEIGHT) - OVERSCAN)
-    const end = Math.min(visible.length, Math.ceil((list.scrollTop + height) / ROW_HEIGHT) + OVERSCAN)
+    const scrollTop = list.scrollTop
+    const start = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN)
+    const end = Math.min(visible.length, Math.ceil((scrollTop + height) / ROW_HEIGHT) + OVERSCAN)
+    const showingResults = searching()
     const retained = new Set()
     let activeId = null
     for (let index = start; index < end; index++) {
@@ -312,23 +359,28 @@ export function createNavigator(
         row = document.createElement('div')
         row.className = 'navigator-row'
         row.setAttribute('role', 'treeitem')
+        row.dataset.key = node.key
+        row.dataset.path = node.path
+        row.dataset.kind = node.kind
+        row.draggable = Boolean(onAttach && node.kind === 'file')
         row.innerHTML =
           '<span class="navigator-chevron" aria-hidden="true"></span><span class="navigator-icon"></span><span class="navigator-name"></span><span class="navigator-directory"></span><span class="navigator-badge"></span>'
         mounted.set(node.key, row)
         rows.appendChild(row)
       }
+      const active = node.key === activeKey
+      if (active) activeId = `navigator-${id}-row-${index}`
+      const activeState = String(active)
+      if (row.dataset.active !== activeState) row.dataset.active = activeState
+      const selected = String(node.kind === 'file' && node.path === selectedPath)
+      if (row.getAttribute('aria-selected') !== selected) row.setAttribute('aria-selected', selected)
+      if (rowRevisions.get(row) === rowRevision) continue
+      rowRevisions.set(row, rowRevision)
       row.id = `navigator-${id}-row-${index}`
-      row.dataset.key = node.key
-      row.dataset.path = node.path
-      row.dataset.kind = node.kind
-      row.draggable = Boolean(onAttach && node.kind === 'file')
-      row.dataset.active = String(node.key === activeKey)
       row.style.top = `${index * ROW_HEIGHT}px`
       row.style.paddingLeft = `${8 + depth * 12}px`
       row.setAttribute('aria-level', String(depth + 1))
-      row.setAttribute('aria-selected', String(node.kind === 'file' && node.path === selectedPath))
       if (node.kind === 'directory') row.setAttribute('aria-expanded', String(expanded.has(node.path)))
-      else row.removeAttribute('aria-expanded')
       const file = changes.get(node.path) ?? node.file
       const status = node.kind === 'file' ? navigationStatus(file) : ''
       row.dataset.status = status
@@ -345,11 +397,11 @@ export function createNavigator(
         icon.replaceChildren(image)
         icon.dataset.glyph = glyph
       }
-      requireElement(row, '.navigator-name', HTMLSpanElement).textContent =
-        node.name || lastPathSegment(snapshot?.scope) || lastPathSegment(snapshot?.root) || 'Project'
-      requireElement(row, '.navigator-directory', HTMLSpanElement).textContent = searching()
-        ? node.path.slice(0, node.path.lastIndexOf('/') + 1)
-        : ''
+      const name = node.name || lastPathSegment(snapshot?.scope) || lastPathSegment(snapshot?.root) || 'Project'
+      const directory = showingResults ? node.path.slice(0, node.path.lastIndexOf('/') + 1) : ''
+      const match = query && queryPattern ? queryPattern.exec(node.path) : null
+      renderSearchText(requireElement(row, '.navigator-name', HTMLSpanElement), name, directory.length, match)
+      renderSearchText(requireElement(row, '.navigator-directory', HTMLSpanElement), directory, 0, match)
       const badge = requireElement(row, '.navigator-badge', HTMLSpanElement)
       badge.textContent = node.kind === 'directory' ? (node.changedCount ? '●' : '') : status
       badge.title =
@@ -360,7 +412,6 @@ export function createNavigator(
             : status
               ? `Git status: ${status}`
               : ''
-      if (node.key === activeKey) activeId = row.id
     }
     for (const [pathname, row] of mounted) {
       if (!retained.has(pathname)) {
@@ -368,8 +419,10 @@ export function createNavigator(
         mounted.delete(pathname)
       }
     }
-    if (activeId) list.setAttribute('aria-activedescendant', activeId)
-    else list.removeAttribute('aria-activedescendant')
+    if (list.getAttribute('aria-activedescendant') !== activeId) {
+      if (activeId) list.setAttribute('aria-activedescendant', activeId)
+      else list.removeAttribute('aria-activedescendant')
+    }
   }
 
   function markChanges() {
@@ -390,18 +443,24 @@ export function createNavigator(
     const folder = tree.nodes.get(`dir:${pathname}`)
     const node = directory ? folder : (tree.files.get(pathname) ?? folder)
     if (!node) return false
+    let projectionChanged = false
     let parent = node.parentKey === null ? undefined : tree.nodes.get(node.parentKey)
     while (parent) {
+      if (!expanded.has(parent.path)) projectionChanged = true
       expanded.add(parent.path)
       parent = parent.parentKey === null ? undefined : tree.nodes.get(parent.parentKey)
     }
-    if (!filters.matches({ path: node.path, directory: node.kind === 'directory' })) filters.reset()
+    if (!filters.matches({ path: node.path, directory: node.kind === 'directory' })) {
+      filters.reset()
+      projectionChanged = true
+    }
     if (query && !pathname.toLocaleLowerCase().includes(query)) {
       input.value = ''
       query = ''
+      projectionChanged = true
     }
     activeKey = node.key
-    refreshProjection()
+    if (projectionChanged || !visibleIndex.has(node.key)) refreshProjection()
     scrollToActive()
     if (focus) list.focus()
     return true
@@ -455,14 +514,19 @@ export function createNavigator(
           }
           // Publish each completed scan even when edits have already queued another one.
           if (prior.root.path !== tree.root.path) expanded = new Set([tree.root.path])
-          filters.update([...tree.files.values()].flatMap(node => (node.file ? [node.file] : [])))
+          filters.update(() => tree.files.values())
           markChanges()
           if (generation === wanted) loading = false
           refreshProjection()
           revealSelection()
         } else {
           reportError(result.error, { silent: true })
-          if (generation === wanted) summary.textContent = result.error.message
+          if (generation === wanted) {
+            summary.dataset.state = 'error'
+            summary.title = result.error.message
+            summary.textContent = 'Couldn’t read files'
+            container.dataset.searching = 'true'
+          }
         }
         reportInitialScan(result.ok)
       }
@@ -494,12 +558,14 @@ export function createNavigator(
   function update(next) {
     if (disposed || !next || !('root' in next)) return
     const nextKey = `${next.root}\0${next.scope ?? next.root}`
-    const nextSignature = new Set(next.files.map(file => file.path))
-    const previousSignature = signature
-    const different =
-      !previousSignature ||
-      previousSignature.size !== nextSignature.size ||
-      [...nextSignature].some(pathname => !previousSignature.has(pathname))
+    /** @type {Map<string, NavigationFile>} */
+    const nextChanges = new Map()
+    let newPath = false
+    for (const file of next.files) {
+      nextChanges.set(file.path, file)
+      if (!changes.has(file.path)) newPath = true
+    }
+    const different = newPath || changes.size !== nextChanges.size
     const changedRoot = key !== nextKey
     const fresh = next.revision !== snapshot?.revision
     const refresh =
@@ -512,11 +578,11 @@ export function createNavigator(
               pathname => pathname === '*' || (!tree.files.has(pathname) && !tree.nodes.has(`dir:${pathname}`)),
             ) === true))
     snapshot = next
+    rowRevision++
     const titlePath = next.scope?.length ? next.scope : next.root
     project.textContent = lastPathSegment(titlePath) || 'Project'
     rootButton.title = titlePath
-    changes = new Map(next.files.map(file => [file.path, file]))
-    signature = nextSignature
+    changes = nextChanges
     inventoryRevision = next.inventoryRevision
     key = nextKey
     if (changedRoot) {
@@ -668,18 +734,20 @@ export function createNavigator(
   }
 
   function onSearch() {
-    query = input.value.toLocaleLowerCase()
+    query = input.value.trim().toLocaleLowerCase()
+    queryPattern = query ? new RegExp(query.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'), 'iu') : null
     list.scrollTop = 0
     refreshProjection(false)
   }
 
   function onSearchBlur() {
-    if (!searching()) container.dataset.searching = 'false'
+    if (!searching() && summary.dataset.state !== 'error') container.dataset.searching = 'false'
   }
 
   /** @param {KeyboardEvent} event */
   function onSearchKey(event) {
-    if (event.key === 'ArrowDown') {
+    if (event.isComposing || event.metaKey || event.ctrlKey || event.altKey) return
+    if (event.key === 'ArrowDown' && visible.length) {
       event.preventDefault()
       activeKey = visible[0]?.node.key ?? null
       scrollToActive()

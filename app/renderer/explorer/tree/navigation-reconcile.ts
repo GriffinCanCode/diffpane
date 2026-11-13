@@ -27,6 +27,7 @@ export interface NavigationTree {
   files: Map<string, NavigationNode>
   directories: Map<string, NavigationNode>
   searchFiles?: NavigationNode[]
+  searchDirectories?: NavigationNode[]
   inventoryEpoch?: number
 }
 const COLLATOR = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
@@ -79,6 +80,7 @@ function insert(tree: NavigationTree, file: NavigationFile, touched: Set<Navigat
       }
       if (!parent.children) throw new Error(`Expected a navigation directory at ${parent.path}`)
       tree.nodes.set(key, child)
+      if (directory) tree.searchDirectories = undefined
       parent.children.push(child)
       touched.add(parent)
       if (!directory) tree.files.set(pathname, child)
@@ -87,7 +89,7 @@ function insert(tree: NavigationTree, file: NavigationFile, touched: Set<Navigat
   }
   parent.file = file
   if (file.directory) tree.directories.set(file.path, parent)
-  tree.searchFiles = undefined
+  if (!file.directory) tree.searchFiles = undefined
   return parent
 }
 
@@ -95,6 +97,7 @@ function remove(tree: NavigationTree, node: NavigationNode, touched: Set<Navigat
   if (node.kind === 'file') {
     tree.files.delete(node.path)
     tree.nodes.delete(node.key)
+    tree.searchFiles = undefined
   } else {
     tree.directories.delete(node.path)
     node.file = null
@@ -102,24 +105,35 @@ function remove(tree: NavigationTree, node: NavigationNode, touched: Set<Navigat
   }
   const parent = node.parentKey === null ? undefined : tree.nodes.get(node.parentKey)
   if (parent) touched.add(parent)
-  tree.searchFiles = undefined
 }
 
 function finish(tree: NavigationTree, touched: Set<NavigationNode>) {
-  // Filter each child array once, including when an entire large folder moves.
+  // Count surviving children before pruning, then compact each affected array once.
+  const remaining = new Map<NavigationNode, number>()
+  const empty: NavigationNode[] = []
   for (const parent of touched) {
-    if (parent.children) parent.children = parent.children.filter(child => tree.nodes.get(child.key) === child)
+    if (!parent.children) continue
+    let count = 0
+    for (const child of parent.children) if (tree.nodes.get(child.key) === child) count++
+    remaining.set(parent, count)
+    if (!count && !parent.file && parent !== tree.root) empty.push(parent)
   }
-  const empty = [...touched].filter(node => node !== tree.root && !node.file && node.children?.length === 0)
   for (let node = empty.pop(); node; node = empty.pop()) {
-    if (!tree.nodes.delete(node.key)) continue
+    tree.nodes.delete(node.key)
+    tree.searchDirectories = undefined
     const parent = node.parentKey === null ? undefined : tree.nodes.get(node.parentKey)
     if (!parent?.children) continue
-    parent.children = parent.children.filter(child => child !== node)
+    const count = (remaining.get(parent) ?? parent.children.length) - 1
+    remaining.set(parent, count)
     touched.add(parent)
-    if (parent !== tree.root && !parent.file && !parent.children.length) empty.push(parent)
+    if (!count && !parent.file && parent !== tree.root) empty.push(parent)
   }
-  for (const node of touched) node.children?.sort(order)
+  for (const node of touched) {
+    if (!node.children || !tree.nodes.has(node.key)) continue
+    if (remaining.get(node) !== node.children.length)
+      node.children = node.children.filter(child => tree.nodes.get(child.key) === child)
+    node.children.sort(order)
+  }
   return tree
 }
 

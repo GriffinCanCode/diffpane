@@ -20,26 +20,31 @@ export function fileExtension(path: string) {
   const dot = name.lastIndexOf('.')
   return dot > 0 ? name.slice(dot).toLocaleLowerCase() : '(no extension)'
 }
-export function matchesFilters(
-  entry: SearchEntry,
-  filters: SearchFilters,
+export function matchesFilters(entry: SearchEntry, filters: SearchFilters, languageFor?: LanguageFor) {
+  return filterPredicate(filters, languageFor)?.(entry) ?? true
+}
+
+export function filterPredicate(
+  { kind, language, extension, folder }: SearchFilters,
   languageFor: LanguageFor = () => 'Plain text',
 ) {
-  if (filters.kind === 'files' && entry.directory) return false
-  if (filters.kind === 'folders' && !entry.directory) return false
-  if (filters.language && (entry.directory || languageFor(entry.path) !== filters.language)) return false
-  if (filters.extension && (entry.directory || fileExtension(entry.path) !== filters.extension)) return false
-  const folder = filters.folder
+  if (kind === 'all' && !language && !extension && !folder) return undefined
+  const normalizedFolder = folder
     .trim()
     .replaceAll('\\', '/')
     .replace(/^\.\//u, '')
     .replace(/\/+$/u, '')
     .toLocaleLowerCase()
-  return (
-    !folder ||
-    entry.path.toLocaleLowerCase().startsWith(`${folder}/`) ||
-    (entry.directory === true && entry.path.toLocaleLowerCase() === folder)
-  )
+  const prefix = `${normalizedFolder}/`
+  return (entry: SearchEntry, foldedPath?: string) => {
+    if (kind === 'files' && entry.directory) return false
+    if (kind === 'folders' && !entry.directory) return false
+    if (language && (entry.directory || languageFor(entry.path) !== language)) return false
+    if (extension && (entry.directory || fileExtension(entry.path) !== extension)) return false
+    if (!normalizedFolder) return true
+    const path = foldedPath ?? entry.path.toLocaleLowerCase()
+    return path.startsWith(prefix) || (entry.directory === true && path === normalizedFolder)
+  }
 }
 
 /** Include each known folder once without scanning ignored directories on disk. */
@@ -62,6 +67,7 @@ export function searchableEntries<T extends SearchEntry>(files: readonly T[], ba
 
 export function createSearchFilters(
   host: HTMLElement,
+  panelId: string,
   onChange: () => void,
   languageFor: LanguageFor = () => 'Plain text',
 ) {
@@ -72,9 +78,10 @@ export function createSearchFilters(
   toggle.className = 'search-filter-toggle'
   toggle.textContent = 'Filters'
   toggle.setAttribute('aria-expanded', 'false')
-  toggle.setAttribute('aria-label', 'Search filters')
+  toggle.setAttribute('aria-controls', panelId)
   const panel = document.createElement('div')
   panel.className = 'search-filter-panel'
+  panel.id = panelId
   panel.hidden = true
   const controls = {
     kind: document.createElement('select'),
@@ -93,7 +100,6 @@ export function createSearchFilters(
     const label = document.createElement('label')
     label.append(document.createTextNode(title))
     const control = controls[key]
-    control.setAttribute('aria-label', title)
     control.dataset.filter = key
     label.append(control)
     panel.append(label)
@@ -112,12 +118,15 @@ export function createSearchFilters(
   reset.type = 'button'
   reset.className = 'search-filter-reset'
   reset.textContent = 'Reset filters'
+  reset.disabled = true
   panel.append(reset)
   bar.append(toggle, panel)
   host.append(bar)
+  let pendingEntries: (() => Iterable<SearchEntry>) | undefined
   toggle.addEventListener('click', () => {
     panel.hidden = !panel.hidden
     toggle.setAttribute('aria-expanded', String(!panel.hidden))
+    if (!panel.hidden && pendingEntries) updateOptions(pendingEntries())
   })
   function value(): SearchFilters {
     return {
@@ -135,7 +144,9 @@ export function createSearchFilters(
       Number(Boolean(filters.extension)) +
       Number(Boolean(filters.folder))
     toggle.textContent = count ? `Filters · ${count}` : 'Filters'
+    toggle.setAttribute('aria-label', count ? `Search filters, ${count} active` : 'Search filters')
     toggle.dataset.active = String(count > 0)
+    reset.disabled = count === 0
   }
   function resetControls() {
     for (const [key, control] of Object.entries(controls)) control.value = key === 'kind' ? 'all' : ''
@@ -143,32 +154,40 @@ export function createSearchFilters(
   }
   reset.addEventListener('click', () => {
     resetControls()
+    toggle.focus()
     onChange()
   })
+  function updateOptions(entries: Iterable<SearchEntry>) {
+    pendingEntries = undefined
+    const languages = new Set<string>()
+    const extensions = new Set<string>()
+    for (const entry of entries)
+      if (!entry.directory) {
+        languages.add(languageFor(entry.path))
+        extensions.add(fileExtension(entry.path))
+      }
+    for (const [key, options, label] of [
+      ['language', languages, 'All languages'],
+      ['extension', extensions, 'All file types'],
+    ] as const) {
+      const select = controls[key]
+      const selected = select.value
+      select.replaceChildren(new Option(label, ''))
+      for (const option of [...options].toSorted((a, b) => a.localeCompare(b))) select.add(new Option(option, option))
+      if (options.has(selected)) select.value = selected
+    }
+    updateLabel()
+  }
   return {
     value,
     reset: resetControls,
     active: () => hasFilters(value()),
+    predicate: () => filterPredicate(value(), languageFor),
     matches: (entry: SearchEntry) => matchesFilters(entry, value(), languageFor),
-    update(entries: readonly SearchEntry[]) {
-      const languages = new Set<string>()
-      const extensions = new Set<string>()
-      for (const entry of entries)
-        if (!entry.directory) {
-          languages.add(languageFor(entry.path))
-          extensions.add(fileExtension(entry.path))
-        }
-      for (const [key, options, label] of [
-        ['language', languages, 'All languages'],
-        ['extension', extensions, 'All file types'],
-      ] as const) {
-        const select = controls[key]
-        const selected = select.value
-        select.replaceChildren(new Option(label, ''))
-        for (const option of [...options].toSorted((a, b) => a.localeCompare(b))) select.add(new Option(option, option))
-        if (options.has(selected)) select.value = selected
-      }
-      updateLabel()
+    update(entries: Iterable<SearchEntry> | (() => Iterable<SearchEntry>)) {
+      if (typeof entries !== 'function') updateOptions(entries)
+      else if (!panel.hidden || controls.language.value || controls.extension.value) updateOptions(entries())
+      else pendingEntries = entries
     },
   }
 }

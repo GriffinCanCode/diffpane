@@ -1,0 +1,87 @@
+.file-picker {
+  height: min(570px, calc(100vh - clamp(12px, 8vh, 76px) - 18px));
+}
+
+.picker-results {
+  position: relative;
+}
+
+.picker-rows {
+  position: relative;
+  margin-inline: 9px;
+}
+
+.picker-file {
+  position: absolute;
+  inset-inline: 0;
+  width: 100%;
+  height: 54px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 13px;
+  background: transparent;
+  text-align: start;
+  overflow: hidden;
+}
+
+.picker-file img {
+  width: 22px;
+  height: 22px;
+  flex: none;
+}
+
+.picker-file-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.picker-file strong,
+.picker-file small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.picker-file strong {
+  font-size: var(--text-body);
+  font-weight: var(--weight-medium);
+}
+
+.picker-file small {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: var(--text-caption);
+}
+
+.picker-enter {
+  visibility: hidden;
+}
+
+.picker-file[aria-selected='true'] .picker-enter {
+  visibility: visible;
+}
+
+.picker-empty strong {
+  font-size: var(--text-body);
+  font-weight: var(--weight-semibold);
+}
+
+.picker-empty[data-state='error'] strong {
+  color: var(--removed);
+}
+
+.picker-retry {
+  margin-top: 6px;
+  padding: 5px 10px;
+  border: 1px solid var(--control-border);
+  border-radius: 5px;
+  background: var(--surface-raised);
+  color: var(--text);
+  font-size: var(--text-label);
+}
+
+.picker-retry:hover {
+  background: var(--hover);
+}

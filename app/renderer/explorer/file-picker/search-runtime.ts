@@ -1,46 +1,43 @@
 import { appError } from '../../../shared/recovery/app-errors.ts'
-import { searchFiles } from './file-search.ts'
-import type { SearchableFile } from './file-search.ts'
+import { compileFileQuery, rankFiles } from './file-search.ts'
+import type { FileQuery, SearchableFile } from './file-search.ts'
 
-interface Hit<T> {
-  file: T
-  positions: number[]
-  score?: number
+export interface FileSearchResults<T> {
+  length: number
+  fileAt: (index: number) => T | undefined
+  positions: (file: T) => number[]
 }
 interface Query<T> {
   id: number
   query: string
-  resolve: (value: Hit<T>[] | null) => void
+  resolve: (value: FileSearchResults<T> | null) => void
   reject: (reason: Error) => void
-  generation: number
+  canceled?: boolean
 }
 
 function isOffset(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
 }
 
-function workerHits<T extends SearchableFile>(matches: unknown, files: readonly T[]): Hit<T>[] | null {
-  if (!Array.isArray(matches) || matches.length > files.length) return null
-  const hits: Hit<T>[] = []
-  for (const match of matches as readonly unknown[]) {
-    if (
-      typeof match !== 'object' ||
-      match === null ||
-      !('index' in match) ||
-      !isOffset(match.index) ||
-      !('positions' in match) ||
-      !Array.isArray(match.positions) ||
-      !match.positions.every(isOffset)
-    )
-      return null
-    const file = files[match.index]
-    if (!file) return null
-    hits.push({ file, positions: match.positions })
+function results<T extends SearchableFile>(
+  files: readonly T[],
+  query: FileQuery,
+  indexes?: Uint32Array,
+): FileSearchResults<T> {
+  return {
+    length: indexes?.length ?? files.length,
+    fileAt: indexes ? index => files[indexes[index] ?? -1] : index => files[index],
+    positions: query.positions,
   }
-  return hits
+}
+
+function workerIndexes(matches: unknown, fileCount: number): matches is Uint32Array {
+  if (!(matches instanceof Uint32Array) || matches.length > fileCount) return false
+  return matches.every(index => index < fileCount)
 }
 
 const WORKER_THRESHOLD = 5000
+const EMPTY_QUERY = compileFileQuery('')
 
 /** Small projects stay synchronous; large searches never block input or editor painting. */
 export function createFileSearch<T extends SearchableFile>() {
@@ -50,7 +47,6 @@ export function createFileSearch<T extends SearchableFile>() {
   let running: Query<T> | undefined
   let queued: Query<T> | undefined
   let sequence = 0
-  let generation = 0
 
   function dispatch() {
     if (running || !queued || !worker) return
@@ -71,6 +67,18 @@ export function createFileSearch<T extends SearchableFile>() {
     }
   }
 
+  function cancelRunning() {
+    if (!worker || !running || running.canceled) return
+    running.canceled = true
+    running.resolve(null)
+    try {
+      // oxlint-disable-next-line unicorn/require-post-message-target-origin -- Worker messages have a dedicated port and no targetOrigin.
+      worker.postMessage({ cancel: running.id })
+    } catch (cause) {
+      workerFailed(cause)
+    }
+  }
+
   function releaseWorker() {
     const previous = worker
     worker = undefined
@@ -86,8 +94,8 @@ export function createFileSearch<T extends SearchableFile>() {
       operation: 'Search files',
       message: 'File search failed. Try again.',
     })
-    if (running?.generation === generation && !queued) running.reject(error)
-    queued?.reject(error)
+    const active = queued ?? (running?.canceled ? undefined : running)
+    active?.reject(error)
     queued = undefined
     releaseWorker()
   }
@@ -110,11 +118,14 @@ export function createFileSearch<T extends SearchableFile>() {
             return
           }
           if (data.id !== work.id) return
-          const publish = work.generation === generation && !queued
-          const hits = publish && 'matches' in data ? workerHits(data.matches, files) : null
-          if (publish && !hits) {
-            workerFailed(new Error('Invalid file search worker matches'))
-            return
+          const publish = !work.canceled && !queued
+          let hits = null
+          if (publish) {
+            if (!('matches' in data) || !workerIndexes(data.matches, files.length)) {
+              workerFailed(new Error('Invalid file search worker matches'))
+              return
+            }
+            hits = results(files, compileFileQuery(work.query), data.matches)
           }
           running = undefined
           work.resolve(hits)
@@ -130,16 +141,18 @@ export function createFileSearch<T extends SearchableFile>() {
       current.addEventListener('error', onWorkerError, options)
       current.addEventListener('messageerror', onWorkerError, options)
     }
+    const current = worker
     // oxlint-disable-next-line unicorn/require-post-message-target-origin -- Worker messages have a dedicated port and no targetOrigin.
-    worker.postMessage({ files: files.map((file, index) => ({ path: file.path, index })) })
+    current.postMessage({ paths: files.map(file => file.path) })
   }
 
   return {
     setFiles(next: readonly T[]) {
+      if (next === files) return
       files = next
-      generation++
       cancelQueued()
       if (files.length >= WORKER_THRESHOLD) {
+        cancelRunning()
         try {
           prepareWorker()
         } catch (cause) {
@@ -147,15 +160,23 @@ export function createFileSearch<T extends SearchableFile>() {
         }
       } else releaseWorker()
     },
-    search(query: string): Hit<T>[] | Promise<Hit<T>[] | null> {
-      if (files.length < WORKER_THRESHOLD || !query.trim()) {
+    search(query: string): FileSearchResults<T> | Promise<FileSearchResults<T> | null> {
+      const hasQuery = Boolean(query.trim())
+      if (files.length < WORKER_THRESHOLD || !hasQuery) {
         cancelQueued()
-        generation++
-        return searchFiles(files, query)
+        cancelRunning()
+        if (!hasQuery) return results(files, EMPTY_QUERY)
+        const compiled = compileFileQuery(query)
+        const indexes = Uint32Array.from(rankFiles(files, compiled), match => match.index)
+        return results(files, compiled, indexes)
       }
       cancelQueued()
       return new Promise((resolve, reject) => {
-        queued = { id: ++sequence, query, resolve, reject, generation }
+        queued = { id: ++sequence, query, resolve, reject }
+        if (running) {
+          cancelRunning()
+          return
+        }
         if (!worker) {
           try {
             prepareWorker()
@@ -167,12 +188,7 @@ export function createFileSearch<T extends SearchableFile>() {
         dispatch()
       })
     },
-    cancel() {
-      generation++
-      cancelQueued()
-    },
     dispose() {
-      generation++
       cancelQueued()
       releaseWorker()
       files = []

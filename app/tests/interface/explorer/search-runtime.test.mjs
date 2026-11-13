@@ -7,7 +7,7 @@ function workers(t) {
   /** @type {TestWorker[]} */
   const created = []
   class TestWorker extends EventTarget {
-    /** @type {Array<{ id: number; query: string } | { files: Array<{ path: string; index: number }> }>} */
+    /** @type {Array<{ id: number; query: string } | { paths: string[] } | { cancel: number }>} */
     messages = []
     terminated = false
     constructor() {
@@ -22,8 +22,8 @@ function workers(t) {
       this.terminated = true
     }
     /** @param {unknown} matches */
-    answer(matches = []) {
-      const query = this.messages.at(-1)
+    answer(matches = new Uint32Array()) {
+      const query = this.messages.findLast(message => 'id' in message)
       assert.ok(query && 'id' in query)
       const { id } = query
       this.dispatchEvent(new MessageEvent('message', { data: { id, matches } }))
@@ -53,13 +53,23 @@ test('releasing search settles active and queued queries and drops the worker an
   search.dispose()
   assert.deepEqual(await Promise.all([active, queued]), [null, null])
   assert.equal(created(0).terminated, true)
-  assert.deepEqual(search.search(''), [])
+  const cleared = search.search('')
+  assert.ok(!(cleared instanceof Promise))
+  assert.equal(cleared.length, 0)
+  assert.equal(cleared.fileAt(0), undefined)
   // Reopening search creates a fresh worker that can publish its own results.
   const files = inventory()
   search.setFiles(files)
   const result = search.search('file42')
-  created(1).answer([{ index: 42, positions: [0, 1] }])
-  assert.deepEqual(await result, [{ file: files[42], positions: [0, 1] }])
+  assert.deepEqual(created(1).messages[0], { paths: files.map(file => file.path) })
+  created(1).answer(Uint32Array.of(42))
+  const reopened = await result
+  assert.ok(reopened)
+  assert.equal(reopened.length, 1)
+  const file = reopened.fileAt(0)
+  assert.ok(file)
+  assert.equal(file, files[42])
+  assert.deepEqual(reopened.positions(file), [0, 1, 2, 3, 4, 5])
   search.dispose()
 })
 
@@ -73,11 +83,9 @@ test('shrinking an inventory releases the obsolete worker without hanging a runn
   assert.equal(await pending, null)
   assert.equal(created(0).terminated, true)
   const matches = search.search('small')
-  assert.ok(Array.isArray(matches))
-  assert.deepEqual(
-    matches.map(hit => hit.file),
-    small,
-  )
+  assert.ok(!(matches instanceof Promise))
+  assert.equal(matches.length, 1)
+  assert.equal(matches.fileAt(0), small[0])
   search.dispose()
 })
 
@@ -89,11 +97,18 @@ test('overlapping worker queries publish only the latest request', async t => {
   const first = search.search('file1')
   const second = search.search('file2')
   const third = search.search('file3')
-  assert.equal(await second, null)
-  created(0).answer([{ index: 1, positions: [] }])
-  assert.equal(await first, null)
-  created(0).answer([{ index: 3, positions: [] }])
-  assert.deepEqual(await third, [{ file: files[3], positions: [] }])
+  assert.deepEqual(await Promise.all([first, second]), [null, null])
+  assert.deepEqual(created(0).messages.slice(1), [{ id: 1, query: 'file1' }, { cancel: 1 }])
+  created(0).answer()
+  assert.deepEqual(created(0).messages.at(-1), { id: 3, query: 'file3' })
+  created(0).answer(Uint32Array.of(3))
+  const latest = await third
+  assert.ok(latest)
+  assert.equal(latest.length, 1)
+  const file = latest.fileAt(0)
+  assert.ok(file)
+  assert.equal(file, files[3])
+  assert.deepEqual(latest.positions(file), [0, 1, 2, 3, 4])
   search.dispose()
 })
 
@@ -111,8 +126,14 @@ test('worker failure rejects the newest query and retry recreates the worker', a
   assert.equal(created(0).terminated, true)
   const result = search.search('file5')
   created(0).fail()
-  created(1).answer([{ index: 5, positions: [0] }])
-  assert.deepEqual(await result, [{ file: files[5], positions: [0] }])
+  created(1).answer(Uint32Array.of(5))
+  const retried = await result
+  assert.ok(retried)
+  assert.equal(retried.length, 1)
+  const file = retried.fileAt(0)
+  assert.ok(file)
+  assert.equal(file, files[5])
+  assert.deepEqual(retried.positions(file), [0, 1, 2, 3, 4])
   search.dispose()
 })
 
@@ -123,8 +144,25 @@ test('malformed worker matches reject the search and release the failed worker',
   const pending = search.search('bad index')
   assert.ok(pending instanceof Promise)
   const rejection = assert.rejects(pending, /Invalid file search worker matches/)
-  created(0).answer([{ index: 5000, positions: [0] }])
+  created(0).answer(Uint32Array.of(5000))
   await rejection
   assert.equal(created(0).terminated, true)
+  search.dispose()
+})
+
+test('inventory replacement cancels stale work before resolving indexes against the new inventory', async t => {
+  const created = workers(t)
+  const search = createFileSearch()
+  search.setFiles(inventory())
+  const stale = search.search('file1')
+  const files = inventory().toReversed()
+  search.setFiles(files)
+  const pending = search.search('file4999')
+  assert.equal(await stale, null)
+  const worker = created(0)
+  assert.deepEqual(worker.messages.slice(-2), [{ cancel: 1 }, { paths: files.map(file => file.path) }])
+  worker.answer()
+  worker.answer(Uint32Array.of(0))
+  assert.equal((await pending)?.fileAt(0), files[0])
   search.dispose()
 })
