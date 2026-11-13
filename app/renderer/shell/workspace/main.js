@@ -48,6 +48,7 @@ import { createChangeReview } from '../../review/queue/change-review.js'
 import { projectIcon } from '../layout/icons.ts'
 import { createWorkspaceLayout } from '../layout/workspace-layout.ts'
 import { clearErrorNotice, guard, renderFailure, reportError, runTask, setErrorNoticeHost } from '../recovery/errors.ts'
+import { waitForWorkspaceOpeningPeeks } from '../recovery/workspace-opening.ts'
 import { requireElement } from './dom.js'
 import { getWorkspacePreferences } from './preferences.ts'
 
@@ -291,7 +292,7 @@ let reviewComparison = 'head'
 /** @type {Map<string, ViewState>} */
 const savedViews = new Map()
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)')
-const minimumOpeningMs = 2100
+const minimumOpeningMs = 3300
 let initialInventoryReady = false
 let initialDocumentReady = false
 /** @type {number | undefined} */
@@ -426,13 +427,21 @@ function finishWorkspaceOpening() {
   app.inert = false
 }
 
+function revealWorkspace() {
+  runTask('Reveal workspace', async () => {
+    await waitForWorkspaceOpeningPeeks(workspaceOpening)
+    if (closed || workspaceOpening?.hidden !== false) return
+    finishWorkspaceOpening()
+  })
+}
+
 function revealWorkspaceWhenReady() {
   if (closed || workspaceOpening?.hidden !== false || !initialInventoryReady || !initialDocumentReady) return
   const firstPaint = performance.getEntriesByName('first-contentful-paint', 'paint')[0]
   const openingStart = firstPaint ?? performance.getEntriesByName('workspace-opening', 'mark')[0]
   const elapsed = performance.now() - (openingStart?.startTime ?? 0)
   const remaining = reducedMotion.matches ? 0 : minimumOpeningMs - elapsed
-  if (remaining <= 0) finishWorkspaceOpening()
+  if (remaining <= 0) revealWorkspace()
   else {
     workspaceOpeningTimer ??= window.setTimeout(() => {
       workspaceOpeningTimer = undefined
@@ -457,7 +466,13 @@ function showStartScreen(failed = false) {
       ? 'Choose another file or folder'
       : 'No project open'
   document.title = 'Diffpane'
-  finishWorkspaceOpening()
+  if (failed) finishWorkspaceOpening()
+  else
+    runTask('Reveal welcome screen', async () => {
+      await waitForWorkspaceOpeningPeeks(workspaceOpening)
+      if (closed || snapshot || workspaceOpening?.hidden !== false) return
+      finishWorkspaceOpening()
+    })
   runTask('Load recent projects', loadRecentTargets)
 }
 

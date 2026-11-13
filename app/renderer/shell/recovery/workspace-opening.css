@@ -1,6 +1,7 @@
 @import './window-mascot.css';
 
 .workspace-opening {
+  --opening-card-width: 382px;
   position: fixed;
   inset: 0;
   z-index: 1001;
@@ -46,15 +47,27 @@
   content: '';
 }
 
+.workspace-opening__piece {
+  --peek-y: calc(var(--glyph-size) / -2 - 9px);
+  position: absolute;
+  isolation: isolate;
+}
+
+.workspace-opening__field .workspace-opening__piece {
+  width: var(--glyph-size);
+  height: var(--glyph-size);
+  transform: rotate(var(--glyph-tilt));
+}
+
 .workspace-opening__glyph {
   --glyph-ink: var(--accent);
   --glyph-fill: var(--accent-surface);
-  position: absolute;
+  position: relative;
   display: grid;
   place-items: center;
   box-sizing: border-box;
-  width: var(--glyph-size);
-  height: var(--glyph-size);
+  width: 100%;
+  height: 100%;
   border: 1px solid color-mix(in oklab, var(--glyph-ink) 23%, var(--line));
   border-radius: 24%;
   background: linear-gradient(148deg, var(--surface-raised), var(--glyph-fill));
@@ -64,7 +77,27 @@
     0 10px 22px color-mix(in oklab, var(--glyph-ink) 12%, transparent);
   color: color-mix(in oklab, var(--glyph-ink) 78%, var(--muted));
   font: 600 var(--glyph-font, 15px)/1 var(--font-mono);
-  transform: rotate(var(--glyph-tilt));
+}
+
+.workspace-opening__peek {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: -1;
+  width: var(--peek-size, min(100%, 48px));
+  color: var(--accent);
+  opacity: 0;
+  transform: translate(-50%, -50%);
+}
+
+.workspace-opening__peek svg {
+  display: block;
+  width: 100%;
+  rotate: var(--peek-angle, 0deg);
+}
+
+.workspace-opening__peek svg path:first-child {
+  fill: var(--accent-surface);
 }
 
 .workspace-opening__glyph--code {
@@ -76,8 +109,6 @@
 }
 
 .workspace-opening__glyph--file {
-  --glyph-ink: var(--violet);
-  --glyph-fill: var(--violet-surface);
   --glyph-size: 39px;
   --glyph-tilt: 13deg;
   --glyph-delay: -1.9s;
@@ -85,7 +116,7 @@
   right: 28%;
 }
 
-.workspace-opening__glyph--file::before {
+.workspace-opening__glyph--file .workspace-opening__glyph::before {
   width: 12px;
   height: 15px;
   border: 1px solid;
@@ -100,22 +131,25 @@
   --glyph-size: 55px;
   --glyph-tilt: 10deg;
   --glyph-delay: -2.8s;
-  --glyph-ink: var(--added);
-  --glyph-fill: var(--added-surface);
   top: 36%;
   right: 11%;
+}
+
+.workspace-opening__glyph--diff .workspace-opening__glyph {
+  --glyph-ink: var(--added);
+  --glyph-fill: var(--added-surface);
   grid-template-columns: 1fr 1fr;
   font-size: 18px;
 }
 
-.workspace-opening__glyph--diff::before {
+.workspace-opening__glyph--diff .workspace-opening__glyph::before {
   position: absolute;
   inset: 9px 50% 9px auto;
   border-inline-end: 1px solid var(--line);
   content: '';
 }
 
-.workspace-opening__glyph--diff span:last-child {
+.workspace-opening__glyph--diff .workspace-opening__glyph span:last-child {
   color: var(--removed);
 }
 
@@ -123,13 +157,19 @@
   --glyph-size: 44px;
   --glyph-tilt: 11deg;
   --glyph-delay: -2.2s;
-  --glyph-ink: var(--modified);
-  --glyph-fill: var(--modified-surface);
+  --peek-x: -28px;
+  --peek-y: -8px;
+  --peek-angle: -90deg;
   bottom: 20%;
   left: 11%;
 }
 
-.workspace-opening__glyph--branch::before {
+.workspace-opening__glyph--branch .workspace-opening__glyph {
+  --glyph-ink: var(--modified);
+  --glyph-fill: var(--modified-surface);
+}
+
+.workspace-opening__glyph--branch .workspace-opening__glyph::before {
   width: 11px;
   height: 14px;
   border-inline-start: 1px solid;
@@ -137,7 +177,7 @@
   content: '';
 }
 
-.workspace-opening__glyph--branch::after {
+.workspace-opening__glyph--branch .workspace-opening__glyph::after {
   position: absolute;
   top: calc(50% - 9px);
   left: calc(50% - 8px);
@@ -155,22 +195,31 @@
   --glyph-size: 49px;
   --glyph-tilt: -11deg;
   --glyph-delay: -1.2s;
+  --glyph-font: 20px;
+  --peek-x: 31px;
+  --peek-y: -8px;
+  --peek-angle: 90deg;
+  right: clamp(12px, calc(50% - var(--opening-card-width) / 2 - var(--glyph-size) - 6px), 18%);
+  bottom: 15%;
+}
+
+.workspace-opening__glyph--file .workspace-opening__glyph,
+.workspace-opening__glyph--prompt .workspace-opening__glyph {
   --glyph-ink: var(--violet);
   --glyph-fill: var(--violet-surface);
-  --glyph-font: 20px;
-  right: 18%;
-  bottom: 15%;
 }
 
 .workspace-opening__glyph--commit {
   --glyph-size: 33px;
   --glyph-tilt: -12deg;
   --glyph-delay: -3.4s;
+  --peek-y: 26px;
+  --peek-angle: 180deg;
   left: 32%;
   bottom: 9%;
 }
 
-.workspace-opening__glyph--commit::before {
+.workspace-opening__glyph--commit .workspace-opening__glyph::before {
   width: 6px;
   height: 6px;
   border: 1px solid;
@@ -178,7 +227,7 @@
   content: '';
 }
 
-.workspace-opening__glyph--commit::after {
+.workspace-opening__glyph--commit .workspace-opening__glyph::after {
   position: absolute;
   inset: 50% 0 auto;
   height: 1px;
@@ -196,7 +245,7 @@
 .workspace-opening__card {
   position: relative;
   box-sizing: border-box;
-  width: min(100%, 382px);
+  width: min(100%, var(--opening-card-width));
   padding: 25px clamp(16px, 4vw, 36px) 31px;
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -254,13 +303,21 @@
   background: color-mix(in oklab, currentColor 20%, transparent);
 }
 
-.workspace-opening__page {
-  position: absolute;
+.workspace-opening__scene .workspace-opening__piece {
+  --peek-size: 40px;
+  --peek-y: -26px;
   top: 26px;
   left: calc(50% - 14px);
-  box-sizing: border-box;
   width: 28px;
   height: 36px;
+  transform: translate(var(--page-x), var(--page-y)) rotate(var(--page-turn));
+}
+
+.workspace-opening__page {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
   border: 1px solid color-mix(in oklab, currentColor 48%, var(--surface));
   border-radius: 5px;
   background:
@@ -268,7 +325,6 @@
     linear-gradient(currentColor, currentColor) 6px 17px / 10px 1px no-repeat,
     linear-gradient(currentColor, currentColor) 6px 22px / 12px 1px no-repeat,
     var(--selection);
-  transform: translate(var(--page-x), var(--page-y)) rotate(var(--page-turn));
 }
 
 .workspace-opening__page--left {
@@ -276,6 +332,7 @@
   --page-y: -7px;
   --page-turn: -23deg;
   --page-delay: 150ms;
+  --peek-x: -12px;
 }
 
 .workspace-opening__page--right {
@@ -283,6 +340,7 @@
   --page-y: -12px;
   --page-turn: 18deg;
   --page-delay: 310ms;
+  --peek-x: 12px;
 }
 
 .workspace-opening__spark {
@@ -342,8 +400,12 @@
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .workspace-opening__glyph {
+  .workspace-opening__field .workspace-opening__piece {
     animation: workspace-opening-drift 3.7s ease-in-out var(--glyph-delay) infinite alternate;
+  }
+
+  .workspace-opening__peek {
+    animation: workspace-opening-peek 1250ms ease-in-out var(--peek-delay) both;
   }
 
   .workspace-opening__character {
@@ -354,7 +416,7 @@
     animation: workspace-opening-blink 1.8s ease-in-out both;
   }
 
-  .workspace-opening__page {
+  .workspace-opening__scene .workspace-opening__piece {
     animation: workspace-opening-file 1.2s cubic-bezier(0.25, 0.65, 0.34, 1) var(--page-delay) both;
   }
 
@@ -372,6 +434,25 @@
 
   .workspace-opening__field .workspace-opening__spark {
     animation: workspace-opening-glimmer 3.4s ease-in-out var(--spark-delay) infinite alternate;
+  }
+}
+
+@keyframes workspace-opening-peek {
+  0%,
+  100% {
+    opacity: 0;
+    translate: 0 0;
+  }
+  12%,
+  94% {
+    opacity: 1;
+  }
+  48%,
+  82% {
+    translate: var(--peek-x, 0px) var(--peek-y);
+  }
+  82% {
+    animation-timing-function: ease-in;
   }
 }
 
