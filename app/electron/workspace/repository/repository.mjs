@@ -12,7 +12,14 @@ import {
   claudeVisiblePath,
   MAX_CLAUDE_FILE_BYTES,
 } from '../../tools/assistant/claude-workspace.mjs'
-import { encodeText, fileContent, MAX_FILE_BYTES, readLimit, searchableText } from '../documents/file-content.ts'
+import {
+  encodeText,
+  fileByteView,
+  fileContent,
+  MAX_FILE_BYTES,
+  readLimit,
+  searchableText,
+} from '../documents/file-content.ts'
 
 /** @import { BigIntStats } from 'node:fs' */
 /** @import { FileHandle } from 'node:fs/promises' */
@@ -48,6 +55,7 @@ const statusArguments = [
   '--ignore-submodules=none',
   '--renames',
 ]
+const workingReadFlags = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0)
 const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
 function empty() {
   return Buffer.alloc(0)
@@ -447,10 +455,7 @@ export class Repository {
         ...(capture || !budget ? { content: bytes } : {}),
       }
     }
-    const handle = await open(
-      absolute,
-      constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0),
-    ).catch((/** @type {unknown} */ error) => {
+    const handle = await open(absolute, workingReadFlags).catch((/** @type {unknown} */ error) => {
       if (missing(error) || errorCode(error) === 'ELOOP') throw checkpointReadChanged(filename)
       throw error
     })
@@ -543,7 +548,7 @@ export class Repository {
     let handle
     try {
       signal.throwIfAborted()
-      handle = await open(absolute, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0))
+      handle = await open(absolute, workingReadFlags)
       const metadata = await handle.stat()
       if (!metadata.isFile() || !metadata.size || metadata.size > MAX_FILE_BYTES) return null
       const parent = path.dirname(absolute)
@@ -560,13 +565,14 @@ export class Repository {
         return null
       const bytes = Buffer.allocUnsafe(metadata.size + 1)
       let length = 0
-      while (length < bytes.length) {
+      while (length < metadata.size) {
         signal.throwIfAborted()
         // oxlint-disable-next-line eslint/no-await-in-loop -- The next read starts at the actual byte count returned by this read.
         const { bytesRead } = await handle.read(bytes, length, bytes.length - length, length)
         if (!bytesRead) break
         length += bytesRead
       }
+      signal.throwIfAborted()
       if (length !== metadata.size) return { text: null, bytes: length }
       return {
         text: searchableText(bytes.subarray(0, length), filename),
@@ -582,9 +588,21 @@ export class Repository {
 
   /** @returns {Promise<InventoryEntry[]>} */
   async files() {
+    const scope = path.relative(this.root, this.scope).split(path.sep).join('/')
     const bytes = await git(
       this.root,
-      ['ls-files', '--stage', '--cached', '--deleted', '--others', '--exclude-standard', '-t', '-z'],
+      [
+        'ls-files',
+        '--stage',
+        '--cached',
+        '--deleted',
+        '--others',
+        '--exclude-standard',
+        '-t',
+        '-z',
+        '--',
+        ...(scope ? [scope] : []),
+      ],
       MAX_STATUS_BYTES,
     )
     let source
@@ -593,7 +611,7 @@ export class Repository {
     } catch {
       throw new Error('Git returned a filename that is not valid UTF-8.')
     }
-    const scope = path.relative(this.root, this.scope).split(path.sep).join('/')
+    const scopePrefix = `${scope}/`
     /** @type {Map<string, InventoryEntry>} */
     const files = new Map()
     /** @type {Set<string>} */
@@ -612,7 +630,7 @@ export class Repository {
       const prior = this.inventoryMetadata.get(filename)
       // A retained path was validated when it first entered this repository's inventory.
       if (!prior) validatePath(filename)
-      if (scope && filename !== scope && !filename.startsWith(`${scope}/`)) continue
+      if (scope && filename !== scope && !filename.startsWith(scopePrefix)) continue
       const submodule = !untracked && record.slice(2, 8) === '160000'
       const existing = files.get(filename)
       if (existing) {
@@ -639,7 +657,7 @@ export class Repository {
     const addIgnored = (filename, directory) => {
       if (files.has(filename)) return
       validatePath(filename)
-      if (scope && filename !== scope && !filename.startsWith(`${scope}/`)) return
+      if (scope && filename !== scope && !filename.startsWith(scopePrefix)) return
       const prior = this.inventoryMetadata.get(filename)
       files.set(
         filename,
@@ -998,6 +1016,7 @@ export class Repository {
 
   /** @param {string} oid @param {string} filename @returns {Promise<BlobContents>} */
   async #blobContents(oid, filename, limit = readLimit(filename)) {
+    if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(oid)) throw new Error('Git returned an invalid blob ID.')
     const key = `${oid}:${limit}`
     let cached = this.blobs.get(key)
     if (cached) {
@@ -1006,14 +1025,31 @@ export class Repository {
       return cached.value
     }
     const pending = (async () => {
-      const size = Number((await git(this.root, ['cat-file', '-s', oid], 4096)).toString('ascii').trim())
-      if (!Number.isSafeInteger(size) || size < 0) throw new Error('Git returned an invalid blob size.')
-      const bytes = successful(
-        await command(this.root, ['cat-file', 'blob', oid], limit, undefined, {
-          truncate: true,
-        }),
+      // One Git process returns both the size and bytes. Allow room for the
+      // batch header and final LF while keeping oversized objects bounded.
+      const output = successful(
+        await command(
+          this.root,
+          ['cat-file', '--batch=%(objecttype) %(objectsize)'],
+          limit + 64,
+          Buffer.from(`${oid}\n`),
+          {
+            truncate: true,
+          },
+        ),
       )
-      return { bytes, size }
+      const headerEnd = output.indexOf(10)
+      const header = headerEnd < 0 ? '' : output.toString('ascii', 0, headerEnd)
+      const size = Number(/^blob (\d+)$/u.exec(header)?.[1])
+      const start = headerEnd + 1
+      const end = start + Math.min(size, limit)
+      if (
+        !Number.isSafeInteger(size) ||
+        end > output.length ||
+        (size <= limit && (output.length !== end + 1 || output[end] !== 10))
+      )
+        throw new Error('Git returned an invalid blob response.')
+      return { bytes: output.subarray(start, end), size }
     })()
     cached = { bytes: 0, value: pending }
     this.blobs.set(key, cached)
@@ -1064,24 +1100,26 @@ export class Repository {
     if (!metadata.isFile()) return { note: 'This path is not a regular file.' }
     let handle
     try {
-      handle = await open(absolute, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0))
+      handle = await open(absolute, workingReadFlags)
       const current = await handle.stat()
       if (!current.isFile()) return { note: 'This path is not a regular file.' }
       const streamed = Boolean(mediaType(filename))
       const limit = streamed ? 64 * 1024 : readLimit(filename)
-      const chunks = []
+      // Read one extra byte to notice growth and distinguish a full preview from a complete file.
+      let bytes = Buffer.allocUnsafe(Math.min(current.size, limit) + 1)
       let length = 0
-      for await (const raw of handle.createReadStream({
-        autoClose: false,
-        start: 0,
-        end: limit - 1,
-      })) {
-        const chunk = /** @type {unknown} */ (raw)
-        if (!Buffer.isBuffer(chunk)) throw new Error('Unexpected working file stream data.')
-        length += chunk.length
-        chunks.push(chunk)
+      while (length < bytes.length) {
+        // oxlint-disable-next-line eslint/no-await-in-loop -- Continue positional reads after a short read.
+        const { bytesRead } = await handle.read(bytes, length, bytes.length - length, length)
+        if (!bytesRead) break
+        length += bytesRead
+        if (length === current.size) break
+        if (length < bytes.length || bytes.length === limit + 1) continue
+        const grown = Buffer.allocUnsafe(limit + 1)
+        bytes.copy(grown, 0, 0, length)
+        bytes = grown
       }
-      return { bytes: Buffer.concat(chunks, length), size: current.size, streamed }
+      return { bytes: bytes.subarray(0, Math.min(length, limit)), size: Math.max(current.size, length), streamed }
     } catch (error) {
       if (missing(error)) return empty()
       throw error
@@ -1102,8 +1140,9 @@ function comparedContents(beforeBytes, afterBytes, beforePath, afterPath, confli
       after: '',
       note: null,
       preview: {
-        before: before.kind === 'text' && !before.hex ? fileContent(beforeBytes, beforePath, true) : before,
-        after: after.kind === 'text' && !after.hex ? fileContent(afterBytes, afterPath, true) : after,
+        before:
+          before.kind === 'text' && before.size && !before.hex ? { ...before, ...fileByteView(beforeBytes) } : before,
+        after: after.kind === 'text' && after.size && !after.hex ? { ...after, ...fileByteView(afterBytes) } : after,
       },
     }
   }

@@ -43,7 +43,7 @@ export async function searchRepositoryContent(repository, request, cancellation)
 
   const timeout = AbortSignal.timeout(SEARCH_TIMEOUT_MS)
   const signal = AbortSignal.any([cancellation, timeout])
-  const pattern = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'), matchCase ? 'u' : 'iu')
+  const pattern = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'), matchCase ? 'gu' : 'giu')
   /** @type {ContentMatch[]} */
   const matches = []
   let scannedBytes = 0
@@ -78,33 +78,37 @@ function appendMatchingLines(matches, filename, text, pattern) {
   const newline = /\r\n?|\n/gu
   let start = text.startsWith('\uFEFF') ? 1 : 0
   let number = 1
-  while (start < text.length) {
-    newline.lastIndex = start
-    const separator = newline.exec(text)
-    const end = separator?.index ?? text.length
-    const line = text.slice(start, end)
-    const found = pattern.exec(line)
-    if (found) {
-      if (matches.length === MAX_MATCHES) return true
-      const column = found.index
-      const length = found[0].length
-      const matchEnd = column + length
-      const contextStart = Math.max(0, column - 31)
-      const contextEnd = Math.min(line.length, matchEnd + 119)
-      const before = line.slice(contextStart, column).replace(/^[\uDC00-\uDFFF]/u, '')
-      const after = line.slice(matchEnd, contextEnd).replace(/[\uD800-\uDBFF]$/u, '')
-      matches.push({
-        path: filename,
-        line: number,
-        column: column + 1,
-        length,
-        // Copy snippets so short results cannot retain the full file string.
-        before: copyText(contextStart ? `…${before}` : before),
-        match: copyText(found[0]),
-        after: copyText(contextEnd < line.length ? `${after}…` : after),
-      })
+  pattern.lastIndex = start
+  newline.lastIndex = start
+  // Find hits in the whole file so misses need no line scan or per-line slices.
+  for (let found = pattern.exec(text); found; found = pattern.exec(text)) {
+    if (matches.length === MAX_MATCHES) return true
+    let separator = newline.exec(text)
+    while (separator && separator.index < found.index) {
+      start = newline.lastIndex
+      number++
+      separator = newline.exec(text)
     }
-    start = separator ? newline.lastIndex : end
+    const end = separator?.index ?? text.length
+    const length = found[0].length
+    const matchEnd = found.index + length
+    const contextStart = Math.max(start, found.index - 31)
+    const contextEnd = Math.min(end, matchEnd + 119)
+    const before = text.slice(contextStart, found.index).replace(/^[\uDC00-\uDFFF]/u, '')
+    const after = text.slice(matchEnd, contextEnd).replace(/[\uD800-\uDBFF]$/u, '')
+    matches.push({
+      path: filename,
+      line: number,
+      column: found.index - start + 1,
+      length,
+      // Copy snippets so short results cannot retain the full file string.
+      before: copyText(contextStart > start ? `…${before}` : before),
+      match: copyText(found[0]),
+      after: copyText(contextEnd < end ? `${after}…` : after),
+    })
+    if (!separator) break
+    start = newline.lastIndex
+    pattern.lastIndex = start
     number++
   }
   return false

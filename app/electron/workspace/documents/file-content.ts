@@ -1,3 +1,4 @@
+import { isUtf8 } from 'node:buffer'
 import path from 'node:path'
 
 export const MAX_FILE_BYTES = 2 * 1024 * 1024
@@ -69,6 +70,27 @@ const MIME_TYPES: Record<string, string> = {
   mov: 'video/quicktime',
   pdf: 'application/pdf',
 }
+const utf8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
+const utf16le = new TextDecoder('utf-16le', { fatal: true, ignoreBOM: true })
+const utf16be = new TextDecoder('utf-16be', { fatal: true, ignoreBOM: true })
+const windows1252 = new TextDecoder('windows-1252')
+const mediaSignatures = (
+  [
+    ['png', '\x89PNG\r\n\x1a\n'],
+    ['jpg', '\xff\xd8\xff'],
+    ['gif', 'GIF87a'],
+    ['gif', 'GIF89a'],
+    ['pdf', '%PDF-'],
+    ['flac', 'fLaC'],
+    ['mp3', 'ID3'],
+    ['webm', '\x1a\x45\xdf\xa3'],
+  ] as const
+).map(([extension, signature]) => [extension, Buffer.from(signature, 'latin1')] as const)
+const riffSignature = Buffer.from('RIFF')
+const oggSignature = Buffer.from('OggS')
+const theoraSignature = Buffer.from('theora')
+const hexDigits = Buffer.from('0123456789abcdef')
+let legacyBytes: Map<string, number> | undefined
 
 interface ContentInput {
   note?: string | null
@@ -101,45 +123,53 @@ export function searchableText(bytes: Buffer, filename: string) {
   return text && !text.limited ? text.value : null
 }
 
-/** Every regular file has a bounded byte view, even when its format cannot be rendered. */
-export function fileContent(input: Buffer | ContentInput, filename: string, includeRaw = false): FileContent {
-  if (!Buffer.isBuffer(input) && input.note) return { kind: 'unavailable', note: input.note, size: 0 }
+export function fileByteView(input: Buffer | ContentInput) {
   const bytes = Buffer.isBuffer(input) ? input : input.bytes
   if (!bytes) throw new Error('The file preview has no bytes.')
-  const size = (!Buffer.isBuffer(input) ? input.size : undefined) ?? bytes.length
-  const truncated = size > bytes.length
-  const streamed = !Buffer.isBuffer(input) && input.streamed === true
-  if (!size) return { kind: 'text', value: '', note: null, size: 0 }
-  const { extension, format } = documentFormat(bytes, filename)
-  const byteView = () => ({
-    size,
+  return {
     hex: hexDump(bytes.subarray(0, MAX_HEX_BYTES)),
     hexBytes: Math.min(bytes.length, MAX_HEX_BYTES),
-  })
+  }
+}
+
+/** Every regular file has a bounded byte view, even when its format cannot be rendered. */
+export function fileContent(input: Buffer | ContentInput, filename: string, includeRaw = false): FileContent {
+  const isBuffer = Buffer.isBuffer(input)
+  if (!isBuffer && input.note) return { kind: 'unavailable', note: input.note, size: 0 }
+  const bytes = isBuffer ? input : input.bytes
+  if (!bytes) throw new Error('The file preview has no bytes.')
+  const size = (isBuffer ? undefined : input.size) ?? bytes.length
+  const truncated = size > bytes.length
+  const streamed = !isBuffer && input.streamed === true
+  if (!size) return { kind: 'text', value: '', note: null, size: 0 }
+  const { extension, format } = documentFormat(bytes, filename)
   if (format) {
-    const base = byteView()
+    const byteView = fileByteView(bytes)
     const { kind, extension: type } = format
     const mime = MIME_TYPES[type] ?? `${kind}/${type}`
     return {
-      ...base,
+      size,
+      ...byteView,
       kind: truncated && !streamed ? 'binary' : kind,
       mime,
       ...(truncated || streamed ? {} : { data: bytes.toString('base64') }),
       note:
         truncated && !streamed
-          ? `File exceeds the ${readLimit(filename) / 1024 / 1024} MiB media preview limit. Inspect its first ${base.hexBytes.toLocaleString()} bytes below.`
+          ? `File exceeds the ${readLimit(filename) / 1024 / 1024} MiB media preview limit. Inspect its first ${byteView.hexBytes.toLocaleString()} bytes below.`
           : null,
     }
   }
   const text = textContent(bytes, extension, truncated)
   if (!text)
     return {
-      ...byteView(),
+      size,
+      ...fileByteView(bytes),
       kind: 'binary',
       note: 'Binary file. Showing hexadecimal bytes and ASCII.',
     }
   return {
-    ...(text.limited || includeRaw ? byteView() : { size }),
+    size,
+    ...(text.limited || includeRaw ? fileByteView(bytes) : {}),
     kind: 'text',
     ...text,
   }
@@ -187,24 +217,26 @@ function textContent(bytes: Buffer, extension: string, truncated: boolean) {
 }
 
 function decodeText(bytes: Buffer, truncated: boolean) {
-  let encoding = 'utf-8'
+  let decoder = utf8
   let start = 0
   if (bytes[0] === 0xff && bytes[1] === 0xfe) {
-    encoding = 'utf-16le'
+    decoder = utf16le
     start = 2
   } else if (bytes[0] === 0xfe && bytes[1] === 0xff) {
-    encoding = 'utf-16be'
+    decoder = utf16be
     start = 2
   }
+  // A streaming decode can retain an incomplete code point at the preview boundary.
+  // Keep that state local to this read so the next file starts with a clean decoder.
+  const activeDecoder = truncated ? new TextDecoder(decoder.encoding, { fatal: true, ignoreBOM: true }) : decoder
   try {
-    const decoder = new TextDecoder(encoding, { fatal: true, ignoreBOM: true })
-    const value = decoder.decode(bytes.subarray(start), { stream: truncated })
+    const value = activeDecoder.decode(start ? bytes.subarray(start) : bytes, { stream: truncated })
     if (hasBinaryControls(value)) return null
-    return { value, note: encoding === 'utf-8' ? null : `Decoded as ${encoding.toUpperCase()}.` }
+    return { value, note: decoder === utf8 ? null : `Decoded as ${decoder.encoding.toUpperCase()}.` }
   } catch {
-    if (encoding !== 'utf-8') return null
+    if (decoder !== utf8) return null
     // Unmarked legacy text has no universal encoding; expose the chosen fallback explicitly.
-    const value = new TextDecoder('windows-1252').decode(bytes)
+    const value = windows1252.decode(bytes)
     if (hasBinaryControls(value) || value.includes('\uFFFD')) return null
     return { value, note: 'Decoded as Windows-1252 (no Unicode encoding marker).' }
   }
@@ -216,21 +248,15 @@ export function encodeText(value: string, original: Buffer) {
     return Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(value, 'utf16le')])
   if (original[0] === 0xfe && original[1] === 0xff)
     return Buffer.concat([Buffer.from([0xfe, 0xff]), Buffer.from(value, 'utf16le').swap16()])
-  try {
-    new TextDecoder('utf-8', { fatal: true }).decode(original)
-    return Buffer.from(value, 'utf8')
-  } catch {
-    const decoder = new TextDecoder('windows-1252')
-    const characters = new Map(Array.from({ length: 256 }, (_, byte) => [decoder.decode(Uint8Array.of(byte)), byte]))
-    return Buffer.from(
-      Array.from(value, character => {
-        const byte = characters.get(character)
-        if (byte === undefined)
-          throw new Error('This character cannot be saved in Windows-1252. The edits are still open.')
-        return byte
-      }),
-    )
+  if (isUtf8(original)) return Buffer.from(value, 'utf8')
+  legacyBytes ??= new Map(Array.from({ length: 256 }, (_, byte) => [windows1252.decode(Uint8Array.of(byte)), byte]))
+  const bytes = Buffer.allocUnsafe(value.length)
+  for (let offset = 0; offset < value.length; offset++) {
+    const byte = legacyBytes.get(value.charAt(offset))
+    if (byte === undefined) throw new Error('This character cannot be saved in Windows-1252. The edits are still open.')
+    bytes[offset] = byte
   }
+  return bytes
 }
 
 function hasBinaryControls(value: string) {
@@ -239,32 +265,59 @@ function hasBinaryControls(value: string) {
 }
 
 function detectMedia(bytes: Buffer) {
-  const starts = (signature: string) => bytes.subarray(0, signature.length).equals(Buffer.from(signature, 'binary'))
-  let extension: string | undefined
-  if (starts('\x89PNG\r\n\x1a\n')) extension = 'png'
-  else if (starts('\xff\xd8\xff')) extension = 'jpg'
-  else if (starts('GIF87a') || starts('GIF89a')) extension = 'gif'
-  else if (starts('%PDF-')) extension = 'pdf'
-  else if (starts('RIFF') && bytes.toString('ascii', 8, 12) === 'WEBP') extension = 'webp'
-  else if (starts('RIFF') && bytes.toString('ascii', 8, 12) === 'WAVE') extension = 'wav'
-  else if (starts('fLaC')) extension = 'flac'
-  else if (starts('ID3')) extension = 'mp3'
-  else if (starts('OggS')) extension = bytes.includes(Buffer.from('theora')) ? 'ogv' : 'ogg'
-  else if (starts('\x1a\x45\xdf\xa3')) extension = 'webm'
-  else if (bytes.toString('ascii', 4, 8) === 'ftyp') {
-    const brand = bytes.toString('ascii', 8, 12)
-    extension = ['avif', 'avis'].includes(brand) ? 'avif' : brand === 'M4A ' ? 'm4a' : 'mp4'
+  for (const [extension, signature] of mediaSignatures) {
+    if (bytes[0] === signature[0] && bytes.subarray(0, signature.length).equals(signature)) return extension
   }
-  return extension
+  if (bytes[0] === riffSignature[0] && bytes.subarray(0, 4).equals(riffSignature)) {
+    const format = bytes.toString('ascii', 8, 12)
+    if (format === 'WEBP') return 'webp'
+    if (format === 'WAVE') return 'wav'
+  }
+  if (bytes[0] === oggSignature[0] && bytes.subarray(0, 4).equals(oggSignature))
+    return bytes.includes(theoraSignature) ? 'ogv' : 'ogg'
+  if (bytes.toString('ascii', 4, 8) === 'ftyp') {
+    const brand = bytes.toString('ascii', 8, 12)
+    return brand === 'avif' || brand === 'avis' ? 'avif' : brand === 'M4A ' ? 'm4a' : 'mp4'
+  }
+  return undefined
 }
 
 function hexDump(bytes: Buffer) {
-  const rows = []
-  for (let offset = 0; offset < bytes.length; offset += 16) {
-    const row = bytes.subarray(offset, offset + 16)
-    const hex = [...row].map(byte => byte.toString(16).padStart(2, '0')).join(' ')
-    const ascii = [...row].map(byte => (byte >= 32 && byte <= 126 ? String.fromCharCode(byte) : '.')).join('')
-    rows.push(`${offset.toString(16).padStart(8, '0')}  ${hex.padEnd(47)}  |${ascii}|`)
+  const bytesPerRow = 16
+  const addressWidth = 8
+  const hexStart = addressWidth + 2
+  const firstBar = hexStart + bytesPerRow * 3 + 1
+  const asciiStart = firstBar + 1
+  const rowWidth = asciiStart + bytesPerRow + 2
+  const space = 32
+  const dot = 46
+  const bar = 124
+  const newline = 10
+  const output = Buffer.allocUnsafe(Math.ceil(bytes.length / bytesPerRow) * rowWidth)
+  let row = 0
+  for (let offset = 0; offset < bytes.length; offset += bytesPerRow) {
+    let address = offset
+    for (let digit = addressWidth - 1; digit >= 0; digit--) {
+      output[row + digit] = hexDigits.readUInt8(address & 0xf)
+      address >>>= 4
+    }
+    output[row + addressWidth] = space
+    output[row + addressWidth + 1] = space
+    let hex = row + hexStart
+    let ascii = row + asciiStart
+    const end = Math.min(offset + bytesPerRow, bytes.length)
+    for (let index = offset; index < end; index++) {
+      const byte = bytes.readUInt8(index)
+      output[hex++] = hexDigits.readUInt8(byte >>> 4)
+      output[hex++] = hexDigits.readUInt8(byte & 0xf)
+      output[hex++] = space
+      output[ascii++] = byte >= 32 && byte <= 126 ? byte : dot
+    }
+    output.fill(space, hex, row + firstBar)
+    output[row + firstBar] = bar
+    output[ascii++] = bar
+    output[ascii++] = newline
+    row = ascii
   }
-  return rows.join('\n')
+  return output.toString('latin1', 0, Math.max(0, row - 1))
 }

@@ -51,6 +51,9 @@ test('binary inspection preserves byte offsets and ASCII and bounds its payload'
   assert.match(result.hex, /^00000000  54 65 73 74 00/)
   assert.match(result.hex, /\|Test\.{12}\|/)
   assert.equal(result.hex.split('\n').length, 4096)
+
+  const partial = fileContent(Buffer.from([31, 32, 126, 127, 255]), 'data.bin')
+  assert.equal(partial.hex, `00000000  1f 20 7e 7f ff${' '.repeat(35)}|. ~..|`)
 })
 
 test('native formats use explicit MIME types and common magic identifies extensionless media', () => {

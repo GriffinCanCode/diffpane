@@ -117,6 +117,29 @@ test('bounds matching lines and cancels an in-flight scan', async () => {
   assert.equal(await pending, null)
 })
 
+test('counts mixed line endings and uses only the first Unicode match per line', async () => {
+  const result = await searchRepositoryContent(
+    {
+      contentSearchPaths: async () => ({ paths: ['miss.txt', 'hits.txt'], truncated: false }),
+      contentSearchFile: async filename => ({
+        text: filename === 'miss.txt' ? '\uFEFFplain\r\n' : '\uFEFF\r\n\r\n🙂K k\rk\n\nmiss\r\nlast K',
+        bytes: 64,
+      }),
+    },
+    { query: 'k', scope: 'workspace', matchCase: false },
+    new AbortController().signal,
+  )
+  assert.ok(result)
+  assert.deepEqual(
+    result.matches.map(({ line, column, match }) => [line, column, match]),
+    [
+      [3, 3, 'K'],
+      [4, 1, 'k'],
+      [7, 6, 'K'],
+    ],
+  )
+})
+
 test('a cancelled search cannot complete successfully with an empty inventory', async () => {
   const cancellation = new AbortController()
   /** @type {PromiseWithResolvers<{ paths: string[]; truncated: boolean }>} */
