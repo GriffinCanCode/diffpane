@@ -45,6 +45,7 @@ electron_1.contextBridge.exposeInMainWorld('diffpane', {
     onEvent: callback => listen('language-event', callback),
   },
   snapshot: () => electron_1.ipcRenderer.invoke('snapshot'),
+  captureCheckpoint: () => electron_1.ipcRenderer.invoke('capture-checkpoint'),
   files: () => electron_1.ipcRenderer.invoke('files'),
   filesDelta: revision => electron_1.ipcRenderer.invoke('files-delta', revision),
   directoryExpanded: (path, expanded) =>

@@ -33,6 +33,10 @@ let catalogIndex = new Map();
 let snapshotIndex = new Map();
 let reviewStates = new Map();
 let reviewVersion = 0;
+let checkpoint;
+let checkpointIndex = new Map();
+let checkpointCapture;
+let checkpointId = 0;
 let requestedDocumentPath;
 let inventoryDirty = false;
 let broadChanges = false;
@@ -57,18 +61,30 @@ const documentStamps = new Map();
 const subscriptions = [];
 const diffs = new DiffRuntime();
 const documents = new DocumentCache(async (filePath, comparison) => {
-  const file = await findFile(filePath);
+  const isCheckpoint = comparison.startsWith('checkpoint:');
+  const baseline = isCheckpoint ? checkpoint : undefined;
+  if (isCheckpoint && (!baseline || comparison !== `checkpoint:${baseline.id}`))
+    throw new Error('This review checkpoint has been replaced.');
+  const checkpointFile = baseline && checkpointIndex.get(filePath);
+  const file = baseline ? (checkpointFile ?? { path: filePath }) : await findFile(filePath);
   if (!file) throw new Error('This file is no longer available in this directory.');
   const start = performance.now();
-  const contents = await repository.contents(file, comparison);
+  const contents = baseline
+    ? await repository.checkpointContents(baseline, file)
+    : await repository.contents(file, comparison);
   const changes = await diffs.calculate(contents.before, contents.after);
   return {
     path: filePath,
-    reviewVersion: file.reviewVersion,
+    reviewVersion: baseline ? checkpointFile?.reviewVersion : file.reviewVersion,
     before: contents.before,
     after: contents.after,
     note: contents.note,
-    editable: !contents.preview && !file.submodule && (await repository.editable(filePath)),
+    ...(contents.workingMissing ? { workingMissing: true } : {}),
+    editable:
+      !contents.workingMissing &&
+      !contents.preview &&
+      !file.submodule &&
+      (await repository.editable(filePath)),
     ...(contents.preview ? { preview: contents.preview } : {}),
     ...changes,
     lineCount: countLines(contents.after),
@@ -146,6 +162,10 @@ function queueFallback() {
 
 async function pollState(result) {
   const filePaths = new Set(result.files.map(file => file.path));
+  if (checkpoint) {
+    for (const filename of checkpoint.paths.keys()) filePaths.add(filename);
+    for (const filename of checkpointIndex.keys()) filePaths.add(filename);
+  }
   for (const entry of documents.entries.values()) filePaths.add(entry.path);
   for (const work of documents.pending.values()) filePaths.add(work.path);
   if (requestedDocumentPath) filePaths.add(requestedDocumentPath);
@@ -288,6 +308,58 @@ async function versionReviewFiles(files, changedPaths, scanAll, stamps = new Map
   return { states, index, changedVersions };
 }
 
+async function scanCheckpoint(result) {
+  if (!checkpoint) return { value: null, index: checkpointIndex, changedPaths: [] };
+  const { id, capturedAt } = checkpoint;
+  try {
+    const files = await repository.checkpointFiles(checkpoint, result);
+    const sameCheckpoint = id === snapshot?.checkpoint?.id;
+    const index = new Map();
+    const changedPaths = [];
+    for (const { statusKey, ...file } of files) {
+      const previous = sameCheckpoint ? checkpointIndex.get(file.path) : undefined;
+      if (previous?.statusKey === statusKey) index.set(file.path, previous);
+      else {
+        index.set(file.path, { ...file, statusKey, reviewVersion: ++reviewVersion });
+        changedPaths.push(file.path);
+      }
+    }
+    for (const filename of checkpointIndex.keys())
+      if (!index.has(filename)) changedPaths.push(filename);
+    return {
+      value: { id, capturedAt, files: [...index.values()] },
+      index,
+      changedPaths,
+    };
+  } catch (error) {
+    const index = id === snapshot?.checkpoint?.id ? checkpointIndex : new Map();
+    return {
+      value: { id, capturedAt, files: [...index.values()], error: error.message },
+      index,
+      changedPaths: [],
+    };
+  }
+}
+
+function captureCheckpoint() {
+  checkpointCapture ??= (async () => {
+    const baseline = await repository.captureCheckpoint();
+    if (refreshing) await currentRefresh.catch(() => {});
+    if (shuttingDown) throw new Error('The workspace is closing.');
+    const previous = checkpoint;
+    checkpoint = Object.assign(baseline, { id: ++checkpointId });
+    try {
+      return await refresh();
+    } catch (error) {
+      checkpoint = previous;
+      throw error;
+    }
+  })().finally(() => {
+    checkpointCapture = undefined;
+  });
+  return checkpointCapture;
+}
+
 function polledPaths(before, after) {
   // A newly selected document or expanded directory is observed for the first
   // time here; adding it to the polling baseline is not a filesystem change.
@@ -348,7 +420,15 @@ async function performRefresh() {
     if (
       !all &&
       paths.length &&
-      !paths.some(file => affectsRequestedDocument(path.relative(repository.root, file))) &&
+      checkpoint?.id === snapshot?.checkpoint?.id &&
+      !paths.some(file => {
+        const relative = path.relative(repository.root, file);
+        return (
+          affectsRequestedDocument(relative) ||
+          checkpoint?.paths.has(relative) ||
+          checkpointIndex.has(relative)
+        );
+      }) &&
       !(await repository.hasRelevantPaths(paths))
     )
       return snapshot;
@@ -358,6 +438,7 @@ async function performRefresh() {
     let changedPaths = paths.map(file => path.relative(repository.root, file));
     const observed = fallbackActive && (poll || !fallbackState) ? await pollState(result) : null;
     const review = await versionReviewFiles(result.files, changedPaths, all, observed?.files);
+    const checkpointReview = await scanCheckpoint(result);
     if (observed) {
       const documentChanges = await polledDocuments(observed);
       if (documentChanges.length) documents.invalidate(documentChanges);
@@ -377,6 +458,9 @@ async function performRefresh() {
           !refreshInventory &&
           !changedPaths.length &&
           !review.changedVersions.length &&
+          !checkpointReview.changedPaths.length &&
+          checkpointReview.value?.id === snapshot?.checkpoint?.id &&
+          checkpointReview.value?.error === snapshot?.checkpoint?.error &&
           !statusChanged &&
           !metadataChanged &&
           !fileChanges.length &&
@@ -406,18 +490,23 @@ async function performRefresh() {
     }
     revision++;
     if (all) changedPaths = ['*'];
-    else if (review.changedVersions.length)
-      changedPaths = [...new Set([...changedPaths, ...review.changedVersions])];
+    else if (review.changedVersions.length || checkpointReview.changedPaths.length)
+      changedPaths = [
+        ...new Set([...changedPaths, ...review.changedVersions, ...checkpointReview.changedPaths]),
+      ];
     howmany.changed(changedPaths);
     // Reads that raced the Git status scan may still carry the previous comparison version.
-    if (review.changedVersions.length) documents.invalidate(review.changedVersions);
+    const changedVersions = [...review.changedVersions, ...checkpointReview.changedPaths];
+    if (changedVersions.length) documents.invalidate(changedVersions);
     reviewStates = review.states;
     snapshotIndex = review.index;
+    checkpointIndex = checkpointReview.index;
     syncExternalReviewPaths(reviewStates);
     if (refreshInventory) invalidateCatalog();
     snapshot = {
       ...result,
       files: [...snapshotIndex.values()],
+      checkpoint: checkpointReview.value,
       root: repository.root,
       scope: repository.scope,
       initialPath,
@@ -496,7 +585,17 @@ async function claudeFile(filePath) {
 }
 
 async function document(filePath, comparison, priority = false) {
-  if (typeof filePath !== 'string' || !['head', 'unstaged', 'staged'].includes(comparison))
+  if (
+    typeof filePath !== 'string' ||
+    !(
+      ['head', 'unstaged', 'staged'].includes(comparison) ||
+      (checkpoint &&
+        comparison === `checkpoint:${checkpoint.id}` &&
+        filePath &&
+        !path.isAbsolute(filePath) &&
+        !filePath.split('/').some(part => ['.', '..', '.git', ''].includes(part.toLowerCase())))
+    )
+  )
     throw new Error('Invalid document request');
   if (priority) requestedDocumentPath = filePath;
   let observed = documentStamps.get(filePath);
@@ -523,6 +622,7 @@ parentPort.on('message', async ({ id, method, args = [] }) => {
   try {
     let value;
     if (method === 'snapshot') value = snapshot ?? (await refresh());
+    else if (method === 'capture-checkpoint') value = await captureCheckpoint();
     else if (method === 'operation-path' || method === 'rename') {
       await files();
       if (catalogIndex.get(args[0])?.submodule)
@@ -636,6 +736,7 @@ parentPort.on('message', async ({ id, method, args = [] }) => {
       // are still starting. Let that work finish before tearing down its isolate.
       await watchSetup;
       await Promise.all(subscriptions.map(subscription => subscription.unsubscribe()));
+      await checkpointCapture?.catch(() => {});
       await currentRefresh?.catch(() => {});
       await Promise.all([languages.dispose(), diffs.dispose(), howmany.dispose()]);
       value = null;
@@ -678,6 +779,8 @@ const watchSetup = (async () => {
             if (
               !documents.hasPath(relative) &&
               !affectsRequestedDocument(relative) &&
+              !checkpoint?.paths.has(relative) &&
+              !checkpointIndex.has(relative) &&
               ((!known && !snapshotIndex.has(relative) && collapsedIgnoredParent(relative)) ||
                 (event.type === 'update' &&
                   repository.inventoryMetadata.get(relative)?.directory &&

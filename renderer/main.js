@@ -133,6 +133,7 @@ let documentFrame = null;
 let navigationVersion = 0;
 let reviewVisible = false;
 let reviewScope = 'focus';
+let reviewComparison = 'head';
 const savedViews = new Map();
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 let recentVersion = 0;
@@ -337,6 +338,22 @@ function applyEditorReadOnly(card) {
   card.editor?.updateOptions({ readOnly, domReadOnly: readOnly });
 }
 
+function closeCurrentFile() {
+  navigationVersion++;
+  for (const card of cards.values()) deactivate(card);
+  cards.clear();
+  openedFile = null;
+  assistant?.setContext(Boolean(snapshot), null);
+  ideas?.refreshContext();
+  ui.feed.replaceChildren();
+  ui.empty_state.hidden = false;
+  navigator.select(null);
+  syncReviewState();
+  document.getElementById('save-state').textContent = 'Autosave on';
+  const outline = ui.navigator.querySelector('.navigator-outline .symbol-list');
+  if (outline) outline.textContent = 'Open a file to see its outline';
+}
+
 async function mutateFile(action, pathname, name) {
   const current = cards.get(openedFile?.path);
   const affected =
@@ -352,26 +369,12 @@ async function mutateFile(action, pathname, name) {
     if (action === 'rename') navigator.renamed(pathname, destination);
     if (affected && openedFile?.path === current?.file.path) {
       const previous = openedFile.path;
-      navigationVersion++;
-      for (const card of cards.values()) {
-        deactivate(card);
-        card.element.remove();
-      }
-      cards.clear();
-      openedFile = null;
-      assistant?.setContext(Boolean(snapshot), null);
-      ideas?.refreshContext();
+      closeCurrentFile();
       if (action === 'rename')
-        await openFile({ path: destination + previous.slice(pathname.length) });
-      else {
-        ui.feed.replaceChildren();
-        ui.empty_state.hidden = false;
-        navigator.select(null);
-        syncReviewState();
-        document.getElementById('save-state').textContent = 'Autosave on';
-        const outline = ui.navigator.querySelector('.navigator-outline .symbol-list');
-        if (outline) outline.textContent = 'Open a file to see its outline';
-      }
+        await openFile(
+          { path: destination + previous.slice(pathname.length) },
+          { compare: current?.comparing, comparison: current?.comparison },
+        );
     }
     if (action === 'rename' && !affected) navigator.select(destination);
   } finally {
@@ -395,8 +398,15 @@ const navigator = createNavigator(ui.navigator, api, openFile, {
 });
 const reviewBadge = ui.review_toggle.querySelector('.review-count');
 const review = createChangeReview(ui.change_review, {
-  onOpen: file => openFile(file, { compare: true }),
+  onOpen: file => openFile(file, { compare: true, comparison: reviewComparison }),
   onBack: toggleReview,
+  onBaseline: updateReviewBaseline,
+  onCapture: async () => {
+    await cards.get(openedFile?.path)?.autosave?.flush();
+    if (closingRequested || closed) throw new Error('This window is closing.');
+    applySnapshot(await api.captureCheckpoint());
+    if (!closed) updateReviewBaseline('checkpoint');
+  },
   onProgress: ({ pending, total }) => {
     const complete = total > 0 && pending === 0;
     reviewBadge.hidden = total === 0;
@@ -414,11 +424,48 @@ const review = createChangeReview(ui.change_review, {
 });
 ui.review_toggle.addEventListener('click', toggleReview);
 
+function reviewFiles(comparison = reviewComparison) {
+  return (comparison === 'head' ? snapshot?.files : snapshot?.checkpoint?.files) ?? [];
+}
+
+function updateReviewBaseline(mode = reviewComparison === 'head' ? 'head' : 'checkpoint') {
+  const checkpoint = snapshot?.checkpoint;
+  const next = mode === 'checkpoint' && checkpoint ? `checkpoint:${checkpoint.id}` : 'head';
+  const changed = next !== reviewComparison;
+  reviewComparison = next;
+  review.setBaseline(next === 'head' ? 'head' : 'checkpoint', checkpoint);
+  const files = reviewFiles();
+  if (changed) {
+    navigationVersion++;
+    const card = cards.get(openedFile?.path);
+    if (card?.reviewComparison) {
+      const file = files.find(entry => entry.path === card.file.path);
+      if (file) openComparison(card, next, file);
+      else if (isCheckpointOnlyDeletion(card)) closeCurrentFile();
+      else {
+        card.modeVersion = (card.modeVersion ?? 0) + 1;
+        card.comparing = false;
+        card.reviewComparison = false;
+        setDocumentComparison(card, 'head');
+        if (card.document && !card.autosave?.pending) renderDocument(card, card.document);
+      }
+    }
+  }
+  review.update(files);
+  syncReviewState();
+}
+
+function isCheckpointOnlyDeletion(card) {
+  return (
+    card.document?.workingMissing && !reviewFiles('head').some(file => file.path === card.file.path)
+  );
+}
+
 function syncReviewState() {
   const card = cards.get(openedFile?.path);
   const version = card?.document?.reviewVersion ?? null;
   let state = null;
-  if (card?.comparing) {
+  if (card?.comparing && card.comparison === reviewComparison) {
     if (closingRequested) state = 'closing';
     else if (card.autosave?.pending) state = card.saveError ? 'save-failed' : 'saving';
     else if (card.loading || card.dirty) state = 'loading';
@@ -534,7 +581,10 @@ function attachIdeaLink(link) {
   ideas.attach(link);
 }
 
-async function openFile(file, { compare = false, anchor = null, ideaLink = false } = {}) {
+async function openFile(
+  file,
+  { compare = false, comparison = 'head', anchor = null, ideaLink = false } = {},
+) {
   if (closingRequested || closed) return false;
   const version = ++navigationVersion;
   const current = cards.get(openedFile?.path);
@@ -571,13 +621,15 @@ async function openFile(file, { compare = false, anchor = null, ideaLink = false
         });
       }
       current.reviewComparison = false;
+      const reloading = setDocumentComparison(current, 'head');
       if (current.documentFailed) {
         current.dirty = true;
         scheduleDocument();
-      } else if (modeChanged && current.document) renderDocument(current, current.document);
-      else if (!current.loading) revealReviewAnchor(current);
+      } else if (modeChanged && current.document && (!reloading || !comparing)) {
+        renderDocument(current, current.document);
+      } else if (!reloading && !current.loading) revealReviewAnchor(current);
       syncReviewState();
-    } else if (compare) openComparison(current);
+    } else if (compare) openComparison(current, comparison, file);
     return true;
   }
   for (const card of cards.values()) {
@@ -592,7 +644,7 @@ async function openFile(file, { compare = false, anchor = null, ideaLink = false
   cards.clear();
   openedFile = file;
   assistant?.setContext(Boolean(snapshot), file.path);
-  const card = createCard(snapshot?.files.find(value => value.path === file.path) ?? file);
+  const card = createCard(reviewFiles(comparison).find(value => value.path === file.path) ?? file);
   card.pendingReviewAnchor = anchor;
   card.anchorFromIdea = ideaLink;
   if (anchor) {
@@ -607,7 +659,7 @@ async function openFile(file, { compare = false, anchor = null, ideaLink = false
   ui.empty_state.hidden = true;
   document.getElementById('save-state').textContent = 'Autosave on';
   navigator.select(file.path);
-  if (compare) openComparison(card);
+  if (compare) openComparison(card, comparison);
   else syncReviewState();
   const outline = ui.navigator.querySelector('.navigator-outline .symbol-list');
   if (outline)
@@ -789,6 +841,7 @@ function createCard(file) {
     changes: [],
     changeIndex: -1,
     comparing: false,
+    comparison: 'head',
     textBytes: 0,
   };
   const slash = file.path.lastIndexOf('/');
@@ -843,6 +896,7 @@ function createCard(file) {
           if (!source) {
             card.comparing = false;
             card.reviewComparison = false;
+            setDocumentComparison(card, 'head');
           }
           return true;
         });
@@ -892,7 +946,7 @@ function applySnapshot(next) {
     document.querySelector('.statusbar-end').hidden = false;
   }
   navigator.update(next);
-  review.update(next.files);
+  updateReviewBaseline();
   ui.project_name.textContent =
     next.scope?.split('/').filter(Boolean).pop() ||
     next.root?.split('/').filter(Boolean).pop() ||
@@ -908,7 +962,7 @@ function applySnapshot(next) {
     void openFile({ path: next.initialPath || next.files[0].path, submodule: false });
   else {
     const card = cards.get(openedFile?.path);
-    const file = card && next.files.find(file => file.path === card.file.path);
+    const file = card && reviewFiles(card.comparison).find(file => file.path === card.file.path);
     if (
       card &&
       (allDirty ||
@@ -933,12 +987,15 @@ async function loadDocument(card) {
   card.documentFailed = false;
   syncReviewState();
   const generation = card.generation;
+  const comparison = card.comparison;
   const editVersion = card.editVersion ?? 0;
   card.element.classList.add('is-loading');
   try {
     const [document, media] = await Promise.all([
-      api.document(card.file.path, 'head'),
-      mediaType(card.file.path) ? api.media(card.file.path).catch(() => null) : null,
+      api.document(card.file.path, comparison),
+      mediaType(card.file.path) && card.file.worktree !== 'D'
+        ? api.media(card.file.path).catch(() => null)
+        : null,
     ]);
     if (!card.active || generation !== card.generation || !cards.has(card.file.path)) return;
     if (card.autosave?.pending || editVersion !== (card.editVersion ?? 0)) {
@@ -948,6 +1005,10 @@ async function loadDocument(card) {
     if (document.error) throw new Error(document.error);
     // Paint completed reads during edit storms, then reconcile any newer invalidation.
     card.currentMedia = media;
+    if (card.renderedComparison !== comparison) {
+      card.renderedComparison = comparison;
+      card.noteSide = card.ideaSide = 'working';
+    }
     renderDocument(card, document);
   } catch (error) {
     if (card.active && generation === card.generation) {
@@ -1025,6 +1086,7 @@ function editorOptions(card) {
 
 function renderDocument(card, document) {
   card.document = document;
+  const baseline = comparisonLabel(card);
   const preview = document.preview;
   const reading = !preview && isMarkdown(card.file.path) && !card.markdownSource;
   const text = document.after ?? '';
@@ -1033,7 +1095,7 @@ function renderDocument(card, document) {
     (!preview &&
       (document.note ||
         document.diffNote ||
-        (!text && (card.file.worktree === 'D' || card.file.index === 'D')
+        (!text && (document.workingMissing || card.file.worktree === 'D' || card.file.index === 'D')
           ? 'This file was deleted. There are no current contents.'
           : ''))) ||
     '';
@@ -1066,7 +1128,10 @@ function renderDocument(card, document) {
   button.setAttribute('aria-label', card.comparing ? 'Show current file' : 'Compare whole file');
   button.title = card.comparing ? 'Show current file' : 'Compare whole file · changed functions';
   card.element.dataset.diff = String(card.comparing);
-  card.element.querySelector('.comparison-labels').hidden = !card.comparing || Boolean(preview);
+  const labels = card.element.querySelector('.comparison-labels');
+  labels.hidden = !card.comparing || Boolean(preview);
+  labels.querySelector('.comparison-original').textContent = baseline;
+  labels.querySelector('.comparison-inline').textContent = `${baseline} → Working file · Inline`;
   if (preview) {
     globalThis.document.getElementById('save-state').textContent = 'Read only';
     releaseEditor(card);
@@ -1083,6 +1148,7 @@ function renderDocument(card, document) {
       card.comparing,
       card.currentMedia,
       {
+        baseline,
         raw: card.previewRaw,
         onRawChange: raw => {
           card.previewRaw = raw;
@@ -1180,8 +1246,13 @@ function renderDocument(card, document) {
     if (state) card.editor.restoreViewState(state);
   }
   if (Boolean(card.diffEditor) !== card.comparing) setCardEditor(card, card.editor.saveViewState());
+  if (card.diffEditor) {
+    card.diffEditor.updateOptions(comparisonAriaLabels(card));
+    card.headContext?.set(baseline === 'HEAD');
+  }
   card.text = text;
   card.autosave.accept(text);
+  syncLanguageAttachment(card);
   applyEditorReadOnly(card);
   updateSaveLabel(card);
   card.textBytes = text.length * 2 + (card.originalModel ? (document.before?.length ?? 0) * 2 : 0);
@@ -1213,7 +1284,7 @@ function renderDocument(card, document) {
       options: {
         isWholeLine: !deleted,
         linesDecorationsClassName: `diff-gutter-${kind}`,
-        linesDecorationsTooltip: `${kind === 'deleted' ? 'Lines deleted' : kind === 'modified' ? 'Lines modified' : 'Lines added'} compared with HEAD`,
+        linesDecorationsTooltip: `${kind === 'deleted' ? 'Lines deleted' : kind === 'modified' ? 'Lines modified' : 'Lines added'} compared with ${baseline}`,
         overviewRuler: {
           color: { deleted: '#ac6266', modified: '#477d92', added: '#52785b' }[kind],
           position: monaco.editor.OverviewRulerLane.Left,
@@ -1233,7 +1304,8 @@ function renderDocument(card, document) {
   (card.diffEditor ?? card.editor).layout();
   card.editor.render(true);
   revealReviewAnchor(card);
-  howmany.updateFile(card, document);
+  if (document.workingMissing) howmany.clearFile(card);
+  else howmany.updateFile(card, document);
   if (card.diffEditor) void highlightFunctions(card);
   else card.changedFunctions = 0;
   if (card.element.querySelector('.symbol-outline').open) void showSymbols(card);
@@ -1251,6 +1323,7 @@ function selectionLines(selection) {
 }
 
 function captureIdeaLink(card, side = card.ideaSide ?? 'working') {
+  if (side === 'head' && comparisonLabel(card) === 'Checkpoint') side = 'working';
   const editor = side === 'head' ? card.diffEditor?.getOriginalEditor() : card.editor;
   const model = editor?.getModel();
   const path = card.file.path;
@@ -1270,6 +1343,7 @@ function captureIdeaLink(card, side = card.ideaSide ?? 'working') {
 }
 
 function captureReviewAnchor(card, side, includeLines = true) {
+  if (side === 'head' && comparisonLabel(card) === 'Checkpoint') side = 'working';
   const original = side === 'head';
   const editor = original ? card.diffEditor?.getOriginalEditor() : card.editor;
   const model = includeLines ? editor?.getModel() : null;
@@ -1356,24 +1430,47 @@ async function changeDocumentMode(card, change) {
     return;
   }
   if (!card.active || closingRequested || intent !== card.modeVersion || !change()) return;
-  renderDocument(card, card.document);
+  if (!card.comparing || card.comparison === card.renderedComparison)
+    renderDocument(card, card.document);
   syncReviewState();
 }
 
 function toggleDiff(card) {
   const comparing = !card.comparing;
+  if (!comparing && isCheckpointOnlyDeletion(card)) return closeCurrentFile();
   return changeDocumentMode(card, () => {
     card.pendingReviewAnchor = null;
     card.comparing = comparing;
     if (comparing) card.markdownSource = true;
-    else card.reviewComparison = false;
+    else {
+      card.reviewComparison = false;
+      setDocumentComparison(card, 'head');
+    }
     return true;
   });
 }
 
-function openComparison(card) {
+function setDocumentComparison(card, comparison) {
+  if (card.comparison === comparison) return false;
+  card.comparison = comparison;
+  card.generation++;
+  card.dirty = true;
+  card.reviewFocus.detach();
+  card.diffEditor?.updateOptions({
+    ...comparisonAriaLabels(card),
+    hideUnchangedRegions: { enabled: false },
+  });
+  const file = reviewFiles(comparison).find(file => file.path === card.file.path);
+  card.file = file ?? { path: card.file.path };
+  scheduleDocument();
+  return true;
+}
+
+function openComparison(card, comparison, file) {
   card.modeVersion = (card.modeVersion ?? 0) + 1;
-  if (!card.reviewComparison || !card.comparing) {
+  const reloading = setDocumentComparison(card, comparison);
+  if (file) card.file = file;
+  if (!card.reviewComparison || !card.comparing || reloading) {
     card.reviewComparison = true;
     card.diffEditor?.updateOptions({
       ...diffAppearance(appearance.value, true),
@@ -1381,7 +1478,7 @@ function openComparison(card) {
     });
     card.comparing = true;
     card.markdownSource = true;
-    if (card.document && !card.documentFailed) {
+    if (card.document && !card.documentFailed && !reloading) {
       renderDocument(card, card.document);
     }
   }
@@ -1392,15 +1489,20 @@ function openComparison(card) {
   syncReviewState();
 }
 
+function comparisonLabel(card) {
+  return card.renderedComparison?.startsWith('checkpoint:') ? 'Checkpoint' : 'HEAD';
+}
+
 function comparisonAriaLabels(card) {
   return {
-    originalAriaLabel: `HEAD contents of ${card.file.originalPath || card.file.path}`,
+    originalAriaLabel: `${comparisonLabel(card)} contents of ${card.file.originalPath || card.file.path}`,
     modifiedAriaLabel: `Working contents of ${card.file.path}`,
   };
 }
 
 function setCardEditor(card, state) {
   for (const action of card.contextActions ?? []) action.dispose();
+  card.headContext = null;
   card.languageCleanup?.();
   card.languageCleanup = null;
   if (card.diffEditor) {
@@ -1440,6 +1542,10 @@ function setCardEditor(card, state) {
     card.diffEditor.setModel({ original: card.originalModel, modified: card.model });
     card.editor = card.diffEditor.getModifiedEditor();
     const originalEditor = card.diffEditor.getOriginalEditor();
+    card.headContext = originalEditor.createContextKey(
+      'diffpaneHeadBaseline',
+      comparisonLabel(card) === 'HEAD',
+    );
     card.diffEditor.updateOptions(comparisonAriaLabels(card));
     const labels = card.element.querySelector('.comparison-labels');
     const syncLabelWidth = ({ width }) =>
@@ -1465,6 +1571,7 @@ function setCardEditor(card, state) {
           editor.addAction({
             id: `diffpane-add-review-note-${side}`,
             label: 'Add review note',
+            precondition: side === 'head' ? 'diffpaneHeadBaseline' : undefined,
             contextMenuGroupId: 'navigation',
             contextMenuOrder: 20,
             run: () => {
@@ -1484,6 +1591,7 @@ function setCardEditor(card, state) {
           editor.addAction({
             id: `diffpane-attach-idea-${side}`,
             label: 'Attach selection or view to an idea',
+            precondition: side === 'head' ? 'diffpaneHeadBaseline' : undefined,
             contextMenuGroupId: 'navigation',
             contextMenuOrder: 21,
             run: () => attachIdeaLink(captureIdeaLink(card, side)),
@@ -1495,10 +1603,18 @@ function setCardEditor(card, state) {
     if (card.diffEditor) bindContext(card.diffEditor.getOriginalEditor(), 'head');
   }
   card.decorationCollection = card.editor.createDecorationsCollection();
-  card.languageCleanup = languageFeatures.attach(card.editor, card.model, card.file.path, {
-    active: true,
-  });
   if (state) card.editor.restoreViewState(state);
+}
+
+function syncLanguageAttachment(card) {
+  if (card.document.workingMissing) {
+    card.languageCleanup?.();
+    card.languageCleanup = null;
+  } else if (!card.languageCleanup) {
+    card.languageCleanup = languageFeatures.attach(card.editor, card.model, card.file.path, {
+      active: true,
+    });
+  }
 }
 
 async function highlightFunctions(card) {
@@ -1594,6 +1710,7 @@ function releaseEditor(card) {
   if (!card.editor) return;
   for (const action of card.contextActions ?? []) action.dispose();
   card.contextActions = [];
+  card.headContext = null;
   card.noteSide = 'working';
   card.ideaSide = 'working';
   card.contentCleanup?.dispose();

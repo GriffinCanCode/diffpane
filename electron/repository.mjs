@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import { lstat, open, readdir, readlink, realpath } from 'node:fs/promises';
 import path from 'node:path';
@@ -8,9 +9,29 @@ import { mediaType } from '../media-types.ts';
 
 const MAX_STATUS_BYTES = 16 * 1024 * 1024;
 const GIT_TIMEOUT_MS = 10_000;
+const MAX_CHECKPOINT_PATHS = 2_000;
+const MAX_CHECKPOINT_PREVIEWS = 32 * 1024 * 1024;
+const MAX_CHECKPOINT_FILE = 512 * 1024 * 1024;
+const MAX_CHECKPOINT_SCAN = 1024 * 1024 * 1024;
 const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 const empty = () => Buffer.alloc(0);
 const unavailable = note => ({ before: '', after: '', note });
+const comparePaths = (left, right) => (left < right ? -1 : left > right ? 1 : 0);
+
+function checkCheckpointPathCount(paths) {
+  if (paths.size > MAX_CHECKPOINT_PATHS)
+    throw new Error('The checkpoint needs to compare more than 2,000 paths.');
+}
+
+function checkpointStamp({ dev, ino, mode, size, mtimeNs, ctimeNs }) {
+  return `${dev}:${ino}:${mode}:${size}:${mtimeNs}:${ctimeNs}`;
+}
+
+function checkpointReadChanged(filename) {
+  return Object.assign(new Error(`${filename} changed while reading the checkpoint. Try again.`), {
+    code: 'CHECKPOINT_READ_CHANGED',
+  });
+}
 
 export class Repository {
   #saves = new Map();
@@ -36,7 +57,7 @@ export class Repository {
     return new Repository(root, scope, gitDir, commonDir);
   }
 
-  async snapshot() {
+  async #status(trackFingerprint) {
     const bytes = await git(
       this.root,
       [
@@ -53,13 +74,341 @@ export class Repository {
     const snapshot = parseStatus(bytes);
     // Polling also needs HEAD and staged blob changes that keep the same status
     // letters. Keep this internal instead of resending Git records to the UI.
-    this.statusFingerprint = bytes.toString('utf8');
+    if (trackFingerprint) this.statusFingerprint = bytes.toString('utf8');
     const scope = path.relative(this.root, this.scope).split(path.sep).join('/');
     const scoped = name => !scope || name === scope || name.startsWith(`${scope}/`);
     snapshot.files = snapshot.files.filter(
       file => scoped(file.path) || (file.originalPath !== null && scoped(file.originalPath)),
     );
     return snapshot;
+  }
+
+  snapshot() {
+    return this.#status(true);
+  }
+
+  #checkpointIncludes(filename) {
+    validatePath(filename);
+    const absolute = path.join(this.root, filename);
+    return (
+      absolute !== this.scope &&
+      !filename.split('/').some(part => part.toLowerCase() === '.git') &&
+      within(this.scope, absolute) &&
+      ![this.gitDir, this.commonDir].some(directory => within(directory, absolute))
+    );
+  }
+
+  #checkpointStatusPaths(status) {
+    const paths = new Set();
+    for (const file of status.files) {
+      if (file.submodule) continue;
+      if (this.#checkpointIncludes(file.path)) paths.add(file.path);
+      if (file.originalPath && this.#checkpointIncludes(file.originalPath))
+        paths.add(file.originalPath);
+      checkCheckpointPathCount(paths);
+    }
+    return paths;
+  }
+
+  async captureCheckpoint() {
+    const status = await this.#status(false);
+    const candidates = this.#checkpointStatusPaths(status);
+    const algorithm = status.head
+      ? status.head.length === 64
+        ? 'sha256'
+        : 'sha1'
+      : await gitPath(this.root, ['rev-parse', '--show-object-format']);
+    const budget = { bytes: 0, previews: 0 };
+    const paths = new Map();
+    // Git already retains clean paths in HEAD. Copy only paths whose working version may differ.
+    for (const filename of candidates)
+      paths.set(
+        filename,
+        await this.#readCheckpointFile(filename, { algorithm, budget, capture: true }),
+      );
+
+    const latest = await this.#status(false);
+    const latestPaths = this.#checkpointStatusPaths(latest);
+    if (
+      latest.head !== status.head ||
+      latestPaths.size !== paths.size ||
+      [...paths.keys()].some(filename => !latestPaths.has(filename))
+    )
+      throw new Error('The working tree changed while capturing the checkpoint. Try again.');
+    for (const [filename, captured] of paths) {
+      const entry = await this.#checkpointEntry(filename);
+      if (entry?.stamp !== captured?.stamp)
+        throw new Error('The working tree changed while capturing the checkpoint. Try again.');
+    }
+    return {
+      capturedAt: Date.now(),
+      head: status.head,
+      algorithm,
+      paths,
+      current: new Map(paths),
+      baseline: new Map(),
+      committed: null,
+    };
+  }
+
+  async checkpointFiles(checkpoint, status) {
+    const candidates = this.#checkpointStatusPaths(status);
+    const byPath = new Map(status.files.map(file => [file.path, file]));
+    for (const filename of checkpoint.paths.keys()) candidates.add(filename);
+    if (checkpoint.head !== status.head) {
+      if (checkpoint.committed?.head !== status.head) {
+        checkpoint.committed = {
+          head: status.head,
+          paths: await this.#checkpointCommitPaths(checkpoint.head, status.head),
+        };
+      }
+      for (const filename of checkpoint.committed.paths) candidates.add(filename);
+    }
+    checkCheckpointPathCount(candidates);
+    const unresolved = [...candidates].filter(
+      filename => !checkpoint.paths.has(filename) && !checkpoint.baseline.has(filename),
+    );
+    const entries = await this.#checkpointTreeEntries(checkpoint.head, unresolved);
+    const baseline = new Map();
+    const current = new Map();
+    const files = [];
+    const budget = { bytes: 0 };
+    for (const filename of [...candidates].sort(comparePaths)) {
+      const captured = checkpoint.paths.has(filename);
+      const before = captured
+        ? checkpoint.paths.get(filename)
+        : (checkpoint.baseline.get(filename) ?? entries.get(filename) ?? null);
+      if (!captured) baseline.set(filename, before);
+      const workingStatus = byPath.get(filename);
+      if (before?.mode === '160000' || workingStatus?.submodule) continue;
+      const options = {
+        algorithm: checkpoint.algorithm,
+        budget,
+        cached: checkpoint.current.get(filename),
+      };
+      const after = await this.#readCheckpointFile(filename, options).catch(error => {
+        if (error.code !== 'CHECKPOINT_READ_CHANGED') throw error;
+        // An atomic editor save can replace the path between stat and open.
+        return this.#readCheckpointFile(filename, options);
+      });
+      if (after) current.set(filename, after);
+      if (before?.oid === after?.oid && before?.mode === after?.mode) continue;
+      const worktree = !before
+        ? 'A'
+        : !after
+          ? 'D'
+          : before.mode.slice(0, 2) !== after.mode.slice(0, 2)
+            ? 'T'
+            : 'M';
+      files.push({
+        path: filename,
+        originalPath: null,
+        index: ' ',
+        worktree,
+        conflicted: Boolean(workingStatus?.conflicted),
+        submodule: false,
+        statusKey: `${workingStatus?.conflicted ? 'conflict:' : ''}${after ? `${after.mode}:${after.oid}` : 'absent'}`,
+      });
+    }
+    checkpoint.baseline = baseline;
+    checkpoint.current = current;
+    return files;
+  }
+
+  async checkpointContents(checkpoint, file) {
+    const filename = file.path;
+    if (!this.#checkpointIncludes(filename))
+      throw new Error('This path is outside the checkpoint workspace.');
+    const captured = checkpoint.paths.has(filename);
+    const baseline = captured
+      ? checkpoint.paths.get(filename)
+      : checkpoint.baseline.has(filename)
+        ? checkpoint.baseline.get(filename)
+        : (await this.#checkpointTreeEntries(checkpoint.head, [filename])).get(filename);
+    if (file.submodule || baseline?.mode === '160000')
+      return unavailable('Git submodule. Open the submodule directory to inspect its files.');
+    const [before, after] = await Promise.all([
+      captured
+        ? baseline?.content
+        : baseline
+          ? this.#blobContents(baseline.oid, filename)
+          : undefined,
+      this.#readCheckpointFile(filename),
+    ]);
+    const contents = comparedContents(
+      before ?? empty(),
+      after?.content ?? empty(),
+      filename,
+      filename,
+      file.conflicted,
+    );
+    if (!contents.note && !contents.preview) {
+      if (!baseline && after && !contents.after) contents.note = 'An empty file was added.';
+      else if (baseline && !after && !contents.before) contents.note = 'An empty file was deleted.';
+      else if (baseline && after && baseline.mode !== after.mode) {
+        if (baseline.mode === '120000' || after.mode === '120000')
+          contents.note =
+            after.mode === '120000' ? 'Changed to a symbolic link.' : 'Changed to a regular file.';
+        else
+          contents.note =
+            after.mode === '100755'
+              ? 'Executable permission added.'
+              : 'Executable permission removed.';
+      }
+    }
+    return { ...contents, workingMissing: !after };
+  }
+
+  async #checkpointCommitPaths(before, after) {
+    const relative = path.relative(this.root, this.scope).split(path.sep).join('/');
+    const args =
+      before && after
+        ? ['diff-tree', '-r', '--name-only', '--no-renames', '--no-commit-id', '-z', before, after]
+        : ['ls-tree', '-r', '--name-only', '--full-tree', '-z', before || after];
+    const bytes = await git(
+      this.root,
+      [...args, '--', ...(relative ? [relative] : [])],
+      MAX_STATUS_BYTES,
+    );
+    const paths = new Set();
+    for (const filename of decoder.decode(bytes).split('\0')) {
+      if (filename && this.#checkpointIncludes(filename)) paths.add(filename);
+      checkCheckpointPathCount(paths);
+    }
+    return paths;
+  }
+
+  async #checkpointTreeEntries(head, paths) {
+    const entries = new Map();
+    if (!head) return entries;
+    const wanted = new Set(paths);
+    // Bound argument sizes even when the repository has long path names.
+    let batch = [];
+    let batchBytes = 0;
+    const read = async () => {
+      const bytes = await git(
+        this.root,
+        ['ls-tree', '--full-tree', '-z', head, '--', ...batch],
+        MAX_STATUS_BYTES,
+      );
+      for (const record of decoder.decode(bytes).split('\0')) {
+        if (!record) continue;
+        const separator = record.indexOf('\t');
+        const filename = record.slice(separator + 1);
+        if (!wanted.has(filename)) continue;
+        const [mode, type, oid] = record.slice(0, separator).split(' ');
+        if (type !== 'tree') entries.set(filename, { mode, oid });
+      }
+      batch = [];
+      batchBytes = 0;
+    };
+    for (const filename of paths) {
+      const length = Buffer.byteLength(filename) + 1;
+      if (batchBytes + length > 32 * 1024 && batch.length) await read();
+      batch.push(filename);
+      batchBytes += length;
+    }
+    if (batch.length) await read();
+    return entries;
+  }
+
+  async #checkpointEntry(filename) {
+    const absolute = path.join(this.root, filename);
+    const parent = path.dirname(absolute);
+    try {
+      const resolvedParent = await realpath(parent);
+      if (
+        !within(this.scope, resolvedParent) ||
+        resolvedParent.split(path.sep).some(part => part.toLowerCase() === '.git') ||
+        [this.gitDir, this.commonDir].some(directory => within(directory, resolvedParent)) ||
+        (parent !== resolvedParent && !(await realDirectories(this.scope, parent)))
+      )
+        return null;
+      const metadata = await lstat(absolute, { bigint: true });
+      if (metadata.isDirectory()) return null;
+      if (!metadata.isFile() && !metadata.isSymbolicLink())
+        throw new Error(
+          `Cannot include ${filename} because it is not a regular file or symbolic link.`,
+        );
+      const mode = metadata.isSymbolicLink()
+        ? '120000'
+        : metadata.mode & 0o100n
+          ? '100755'
+          : '100644';
+      return { absolute, metadata, mode, stamp: checkpointStamp(metadata) };
+    } catch (error) {
+      if (missing(error)) return null;
+      throw error;
+    }
+  }
+
+  async #readCheckpointFile(filename, { algorithm, budget, cached, capture = false } = {}) {
+    const entry = await this.#checkpointEntry(filename);
+    if (!entry) return null;
+    const { absolute, metadata, mode, stamp } = entry;
+    if (cached?.stamp === stamp) return cached;
+    const size = Number(metadata.size);
+    if (budget && (size > MAX_CHECKPOINT_FILE || budget.bytes + size > MAX_CHECKPOINT_SCAN))
+      throw new Error(`Checkpoint scan exceeds its file or total read limit at ${filename}.`);
+    if (budget) budget.bytes += size;
+    const hash = algorithm && createHash(algorithm).update(`blob ${size}\0`);
+    const streamed = !budget && Boolean(mediaType(filename));
+    const limit =
+      capture || !budget ? Math.min(size, streamed ? 64 * 1024 : readLimit(filename)) : 0;
+    if (capture) {
+      budget.previews += limit;
+      if (budget.previews > MAX_CHECKPOINT_PREVIEWS)
+        throw new Error('The checkpoint needs more than 32 MiB of preview data.');
+    }
+    if (mode === '120000') {
+      const bytes = await readlink(absolute, { encoding: 'buffer' });
+      if ((await this.#checkpointEntry(filename))?.stamp !== stamp || bytes.length !== size)
+        throw checkpointReadChanged(filename);
+      return {
+        stamp,
+        mode,
+        oid: hash?.update(bytes).digest('hex'),
+        ...(capture || !budget ? { content: bytes } : {}),
+      };
+    }
+    const handle = await open(
+      absolute,
+      constants.O_RDONLY | (constants.O_NOFOLLOW || 0) | (constants.O_NONBLOCK || 0),
+    ).catch(error => {
+      if (missing(error) || error.code === 'ELOOP') throw checkpointReadChanged(filename);
+      throw error;
+    });
+    try {
+      if (
+        checkpointStamp(await handle.stat({ bigint: true })) !== stamp ||
+        (await this.#checkpointEntry(filename))?.stamp !== stamp
+      )
+        throw checkpointReadChanged(filename);
+      const bytes = limit ? Buffer.allocUnsafe(limit) : empty();
+      let offset = 0;
+      const length = hash ? size : limit;
+      if (length) {
+        for await (const chunk of handle.createReadStream({
+          autoClose: false,
+          start: 0,
+          end: length - 1,
+        })) {
+          hash?.update(chunk);
+          if (offset < limit) chunk.copy(bytes, offset, 0, Math.min(chunk.length, limit - offset));
+          offset += chunk.length;
+        }
+      }
+      if (offset !== length || checkpointStamp(await handle.stat({ bigint: true })) !== stamp)
+        throw checkpointReadChanged(filename);
+      return {
+        stamp,
+        mode,
+        oid: hash?.digest('hex'),
+        ...(capture || !budget ? { content: { bytes, size, streamed } } : {}),
+      };
+    } finally {
+      await handle.close();
+    }
   }
 
   async files() {
@@ -378,35 +727,7 @@ export class Repository {
           : this.#blob(':', indexPath)
         : this.#workingFile(file.path),
     ]);
-    const before = fileContent(beforeBytes, headPath);
-    const after = fileContent(afterBytes, file.path);
-    if (before.kind === 'unavailable' || after.kind === 'unavailable')
-      return unavailable(before.note || after.note);
-    if (before.kind !== 'text' || after.kind !== 'text' || before.limited || after.limited) {
-      return {
-        before: '',
-        after: '',
-        note: null,
-        preview: {
-          before:
-            before.kind === 'text' && !before.hex
-              ? fileContent(beforeBytes, headPath, true)
-              : before,
-          after:
-            after.kind === 'text' && !after.hex ? fileContent(afterBytes, file.path, true) : after,
-        },
-      };
-    }
-    let note = after.note || before.note || null;
-    if (file.conflicted)
-      note = 'Unresolved merge conflict. The working file includes the current conflict markers.';
-    else if (
-      before.value !== after.value &&
-      before.value.replaceAll('\r\n', '\n') === after.value.replaceAll('\r\n', '\n')
-    ) {
-      note = 'Only line endings changed (LF / CRLF).';
-    }
-    return { before: before.value, after: after.value, note };
+    return comparedContents(beforeBytes, afterBytes, headPath, file.path, file.conflicted);
   }
 
   async editable(filename) {
@@ -505,7 +826,10 @@ export class Repository {
     );
     // Quiet verification exits 1 for missing paths and unborn HEAD.
     if (output.code === 1) return empty();
-    const oid = successful(output).toString('ascii').trim();
+    return this.#blobContents(successful(output).toString('ascii').trim(), filename);
+  }
+
+  async #blobContents(oid, filename) {
     const key = `${oid}:${readLimit(filename)}`;
     let cached = this.blobs.get(key);
     if (cached) {
@@ -596,6 +920,38 @@ export class Repository {
   }
 }
 
+function comparedContents(beforeBytes, afterBytes, beforePath, afterPath, conflicted) {
+  const before = fileContent(beforeBytes, beforePath);
+  const after = fileContent(afterBytes, afterPath);
+  if (before.kind === 'unavailable' || after.kind === 'unavailable')
+    return unavailable(before.note || after.note);
+  if (before.kind !== 'text' || after.kind !== 'text' || before.limited || after.limited) {
+    return {
+      before: '',
+      after: '',
+      note: null,
+      preview: {
+        before:
+          before.kind === 'text' && !before.hex
+            ? fileContent(beforeBytes, beforePath, true)
+            : before,
+        after:
+          after.kind === 'text' && !after.hex ? fileContent(afterBytes, afterPath, true) : after,
+      },
+    };
+  }
+  let note = after.note || before.note || null;
+  if (conflicted)
+    note = 'Unresolved merge conflict. The working file includes the current conflict markers.';
+  else if (
+    before.value !== after.value &&
+    before.value.replaceAll('\r\n', '\n') === after.value.replaceAll('\r\n', '\n')
+  ) {
+    note = 'Only line endings changed (LF / CRLF).';
+  }
+  return { before: before.value, after: after.value, note };
+}
+
 function validatePath(filename) {
   const parts = typeof filename === 'string' ? filename.split('/') : [];
   if (
@@ -616,6 +972,15 @@ function within(root, candidate) {
     relative === '' ||
     (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative))
   );
+}
+
+async function realDirectories(root, directory) {
+  if (!within(root, directory)) return false;
+  // Case and Unicode normalization may change realpath spelling without a symlink.
+  for (let current = directory; current !== root; current = path.dirname(current)) {
+    if (!(await lstat(current)).isDirectory()) return false;
+  }
+  return true;
 }
 
 const missing = error => error.code === 'ENOENT' || error.code === 'ENOTDIR';
@@ -689,6 +1054,7 @@ function parseStatus(bytes) {
   else if (oid === '(initial)') branch += ' (unborn)';
   return {
     branch,
+    head: oid && oid !== '(initial)' ? oid : null,
     files: [...files.values()].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)),
   };
 }

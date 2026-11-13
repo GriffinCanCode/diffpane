@@ -51,6 +51,7 @@ contextBridge.exposeInMainWorld('diffpane', {
     onEvent: (callback: (value: unknown) => void) => listen('language-event', callback),
   },
   snapshot: () => ipcRenderer.invoke('snapshot'),
+  captureCheckpoint: () => ipcRenderer.invoke('capture-checkpoint'),
   files: () => ipcRenderer.invoke('files'),
   filesDelta: (revision: number | null) => ipcRenderer.invoke('files-delta', revision),
   directoryExpanded: (path: string, expanded: boolean) =>

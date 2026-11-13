@@ -470,6 +470,12 @@ for (const method of ['list', 'change', 'copy']) {
   });
 }
 
+ipcMain.handle('capture-checkpoint', event => {
+  const session = sessions.get(event.sender.id);
+  if (!session || event.senderFrame !== event.sender.mainFrame) throw new Error('Unknown window');
+  return session.call('capture-checkpoint');
+});
+
 for (const method of [
   'snapshot',
   'files',

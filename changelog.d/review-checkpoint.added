@@ -1,0 +1,1 @@
+Capture a working-tree checkpoint in Changes and review the edits made since it, including changes already committed. Switch between Git HEAD and the checkpoint without losing review progress.

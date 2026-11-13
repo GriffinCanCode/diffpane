@@ -20,7 +20,7 @@ export function showDocumentPreview(
   filename: string,
   compare = false,
   currentMedia: PreviewMedia | null = null,
-  options: { raw?: boolean; onRawChange?: (raw: boolean) => void } = {},
+  options: { baseline?: string; raw?: boolean; onRawChange?: (raw: boolean) => void } = {},
 ) {
   const root = document.createElement('div');
   root.className = 'document-preview';
@@ -60,7 +60,7 @@ export function showDocumentPreview(
       pane.dataset.side = side;
       const heading = document.createElement('div');
       heading.className = 'preview-heading';
-      heading.textContent = `${side === 'before' ? 'Original · HEAD' : 'Current · working file'} · ${value.size.toLocaleString()} bytes`;
+      heading.textContent = `${side === 'before' ? `Original · ${options.baseline ?? 'HEAD'}` : 'Current · working file'} · ${value.size.toLocaleString()} bytes`;
       pane.append(heading);
       const note = document.createElement('p');
       note.className = 'preview-note';

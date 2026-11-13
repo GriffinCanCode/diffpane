@@ -3,6 +3,13 @@ import { projectIcon } from './icons.ts';
 
 const ROW_HEIGHT = 48;
 const OVERSCAN = 4;
+const checkpointTime = new Intl.DateTimeFormat(undefined, {
+  month: 'short',
+  day: 'numeric',
+  hour: 'numeric',
+  minute: 'numeric',
+  second: 'numeric',
+});
 let instance = 0;
 
 function icon(path, className = '') {
@@ -16,6 +23,7 @@ const glyphs = {
   check: 'm3.5 8 3 3 6-6',
   undo: 'M6 4 3 7l3 3M3 7h6.5a3 3 0 0 1 0 6H8',
   compare: 'M2 3h12v10H2zM8 3v10M4 6h2m4 4h2',
+  checkpoint: 'M3.5 13.5v-11m0 1h8l-2 3 2 3h-8',
   clean: 'M2.5 9 5 4.5h6L13.5 9v3.5h-11zM2.5 9h3l1 1.5h3l1-1.5h3',
   reviewed: 'M6 2.5h4l3 3v8H3v-11h3m4 0v3h3M6 8h4m-4 3h3',
   complete: 'M14 8a6 6 0 1 1-12 0 6 6 0 0 1 12 0zM5 8l2 2 4-4',
@@ -40,7 +48,10 @@ function changeStatus(file) {
   return statusLabels[file.worktree] ? file.worktree : (file.index || 'M').trim() || 'M';
 }
 
-export function createChangeReview(container, { onOpen, onBack, onProgress }) {
+export function createChangeReview(
+  container,
+  { onOpen, onBack, onProgress, onCapture, onBaseline },
+) {
   const id = `change-review-${++instance}`;
   container.classList.add('change-review');
   container.setAttribute('aria-labelledby', `${id}-title`);
@@ -51,6 +62,17 @@ export function createChangeReview(container, { onOpen, onBack, onProgress }) {
       <h2 id="${id}-title">Review queue</h2>
       <button type="button" class="change-review-back" aria-label="Back to files" title="Back to files">${icon(glyphs.back)} Files</button>
     </header>
+    <div class="change-review-baseline">
+      <div class="change-review-baseline-actions">
+        <select class="change-review-baseline-select" aria-label="Compare against" aria-describedby="${id}-checkpoint-time" hidden>
+          <option value="head">Git HEAD</option>
+          <option value="checkpoint">Checkpoint</option>
+        </select>
+        <button type="button" class="change-review-capture">${icon(glyphs.checkpoint)}<span></span></button>
+      </div>
+      <time class="change-review-checkpoint-time" id="${id}-checkpoint-time" aria-live="polite" hidden></time>
+      <p class="change-review-error change-review-checkpoint-error" role="status" hidden></p>
+    </div>
     <div class="change-review-progress" hidden>
       <span class="change-review-count" role="status"></span>
       <progress aria-label="Review progress" max="1" value="0"></progress>
@@ -86,6 +108,11 @@ export function createChangeReview(container, { onOpen, onBack, onProgress }) {
       </button>
     </footer>`;
 
+  const baselineSelect = container.querySelector('.change-review-baseline-select');
+  const captureButton = container.querySelector('.change-review-capture');
+  const captureLabel = captureButton.querySelector('span');
+  const capturedTime = container.querySelector('time');
+  const checkpointError = container.querySelector('.change-review-checkpoint-error');
   const count = container.querySelector('.change-review-count');
   const progress = container.querySelector('progress');
   const progressGroup = container.querySelector('.change-review-progress');
@@ -100,15 +127,22 @@ export function createChangeReview(container, { onOpen, onBack, onProgress }) {
   const emptyAction = empty.querySelector('button');
   const footer = container.querySelector('.change-review-footer');
   const position = container.querySelector('.change-review-position');
-  const error = container.querySelector('.change-review-error');
+  const error = footer.querySelector('.change-review-error');
   const previous = container.querySelector('[data-direction="previous"]');
   const next = container.querySelector('[data-direction="next"]');
   const mark = container.querySelector('.change-review-mark');
   const markIcon = mark.querySelector('.change-review-mark-icon');
   const markLabel = mark.querySelector('.change-review-mark-label');
   const markNext = mark.querySelector('.change-review-mark-next');
-  const reviewed = new Map();
+  const headReviewed = new Map();
+  const checkpointReviewed = new Map();
   const mounted = new Map();
+  let reviewed = headReviewed;
+  let baseline = 'head';
+  let checkpoint = null;
+  let capturing = false;
+  let captureError = '';
+  let resetScrollOnUpdate = false;
   let changes = new Map();
   let entries = [];
   let entryIndex = new Map();
@@ -122,8 +156,62 @@ export function createChangeReview(container, { onOpen, onBack, onProgress }) {
   let frame = null;
   let disposed = false;
 
+  function renderBaseline() {
+    baselineSelect.hidden = !checkpoint;
+    baselineSelect.disabled = capturing;
+    if (baselineSelect.value !== baseline) baselineSelect.value = baseline;
+    captureButton.setAttribute('aria-disabled', String(capturing));
+    captureButton.title = checkpoint
+      ? 'Replace the checkpoint and start a new review'
+      : 'Capture the current working tree for review';
+    captureButton.setAttribute(
+      'aria-label',
+      capturing ? 'Capturing checkpoint' : checkpoint ? 'Replace checkpoint' : 'Capture checkpoint',
+    );
+    const action = capturing
+      ? 'Capturing…'
+      : checkpoint
+        ? 'Replace checkpoint'
+        : 'Capture checkpoint';
+    if (captureLabel.textContent !== action) captureLabel.textContent = action;
+    capturedTime.hidden = !checkpoint;
+    const timestamp = checkpoint ? new Date(checkpoint.capturedAt) : null;
+    if (timestamp && Number.isFinite(timestamp.getTime())) {
+      const label = `Captured ${checkpointTime.format(timestamp)}`;
+      capturedTime.dateTime = timestamp.toISOString();
+      if (capturedTime.textContent !== label) capturedTime.textContent = label;
+    } else {
+      capturedTime.removeAttribute('datetime');
+      capturedTime.textContent = '';
+    }
+    const message = captureError || (baseline === 'checkpoint' && checkpoint?.error) || '';
+    checkpointError.hidden = !message;
+    if (checkpointError.textContent !== message) checkpointError.textContent = message;
+  }
+
+  async function capture() {
+    if (capturing || disposed) return;
+    capturing = true;
+    captureError = '';
+    renderBaseline();
+    try {
+      await onCapture();
+    } catch (error) {
+      captureError = error?.message || String(error);
+    } finally {
+      capturing = false;
+      if (!disposed) renderBaseline();
+    }
+  }
+
   function focusQueue() {
-    const target = !list.hidden ? list : !emptyAction.hidden ? emptyAction : emptyTitle;
+    const target = !list.hidden
+      ? list
+      : !emptyAction.hidden
+        ? emptyAction
+        : checkpoint
+          ? emptyTitle
+          : captureButton;
     target.focus({ preventScroll: true });
   }
 
@@ -213,6 +301,7 @@ export function createChangeReview(container, { onOpen, onBack, onProgress }) {
 
   function canMark() {
     return (
+      !(baseline === 'checkpoint' && checkpoint?.error) &&
       !openingPath &&
       currentState === 'ready' &&
       entryIndex.has(currentPath) &&
@@ -242,7 +331,10 @@ export function createChangeReview(container, { onOpen, onBack, onProgress }) {
     let action = 'Open comparison';
     let symbol = 'compare';
     let disabled = !entries.length;
-    if (reviewable) {
+    if (baseline === 'checkpoint' && checkpoint?.error) {
+      action = 'Checkpoint unavailable';
+      disabled = true;
+    } else if (reviewable) {
       action =
         filter === 'reviewed'
           ? 'Return to pending'
@@ -287,20 +379,25 @@ export function createChangeReview(container, { onOpen, onBack, onProgress }) {
 
   function renderEmpty() {
     const state = !changes.size ? 'clean' : filter === 'reviewed' ? 'reviewed' : 'complete';
-    if (empty.dataset.state === state) return;
-    empty.dataset.state = state;
+    const cleanState = baseline === 'head' ? 'head' : checkpoint?.error ? 'error' : 'checkpoint';
+    const key = state === 'clean' ? cleanState : state;
+    if (empty.dataset.state === key) return;
+    empty.dataset.state = key;
     emptyIcon.innerHTML = icon(glyphs[state]);
     const [title, description, action] = {
-      clean: ['Working tree is clean', 'New changes will appear here as they happen.'],
+      head: ['Working tree is clean', 'New changes will appear here as they happen.'],
+      checkpoint: ['No changes since checkpoint', 'New changes will appear here as they happen.'],
+      error: ['Checkpoint comparison unavailable'],
       reviewed: [
         'No files reviewed yet',
         'Mark a file reviewed to find it here.',
         'Show pending files',
       ],
       complete: ['Review complete', 'New edits move files back to Pending.', 'View reviewed files'],
-    }[state];
+    }[key];
     emptyTitle.textContent = title;
-    emptyDescription.textContent = description;
+    emptyDescription.textContent = description ?? '';
+    emptyDescription.hidden = !description;
     emptyAction.hidden = !action;
     emptyAction.textContent = action ?? '';
   }
@@ -426,6 +523,8 @@ export function createChangeReview(container, { onOpen, onBack, onProgress }) {
 
   for (const button of filters)
     button.addEventListener('click', () => selectFilter(button.dataset.filter));
+  captureButton.addEventListener('click', () => void capture());
+  baselineSelect.addEventListener('change', () => onBaseline(baselineSelect.value));
   container.querySelector('.change-review-back').addEventListener('click', onBack);
   emptyAction.addEventListener('click', () => {
     selectFilter(filter === 'pending' ? 'reviewed' : 'pending');
@@ -453,15 +552,38 @@ export function createChangeReview(container, { onOpen, onBack, onProgress }) {
   });
   const resize = new ResizeObserver(scheduleRows);
   resize.observe(list);
+  renderBaseline();
 
   return {
+    setBaseline(mode, nextCheckpoint) {
+      const replaced = checkpoint?.id !== nextCheckpoint?.id;
+      const switched = mode !== baseline || (mode === 'checkpoint' && replaced);
+      checkpoint = nextCheckpoint;
+      if (replaced) checkpointReviewed.clear();
+      if (switched) {
+        baseline = mode;
+        reviewed = mode === 'head' ? headReviewed : checkpointReviewed;
+        request++;
+        openingPath = null;
+        currentState = null;
+        currentVersion = null;
+        activePath = currentPath;
+        filter = 'pending';
+        error.hidden = true;
+        resetScrollOnUpdate = true;
+      }
+      renderBaseline();
+    },
     update(files) {
       changes = new Map(files.map(file => [file.path, file]));
       for (const [path, version] of reviewed) {
         if (changes.get(path)?.reviewVersion !== version) reviewed.delete(path);
       }
       updateProgress();
-      if (!container.hidden) project();
+      if (!container.hidden) {
+        project({ resetScroll: resetScrollOnUpdate });
+        resetScrollOnUpdate = false;
+      }
     },
     setCurrent(path, state, version) {
       if (path === currentPath && state === currentState && version === currentVersion) return;
@@ -482,7 +604,8 @@ export function createChangeReview(container, { onOpen, onBack, onProgress }) {
       if (visible === !container.hidden) return;
       container.hidden = !visible;
       if (visible) {
-        project();
+        project({ resetScroll: resetScrollOnUpdate });
+        resetScrollOnUpdate = false;
         revealActive();
         renderRows();
       } else {
