@@ -63,7 +63,7 @@ import { requireElement } from './dom.js'
 /** @typedef {'head' | 'working'} EditorSide */
 /** @typedef {WorkspaceFile & {anchor?: string}} OpenFile */
 /** @typedef {Omit<ReviewAnchor, 'side' | 'truncated'> & {side?: EditorSide, truncated?: boolean, direct?: boolean}} FileAnchor */
-/** @typedef {{compare?: boolean, comparison?: WorkspaceComparison, source?: boolean, match?: ContentMatch | null, anchor?: FileAnchor | null, ideaLink?: boolean}} OpenOptions */
+/** @typedef {{compare?: boolean, comparison?: WorkspaceComparison, review?: boolean, source?: boolean, match?: ContentMatch | null, anchor?: FileAnchor | null, ideaLink?: boolean}} OpenOptions */
 /**
  * @typedef {object} Card
  * @property {OpenFile} file
@@ -580,8 +580,9 @@ function closeCurrentFile() {
   if (outline) outline.textContent = 'Open a file to see its outline'
 }
 
-/** @param {'rename' | 'trash' | 'reveal' | 'copy-path' | 'copy-relative-path'} action @param {string} pathname @param {string} [name] */
+/** @param {'rename' | 'trash'} action @param {string} pathname @param {string} [name] */
 async function mutateFile(action, pathname, name) {
+  if (closingRequested || closed) throw new Error('This window is closing.')
   const mutation = { path: pathname }
   mutations.add(mutation)
   try {
@@ -596,19 +597,21 @@ async function mutateFile(action, pathname, name) {
       destination = await api.rename(pathname, name)
     } else await api.fileAction(action, pathname)
     if (closed) return
+    if (destination === pathname) return
     if (destination) navigator.renamed(pathname, destination)
     if (openedFile && pathAffects(pathname, openedFile.path)) {
       const previous = openedFile.path
       const affected = cards.get(previous)
       closeCurrentFile()
       if (destination && !closingRequested) {
-        const path = `\${destination}\${previous.slice(pathname.length)}`
+        const path = `${destination}${previous.slice(pathname.length)}`
         rememberView(path, affected?.viewState)
         await openFile(
           { path },
           {
             compare: affected?.comparing,
             comparison: affected?.comparison,
+            review: affected?.reviewComparison ?? false,
             source: affected?.markdownSource,
           },
         )
@@ -625,14 +628,7 @@ const navigator = createNavigator(ui.navigator, api, openFile, {
   onReady: startBackgroundAnalysis,
   iconFor: projectIcon,
   onMutate: (action, path, name) => {
-    if (
-      action === 'rename' ||
-      action === 'trash' ||
-      action === 'reveal' ||
-      action === 'copy-path' ||
-      action === 'copy-relative-path'
-    )
-      return mutateFile(action, path, name)
+    if (action === 'rename' || action === 'trash') return mutateFile(action, path, name)
     throw new Error('Unknown file action.')
   },
   onAttach: api.ideas ? path => attachIdeaLink({ path }) : undefined,
@@ -927,7 +923,15 @@ function rememberView(pathname, state) {
 /** @param {OpenFile} file @param {OpenOptions} [options] */
 async function openFile(
   file,
-  { compare = false, comparison = 'head', source = false, match = null, anchor = null, ideaLink = false } = {},
+  {
+    compare = false,
+    comparison = 'head',
+    review: focusReview = compare,
+    source = false,
+    match = null,
+    anchor = null,
+    ideaLink = false,
+  } = {},
 ) {
   if (closingRequested || closed) return false
   const version = ++navigationVersion
@@ -1036,8 +1040,14 @@ async function openFile(
   ui.emptyState.hidden = true
   requireElement(app, '#save-state', HTMLElement).textContent = 'Autosave on'
   navigator.select(file.path)
-  if (compare) openComparison(card, comparison)
-  else syncReviewState()
+  if (focusReview) openComparison(card, comparison)
+  else {
+    if (compare) {
+      card.comparing = true
+      setDocumentComparison(card, comparison)
+    }
+    syncReviewState()
+  }
   const outline = ui.navigator.querySelector('.navigator-outline .symbol-list')
   if (outline) {
     if (mediaType(file.path)) outline.textContent = 'No outline for media files'
