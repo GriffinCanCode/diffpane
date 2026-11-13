@@ -2,10 +2,10 @@ import { createHighlighterCore } from '@shikijs/core'
 import type { LanguageRegistration, ThemeRegistration } from '@shikijs/core'
 import { createOnigurumaEngine } from '@shikijs/engine-oniguruma'
 import { shikiToMonaco } from '@shikijs/monaco'
-import dark from '@shikijs/themes/dark-plus'
-import light from '@shikijs/themes/light-plus'
 import type { editor, languages } from 'monaco-editor'
 import type { SyntaxCatalogEntry, SyntaxGrammar } from 'virtual:syntax-catalog'
+import { colorHex } from '../../../shared/appearance/palette.ts'
+import type { ColorScheme } from '../../../shared/appearance/palette.ts'
 import { editorThemeName, EDITOR_THEMES, SYNTAX_COLORS } from './editor-themes.ts'
 import type { EditorThemeName } from './editor-themes.ts'
 
@@ -19,25 +19,45 @@ export interface SyntaxRuntime {
   setTheme: (name: EditorThemeName) => void
 }
 
-function syntaxTheme(base: ThemeRegistration, name: EditorThemeName) {
-  const { comment, keyword, string, number, symbol, variable } = SYNTAX_COLORS[name]
+function syntaxTheme(scheme: ColorScheme): ThemeRegistration {
+  const name = editorThemeName(scheme)
+  const { comment, keyword, string, number, symbol, variable, added, removed } = SYNTAX_COLORS[name]
   return {
-    ...base,
     name,
+    type: scheme,
+    colors: {
+      'editor.background': colorHex(scheme, 'workbenchBackground'),
+      'editor.foreground': colorHex(scheme, 'editorText'),
+    },
     tokenColors: [
-      ...(base.tokenColors ?? []),
       { scope: 'comment', settings: { foreground: `#${comment}`, fontStyle: 'italic' } },
       {
-        scope: ['keyword', 'storage.type', 'storage.modifier'],
+        scope: ['keyword', 'storage', 'constant.language', 'support.constant'],
         settings: { foreground: `#${keyword}` },
       },
-      { scope: 'string', settings: { foreground: `#${string}` } },
-      { scope: 'constant.numeric', settings: { foreground: `#${number}` } },
+      { scope: ['string', 'markup.inline.raw'], settings: { foreground: `#${string}` } },
+      { scope: ['constant.numeric', 'constant.character', 'constant.other'], settings: { foreground: `#${number}` } },
       {
-        scope: ['entity.name.type', 'support.type', 'entity.name.function', 'support.function', 'constant.language'],
+        scope: [
+          'entity.name.type',
+          'entity.name.namespace',
+          'entity.name.function',
+          'entity.name.tag',
+          'support.type',
+          'support.class',
+          'support.function',
+          'markup.heading',
+        ],
         settings: { foreground: `#${symbol}` },
       },
-      { scope: ['variable', 'variable.parameter'], settings: { foreground: `#${variable}` } },
+      {
+        scope: ['variable', 'support.variable', 'entity.other.attribute-name'],
+        settings: { foreground: `#${variable}` },
+      },
+      { scope: ['invalid', 'markup.deleted'], settings: { foreground: `#${removed}` } },
+      { scope: 'markup.inserted', settings: { foreground: `#${added}` } },
+      { scope: 'markup.italic', settings: { fontStyle: 'italic' } },
+      { scope: 'markup.bold', settings: { fontStyle: 'bold' } },
     ],
   }
 }
@@ -51,7 +71,7 @@ export async function createSyntaxRuntime(
 ): Promise<SyntaxRuntime> {
   const highlighter = await createHighlighterCore({
     engine: createOnigurumaEngine(import('@shikijs/engine-oniguruma/wasm-inlined')),
-    themes: [syntaxTheme(dark, editorThemeName('dark')), syntaxTheme(light, editorThemeName('light'))],
+    themes: [syntaxTheme('dark'), syntaxTheme('light')],
     langs: [],
   })
   const scopes = new Map(catalog.map(entry => [entry.scope, entry]))

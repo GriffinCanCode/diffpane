@@ -3,6 +3,7 @@ import { createHighlighterCore } from '@shikijs/core'
 import { createOnigurumaEngine } from '@shikijs/engine-oniguruma'
 import dark from '@shikijs/themes/dark-plus'
 import { test } from 'vite-plus/test'
+import { SYNTAX_COLORS } from '../../../renderer/editor/highlighting/editor-themes.ts'
 import { createSyntaxRuntime } from '../../../renderer/editor/highlighting/grammars.ts'
 import { configureSyntax } from '../../../renderer/editor/highlighting/syntax.ts'
 import { catalog, grammarBytes } from '../../../tooling/grammars/catalog/syntax-catalog.ts'
@@ -193,20 +194,20 @@ test('late TextMate grammars use the active editor theme and respond to changes'
   themeName = 'diffpane-light'
   runtime.setTheme(themeName)
   await loading
-  assert.ok(colors('directives', '# Configuration').includes('59666c'))
+  assert.ok(colors('directives', '# Configuration').includes(SYNTAX_COLORS['diffpane-light'].comment))
   assert.equal(definitions.get('diffpane-light')?.base, 'vs')
 
   await runtime.load('source.metrics')
-  assert.ok(colors('metrics', '# HELP requests Request count').includes('59666c'))
+  assert.ok(colors('metrics', '# HELP requests Request count').includes(SYNTAX_COLORS['diffpane-light'].comment))
   themeName = 'diffpane'
   runtime.setTheme(themeName)
-  assert.ok(colors('directives', '# Configuration').includes('808080'))
-  assert.ok(colors('metrics', '# HELP requests Request count').includes('808080'))
+  assert.ok(colors('directives', '# Configuration').includes(SYNTAX_COLORS.diffpane.comment))
+  assert.ok(colors('metrics', '# HELP requests Request count').includes(SYNTAX_COLORS.diffpane.comment))
 
   themeName = 'diffpane-light'
   runtime.setTheme(themeName)
-  assert.ok(colors('directives', '# Configuration').includes('59666c'))
-  assert.ok(colors('metrics', '# HELP requests Request count').includes('59666c'))
+  assert.ok(colors('directives', '# Configuration').includes(SYNTAX_COLORS['diffpane-light'].comment))
+  assert.ok(colors('metrics', '# HELP requests Request count').includes(SYNTAX_COLORS['diffpane-light'].comment))
 })
 
 test('embedded TextMate grammars preserve an existing native token provider', async () => {

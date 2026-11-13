@@ -1,114 +1,156 @@
 import type { editor } from 'monaco-editor'
+import { colorHex } from '../../../shared/appearance/palette.ts'
+import type { ColorRole, ColorScheme } from '../../../shared/appearance/palette.ts'
+
+function syntaxColors(scheme: ColorScheme) {
+  return {
+    comment: colorHex(scheme, 'syntaxComment').slice(1),
+    keyword: colorHex(scheme, 'syntaxKeyword').slice(1),
+    string: colorHex(scheme, 'syntaxString').slice(1),
+    number: colorHex(scheme, 'syntaxNumber').slice(1),
+    symbol: colorHex(scheme, 'syntaxSymbol').slice(1),
+    variable: colorHex(scheme, 'syntaxVariable').slice(1),
+    added: colorHex(scheme, 'added').slice(1),
+    removed: colorHex(scheme, 'removed').slice(1),
+  }
+}
 
 export const SYNTAX_COLORS = {
-  diffpane: {
-    comment: '808080',
-    keyword: '80CBC4',
-    string: 'D994D3',
-    number: 'C4A7E7',
-    symbol: 'EFAB74',
-    variable: 'CCCCCC',
-  },
-  'diffpane-light': {
-    comment: '59666C',
-    keyword: '11675F',
-    string: '934077',
-    number: '6947A2',
-    symbol: '9B481C',
-    variable: '34383D',
-  },
+  diffpane: syntaxColors('dark'),
+  'diffpane-light': syntaxColors('light'),
 }
 
 export type EditorThemeName = keyof typeof SYNTAX_COLORS
 
-export function editorThemeName(scheme: 'light' | 'dark'): EditorThemeName {
+export function editorThemeName(scheme: ColorScheme): EditorThemeName {
   return scheme === 'light' ? 'diffpane-light' : 'diffpane'
 }
 
-function rules({ comment, keyword, string, number, symbol, variable }: (typeof SYNTAX_COLORS)[EditorThemeName]) {
+function rules({
+  comment,
+  keyword,
+  string,
+  number,
+  symbol,
+  variable,
+  added,
+  removed,
+}: ReturnType<typeof syntaxColors>) {
   return [
+    { token: 'emphasis', fontStyle: 'italic' },
+    { token: 'strong', fontStyle: 'bold' },
     { token: 'comment', foreground: comment, fontStyle: 'italic' },
     { token: 'keyword', foreground: keyword },
+    { token: 'operator', foreground: keyword },
     { token: 'string', foreground: string },
+    { token: 'regexp', foreground: string },
     { token: 'string.key.json', foreground: variable },
     { token: 'number', foreground: number },
-    { token: 'type.identifier', foreground: symbol },
-    ...['class', 'struct', 'interface', 'type', 'typeParameter'].map(token => ({
+    { token: 'invalid', foreground: removed },
+    { token: 'deleted', foreground: removed },
+    { token: 'inserted', foreground: added },
+    ...['class', 'struct', 'interface', 'type', 'typeParameter', 'tag', 'annotation', 'metatag'].map(token => ({
       token,
       foreground: symbol,
     })),
     ...['function', 'method', 'macro', 'member'].map(token => ({ token, foreground: symbol })),
-    ...['variable', 'parameter', 'property'].map(token => ({ token, foreground: variable })),
-    ...['enumMember', 'variable.readonly', 'property.readonly'].map(token => ({
+    ...['variable', 'parameter', 'property', 'key', 'attribute.name'].map(token => ({ token, foreground: variable })),
+    { token: 'attribute.value', foreground: string },
+    ...['constant', 'enumMember', 'variable.readonly', 'property.readonly'].map(token => ({
       token,
       foreground: number,
     })),
   ]
 }
 
-const TRANSPARENT = {
-  'editorOverviewRuler.border': '#00000000',
-  'scrollbar.shadow': '#00000000',
-  'diffEditor.insertedTextBackground': '#00000000',
-  'diffEditor.removedTextBackground': '#00000000',
-  'diffEditor.insertedLineBackground': '#00000000',
-  'diffEditor.removedLineBackground': '#00000000',
-  'diffEditor.diagonalFill': '#00000000',
+const editorRoles = {
+  foreground: 'text',
+  descriptionForeground: 'muted',
+  focusBorder: 'focusRing',
+  'textLink.foreground': 'accent',
+  'textLink.activeForeground': 'accent',
+  'editor.background': 'workbenchBackground',
+  'editor.foreground': 'editorText',
+  'editorLineNumber.foreground': 'editorLineNumber',
+  'editorLineNumber.activeForeground': 'editorActiveLineNumber',
+  'editorGutter.background': 'workbenchBackground',
+  'editor.selectionBackground': 'selection',
+  'editor.inactiveSelectionBackground': 'selectionInactive',
+  'editor.selectionHighlightBackground': 'selectionInactive',
+  'editor.lineHighlightBackground': 'hover',
+  'editorCursor.foreground': 'accent',
+  'editorBracketHighlight.foreground1': 'syntaxSymbol',
+  'editorBracketHighlight.foreground2': 'syntaxString',
+  'editorBracketHighlight.foreground3': 'syntaxNumber',
+  'editorBracketHighlight.unexpectedBracket.foreground': 'removed',
+  'editorBracketMatch.background': 'accentSurface',
+  'editorBracketMatch.border': 'focusRing',
+  'editorBracketMatch.foreground': 'text',
+  'editorWhitespace.foreground': 'controlBorder',
+  'editorRuler.foreground': 'line',
+  'editorIndentGuide.background1': 'editorSeparator',
+  'editorIndentGuide.activeBackground1': 'controlBorder',
+  'editorWidget.background': 'surfaceRaised',
+  'editorWidget.foreground': 'text',
+  'editorWidget.border': 'controlBorder',
+  'editorHoverWidget.statusBarBackground': 'surface',
+  'editor.findMatchBackground': 'matchBackground',
+  'editor.findMatchBorder': 'warningEdge',
+  'editor.findMatchHighlightBackground': 'warningSurface',
+  'editorOverviewRuler.findMatchForeground': 'warningEdge',
+  'editorOverviewRuler.errorForeground': 'removedEdge',
+  'editorOverviewRuler.warningForeground': 'warningEdge',
+  'editorOverviewRuler.infoForeground': 'modifiedEdge',
+  'editorOverviewRuler.border': 'transparent',
+  'editorError.foreground': 'removedEdge',
+  'editorWarning.foreground': 'warningEdge',
+  'editorInfo.foreground': 'modifiedEdge',
+  'editorHint.foreground': 'subtle',
+  'scrollbar.shadow': 'transparent',
+  'scrollbarSlider.background': 'scrollbar',
+  'scrollbarSlider.hoverBackground': 'scrollbarHover',
+  'scrollbarSlider.activeBackground': 'scrollbarActive',
+  'input.background': 'surfaceInset',
+  'input.foreground': 'text',
+  'input.border': 'controlBorder',
+  'input.placeholderForeground': 'subtle',
+  'inputOption.activeBackground': 'accentSurface',
+  'inputOption.activeBorder': 'focusRing',
+  'inputOption.activeForeground': 'accent',
+  'inputOption.hoverBackground': 'hover',
+  'menu.background': 'surfaceRaised',
+  'menu.foreground': 'text',
+  'menu.border': 'controlBorder',
+  'menu.selectionBackground': 'selection',
+  'menu.selectionForeground': 'text',
+  'menu.separatorBackground': 'line',
+  'list.activeSelectionBackground': 'selection',
+  'list.activeSelectionForeground': 'text',
+  'list.hoverBackground': 'hover',
+  'list.hoverForeground': 'text',
+  'list.highlightForeground': 'accent',
+  'diffEditor.border': 'line',
+  'diffEditor.insertedTextBackground': 'transparent',
+  'diffEditor.removedTextBackground': 'transparent',
+  'diffEditor.insertedLineBackground': 'transparent',
+  'diffEditor.removedLineBackground': 'transparent',
+  'diffEditor.diagonalFill': 'transparent',
+  'diffEditorGutter.insertedLineBackground': 'addedGutter',
+  'diffEditorGutter.removedLineBackground': 'removedGutter',
+  'diffEditorOverview.insertedForeground': 'addedEdge',
+  'diffEditorOverview.removedForeground': 'removedEdge',
+} satisfies Record<string, ColorRole>
+
+function editorTheme(scheme: ColorScheme): editor.IStandaloneThemeData {
+  return {
+    base: scheme === 'light' ? 'vs' : 'vs-dark',
+    inherit: false,
+    rules: rules(SYNTAX_COLORS[editorThemeName(scheme)]),
+    colors: Object.fromEntries(Object.entries(editorRoles).map(([key, role]) => [key, colorHex(scheme, role)])),
+  }
 }
 
 export const EDITOR_THEMES: Record<EditorThemeName, editor.IStandaloneThemeData> = {
-  diffpane: {
-    base: 'vs-dark',
-    inherit: true,
-    rules: rules(SYNTAX_COLORS.diffpane),
-    colors: {
-      ...TRANSPARENT,
-      'editor.background': '#181818',
-      'editor.foreground': '#d4d4d4',
-      'editorLineNumber.foreground': '#5c6068',
-      'editorLineNumber.activeForeground': '#c6c9d0',
-      'editorGutter.background': '#181818',
-      'editor.selectionBackground': '#35415c',
-      'editor.inactiveSelectionBackground': '#303844',
-      'editor.lineHighlightBackground': '#ffffff04',
-      'editorCursor.foreground': '#b8c3d7',
-      'editorIndentGuide.background1': '#ffffff0c',
-      'editorIndentGuide.activeBackground1': '#ffffff20',
-      'scrollbarSlider.background': '#ffffff12',
-      'scrollbarSlider.hoverBackground': '#ffffff24',
-      'scrollbarSlider.activeBackground': '#ffffff30',
-      'editorWidget.background': '#22242a',
-      'editorWidget.border': '#383b43',
-      'editor.findMatchBackground': '#7e622b',
-      'editor.findMatchHighlightBackground': '#7e622b70',
-      focusBorder: '#748aaf',
-    },
-  },
-  'diffpane-light': {
-    base: 'vs',
-    inherit: true,
-    rules: rules(SYNTAX_COLORS['diffpane-light']),
-    colors: {
-      ...TRANSPARENT,
-      'editor.background': '#ffffff',
-      'editor.foreground': '#24272a',
-      'editorLineNumber.foreground': '#68737b',
-      'editorLineNumber.activeForeground': '#344146',
-      'editorGutter.background': '#ffffff',
-      'editor.selectionBackground': '#d8e8f5',
-      'editor.inactiveSelectionBackground': '#e6edf4',
-      'editor.lineHighlightBackground': '#18344f08',
-      'editorCursor.foreground': '#293d50',
-      'editorIndentGuide.background1': '#24395118',
-      'editorIndentGuide.activeBackground1': '#2439513b',
-      'scrollbarSlider.background': '#2439511f',
-      'scrollbarSlider.hoverBackground': '#2439513b',
-      'scrollbarSlider.activeBackground': '#24395159',
-      'editorWidget.background': '#f5f7f8',
-      'editorWidget.border': '#d4dce0',
-      'editor.findMatchBackground': '#f5d987',
-      'editor.findMatchHighlightBackground': '#f5d98780',
-      focusBorder: '#357d76',
-    },
-  },
+  diffpane: editorTheme('dark'),
+  'diffpane-light': editorTheme('light'),
 }
