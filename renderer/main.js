@@ -45,7 +45,7 @@ const icons = {
   review:
     '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m2.5 5 1 1 2-2m-3 6 1 1 2-2M8 5h5.5M8 10h5.5" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   note: '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3.5 2.5h9a1 1 0 0 1 1 1v6L9.5 13.5h-6a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1Z" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round"/><path d="M9.5 13.5v-3a1 1 0 0 1 1-1h3M5 5.5h6M5 8h3" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"/></svg>',
-  idea: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.6 10.4c0-1.4-1.7-1.9-1.7-4a4.1 4.1 0 0 1 8.2 0c0 2.1-1.7 2.6-1.7 4m-4.8 0h4.8m-4 2.1h3.2m-2.5 1.8h1.8"/></svg>',
+  idea: '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="2.5" width="11.5" height="13" rx="2"/><path d="M7 2.5v13M2 6h3m-3 6h3m4.5-5h3m-3 3h2"/></svg>',
   settings:
     '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" aria-hidden="true"><path d="m6.5 1.5-.3 1.7-1.1.6-1.6-.6-1.5 2.6 1.3 1.1v1.2L2 9.2l1.5 2.6 1.6-.6 1.1.6.3 1.7h3l.3-1.7 1.1-.6 1.6.6L14 9.2l-1.3-1.1V6.9L14 5.8l-1.5-2.6-1.6.6-1.1-.6-.3-1.7z"/><circle cx="8" cy="7.5" r="2"/></svg>',
   claude:
@@ -64,7 +64,7 @@ app.innerHTML = `
     <div class="project"><span id="project-name">Diffpane</span><span id="project-path"></span></div>
     <span class="branch" hidden>${icons.branch}<span id="branch-name"></span></span>
     <div class="titlebar-actions">
-      <button type="button" id="ideas-toggle" class="titlebar-button" aria-label="Idea Builder" aria-controls="ideas-panel" aria-expanded="false" aria-keyshortcuts="Meta+Shift+I Control+Shift+I" title="Idea Builder · ⌘⇧I" hidden>${icons.idea}<span>Ideas</span></button>
+      <button type="button" id="ideas-toggle" class="titlebar-button" aria-controls="ideas-panel" aria-expanded="false" aria-keyshortcuts="Meta+Shift+I Control+Shift+I" title="Ideas · ⌘⇧I" hidden>${icons.idea}<span>Ideas</span></button>
       <button type="button" id="review-toggle" class="titlebar-button review-toggle" aria-label="Review changes" aria-controls="change-review" aria-pressed="false" aria-keyshortcuts="Meta+Shift+G Control+Shift+G" title="Review changes · ⌘⇧G" hidden>${icons.review}<span>Changes</span><span class="review-count" aria-hidden="true"></span></button>
       <button type="button" id="review-notes-toggle" class="titlebar-button" aria-label="Review notes" aria-controls="review-notes-panel" aria-expanded="false" aria-keyshortcuts="Meta+Shift+J Control+Shift+J" title="Review notes · ⌘⇧J" hidden>${icons.note}<span>Notes</span><span class="review-notes-count" aria-hidden="true" hidden></span></button>
       <button type="button" id="claude-toggle" aria-label="Claude" aria-controls="claude-panel" aria-expanded="false" aria-keyshortcuts="Meta+Shift+L Control+Shift+L" title="Claude · ⌘⇧L" hidden>${icons.claude}<span>Claude</span></button>
@@ -77,7 +77,7 @@ app.innerHTML = `
       <aside id="navigator" hidden></aside>
       <aside id="change-review" hidden></aside>
     </div>
-    <section class="workbench">
+    <section class="workbench" tabindex="-1" aria-label="Code workspace">
   <div class="message" id="message" role="status" hidden></div>
   <main class="start-screen" id="start-screen" aria-labelledby="start-title" aria-busy="true">
     <div class="start-content"><span class="start-mark">${icons.mark}</span><h1 id="start-title">Opening workspace…</h1><p id="start-description" role="status">Your files will appear here in a moment.</p><div class="start-actions" id="start-actions" hidden><button type="button" id="open-folder">Open Folder…</button><button type="button" id="open-file">Open File…</button></div><section class="recent-targets" id="recent-targets" aria-labelledby="recent-title" hidden><h2 id="recent-title">Recently opened</h2><ul class="recent-list" id="recent-list"></ul><p id="recent-status" role="status" hidden></p></section></div>
@@ -141,6 +141,9 @@ let recentSignature = '';
 let applyingAssistantPath = null;
 let applyingAssistantEdit = null;
 const ideaVisibilityKey = 'diffpane.ideas.visible';
+let ideaMode = 'closed';
+let ideaDocked = false;
+let focusBeforeIdeas = null;
 
 let activeScheme;
 const appearance = createAppearanceSettings((preferences, scheme) => {
@@ -169,7 +172,10 @@ ui.settings_toggle.addEventListener('click', openSettings);
 const assistant =
   api?.claude &&
   createAssistant(ui.claude_panel, ui.claude_toggle, api, {
-    onOpen: () => reviewNotes?.close(),
+    onOpen: () => {
+      returnFromIdeas({ dock: true });
+      reviewNotes?.close();
+    },
     prepareSend: async pathname => {
       if (closingRequested || closed) throw new Error('This window is closing.');
       await cards.get(pathname)?.autosave?.flush();
@@ -531,7 +537,17 @@ const ideas =
     save: api.ideas.upsert,
     remove: api.ideas.delete,
     onPendingChange: syncSaveState,
-    onClose: () => setIdeasVisible(false, true),
+    onClose: () => {
+      if (returnFromIdeas({ restoreFocus: true })) return;
+      if (setIdeasMode('closed', { remember: true })) ui.ideas_toggle.focus();
+    },
+    onDock: () => {
+      if (setIdeasMode('dock', { remember: true })) {
+        focusBeforeIdeas = null;
+        ideas.focus();
+      }
+    },
+    onExpand: showIdeasNotebook,
     hasCurrentLink: () => Boolean(openedFile),
     getCurrentLink: () => {
       const card = cards.get(openedFile?.path);
@@ -556,28 +572,83 @@ const ideas =
         throw new Error('The linked file could not be opened.');
     },
     draftInChat: assistant ? idea => assistant.attachIdea(idea) : undefined,
-    openMarkdownFile: target => void openMarkdownTarget(target),
+    openMarkdownFile: async target => {
+      if (!(await openMarkdownTarget(target, { ideaLink: true })))
+        throw new Error('The linked file could not be opened.');
+    },
     openExternal: api.openExternal,
     media: api.media,
-    colorize: colorizeMarkdown,
   });
 const workspaceLayout = createWorkspaceLayout(ui.workspace);
-ui.ideas_toggle.addEventListener('click', () => setIdeasVisible(ui.ideas_panel.hidden, true));
+ui.ideas_toggle.addEventListener('click', () => {
+  if (!returnFromIdeas({ restoreFocus: true })) showIdeasNotebook();
+});
+ui.claude_toggle.addEventListener(
+  'click',
+  event => {
+    if (!returnFromIdeas()) return;
+    event.stopImmediatePropagation();
+    assistant?.toggle(true);
+  },
+  { capture: true },
+);
+ui.review_notes_toggle.addEventListener(
+  'click',
+  () => {
+    if (returnFromIdeas()) reviewNotes?.close();
+  },
+  { capture: true },
+);
 
-function setIdeasVisible(visible, focus = false, remember = true) {
-  if (!ideas || !snapshot || closingRequested) return;
-  ui.ideas_panel.hidden = !visible;
-  ui.ideas_toggle.setAttribute('aria-expanded', String(visible));
-  if (remember) localStorage.setItem(ideaVisibilityKey, String(visible));
-  if (focus) {
-    if (visible) ideas.focus();
-    else ui.ideas_toggle.focus();
+/** @param {'closed' | 'dock' | 'notebook'} mode */
+function setIdeasMode(mode, { remember = false } = {}) {
+  if (!ideas || !snapshot || closingRequested || closed) return false;
+  const notebook = mode === 'notebook';
+  ideaMode = mode;
+  if (!notebook) ideaDocked = mode === 'dock';
+  ui.ideas_panel.hidden = mode === 'closed';
+  ideas.setMode(notebook ? 'notebook' : 'dock');
+  workspaceLayout.setIdeasNotebook(notebook, ideaDocked);
+  languageWidgets.hidden = notebook;
+  ui.ideas_toggle.setAttribute('aria-expanded', String(notebook));
+  if (remember) {
+    try {
+      localStorage.setItem(ideaVisibilityKey, String(ideaDocked));
+    } catch {
+      // The pane can still change modes when local storage is unavailable.
+    }
   }
+  return true;
+}
+
+function showIdeasNotebook() {
+  if (ideaMode === 'notebook') return;
+  const previous = document.activeElement;
+  if (!setIdeasMode('notebook')) return;
+  focusBeforeIdeas = previous instanceof HTMLElement ? previous : null;
+  ideas.focus();
+}
+
+function returnFromIdeas({ dock = ideaDocked, restoreFocus = false } = {}) {
+  if (ideaMode !== 'notebook' || !setIdeasMode(dock ? 'dock' : 'closed')) return false;
+  if (restoreFocus) {
+    const previous = focusBeforeIdeas;
+    if (
+      previous?.isConnected &&
+      previous !== document.body &&
+      !previous.closest('[hidden], [inert]')
+    )
+      previous.focus({ preventScroll: true });
+    if (document.activeElement === document.body || document.activeElement !== previous)
+      ui.ideas_toggle.focus();
+  }
+  focusBeforeIdeas = null;
+  return true;
 }
 
 function attachIdeaLink(link) {
   if (!ideas || !snapshot || closingRequested) return;
-  setIdeasVisible(true);
+  if (ideaMode === 'closed') setIdeasMode('dock');
   ideas.attach(link);
 }
 
@@ -597,6 +668,20 @@ async function openFile(
     }
   }
   if (version !== navigationVersion || closingRequested || closed) return false;
+  if (ideaMode === 'notebook') {
+    try {
+      const target = await api.document(file.path, compare ? comparison : 'head');
+      if (target.error) throw new Error(target.error);
+    } catch (error) {
+      if (version !== navigationVersion || closingRequested || closed) return false;
+      if (ideaLink) throw error;
+      if (ideaMode === 'notebook') ideas.notify(error.message || String(error));
+      return false;
+    }
+    if (version !== navigationVersion || closingRequested || closed) return false;
+    if (returnFromIdeas({ dock: ideaLink || ideaDocked }))
+      ui.workspace.querySelector('.workbench').focus({ preventScroll: true });
+  }
   if (openedFile?.path === file.path && current) {
     navigator.select(file.path);
     current.pendingReviewAnchor = anchor;
@@ -630,6 +715,10 @@ async function openFile(
       } else if (!reloading && !current.loading) revealReviewAnchor(current);
       syncReviewState();
     } else if (compare) openComparison(current, comparison, file);
+    else if (file.anchor && current.document && current.markdownCleanup) {
+      current.markdownAnchor = file.anchor;
+      renderDocument(current, current.document);
+    }
     return true;
   }
   for (const card of cards.values()) {
@@ -646,6 +735,7 @@ async function openFile(
   assistant?.setContext(Boolean(snapshot), file.path);
   const card = createCard(reviewFiles(comparison).find(value => value.path === file.path) ?? file);
   card.pendingReviewAnchor = anchor;
+  card.markdownAnchor = file.anchor || null;
   card.anchorFromIdea = ideaLink;
   if (anchor) {
     card.comparing = anchor.side === 'head';
@@ -763,20 +853,22 @@ function colorizeMarkdown(code, language) {
   return monaco.editor.colorize(code, aliases[language] ?? language, {});
 }
 
-async function openMarkdownTarget(target) {
-  await openFile({ path: target.path });
-  const next = cards.get(target.path);
-  if (next) next.markdownAnchor = target.anchor;
+function openMarkdownTarget(target, options) {
+  return openFile(target, options);
 }
 
 function toggleNavigator() {
   if (!snapshot) return;
-  setSidebarVisible(ui.sidebar.hidden);
+  if (returnFromIdeas()) {
+    reviewVisible = false;
+    setSidebarVisible(true);
+    ui.navigator.querySelector('.navigator-tree').focus();
+  } else setSidebarVisible(ui.sidebar.hidden);
 }
 
 function toggleReview() {
   if (!snapshot) return;
-  reviewVisible = ui.sidebar.hidden || !reviewVisible;
+  reviewVisible = returnFromIdeas() || ui.sidebar.hidden || !reviewVisible;
   setSidebarVisible(true);
   if (reviewVisible) review.focus();
   else ui.navigator.querySelector('.navigator-tree').focus();
@@ -939,7 +1031,11 @@ function applySnapshot(next) {
     reviewNotes?.setContext(true);
     if (ideas) {
       ui.ideas_toggle.hidden = false;
-      setIdeasVisible(localStorage.getItem(ideaVisibilityKey) !== 'false', false, false);
+      try {
+        if (localStorage.getItem(ideaVisibilityKey) === 'true') setIdeasMode('dock');
+      } catch {
+        // Ideas can still open when local storage is unavailable.
+      }
       void ideas.load();
     }
     document.querySelector('.branch').hidden = false;
@@ -1090,7 +1186,8 @@ function renderDocument(card, document) {
   const preview = document.preview;
   const reading = !preview && isMarkdown(card.file.path) && !card.markdownSource;
   const text = document.after ?? '';
-  const reusableMarkdown = reading && card.markdownCleanup && text === card.markdownText;
+  const reusableMarkdown =
+    reading && card.markdownCleanup && text === card.markdownText && !card.markdownAnchor;
   card.note.textContent =
     (!preview &&
       (document.note ||
@@ -1790,7 +1887,7 @@ document.addEventListener('keydown', event => {
   }
   if (event.shiftKey && !event.altKey && event.key.toLowerCase() === 'l' && assistant) {
     event.preventDefault();
-    if (!event.repeat) assistant.toggle();
+    if (!event.repeat) ui.claude_toggle.click();
     return;
   }
   if (event.shiftKey && !event.altKey && event.key.toLowerCase() === 'i' && ideas && snapshot) {
@@ -1921,7 +2018,7 @@ else {
       reviewNotes?.dispose();
       workspaceLayout.dispose();
       unsubscribeIdeas?.();
-      ideas?.reset();
+      ideas?.dispose();
       if (snapshotFrame !== null) cancelAnimationFrame(snapshotFrame);
       if (documentFrame !== null) cancelAnimationFrame(documentFrame);
       navigator.dispose();

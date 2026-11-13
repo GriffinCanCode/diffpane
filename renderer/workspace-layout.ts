@@ -179,6 +179,8 @@ export function createWorkspaceLayout(workspace: HTMLElement) {
   const { sizes: preferred, order: savedOrder } = readPreferences();
   let order = savedOrder;
   let layout: Layout;
+  let ideasNotebook = false;
+  let ideasDocked = false;
   let drag: {
     key: Dimension;
     pointer: number;
@@ -391,7 +393,7 @@ export function createWorkspaceLayout(workspace: HTMLElement) {
       workspace.clientWidth,
       workspace.clientHeight,
       {
-        ideas: Boolean(panes.ideas && !panes.ideas.hidden),
+        ideas: ideasNotebook ? ideasDocked : Boolean(panes.ideas && !panes.ideas.hidden),
         files: Boolean(panes.files && !panes.files.hidden),
         right: Boolean(rightPanel()),
       },
@@ -502,15 +504,14 @@ export function createWorkspaceLayout(workspace: HTMLElement) {
     })),
   ] as const;
   const auxiliaryHeaders: HTMLElement[] = [];
+  const ideasHeader = panes.ideas?.querySelector<HTMLElement>('.idea-header');
+  const dragHint = 'Use the left or right arrow key to move this panel.';
   for (const { column, panel, selector } of handles) {
     for (const header of panel?.querySelectorAll<HTMLElement>(selector) ?? []) {
       if (column === 'right') auxiliaryHeaders.push(header);
       header.setAttribute('data-panel-drag-handle', '');
       header.tabIndex = 0;
-      header.setAttribute(
-        'aria-description',
-        'Use the left or right arrow key to move this panel.',
-      );
+      header.setAttribute('aria-description', dragHint);
       header.addEventListener(
         'pointerdown',
         event => {
@@ -518,6 +519,7 @@ export function createWorkspaceLayout(workspace: HTMLElement) {
             event.button !== 0 ||
             drag ||
             dock ||
+            (ideasNotebook && column === 'ideas') ||
             !layout.activeColumns.includes(column) ||
             !(event.target instanceof Element)
           )
@@ -541,6 +543,7 @@ export function createWorkspaceLayout(workspace: HTMLElement) {
         event => {
           if (
             event.target !== header ||
+            (ideasNotebook && column === 'ideas') ||
             drag ||
             dock ||
             event.altKey ||
@@ -658,6 +661,21 @@ export function createWorkspaceLayout(workspace: HTMLElement) {
   }
 
   return {
+    setIdeasNotebook(notebook: boolean, docked: boolean) {
+      ideasNotebook = notebook;
+      ideasDocked = docked;
+      workspace.toggleAttribute('data-ideas-notebook', notebook);
+      for (const panel of [panes.files, panes.code, ...rightPanels, ...Object.values(splitters)]) {
+        if (panel) panel.inert = notebook;
+      }
+      if (ideasHeader) {
+        ideasHeader.tabIndex = notebook ? -1 : 0;
+        ideasHeader.toggleAttribute('data-panel-drag-handle', !notebook);
+        if (notebook) ideasHeader.removeAttribute('aria-description');
+        else ideasHeader.setAttribute('aria-description', dragHint);
+      }
+      refresh();
+    },
     dispose() {
       stopDrag(false);
       stopDock();

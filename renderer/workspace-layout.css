@@ -25,6 +25,21 @@
   grid-column: ideas;
 }
 
+.workspace[data-ideas-notebook] > #ideas-panel {
+  position: absolute;
+  z-index: 4;
+  inset: 0;
+  grid-area: auto;
+}
+
+.workspace[data-ideas-notebook] > [inert] {
+  visibility: hidden;
+}
+
+#app:has(> .workspace[data-ideas-notebook]) > .statusbar {
+  display: none;
+}
+
 .workspace > #sidebar {
   grid-column: files;
 }
