@@ -954,8 +954,9 @@ async function receive({ id, method, args }) {
       await dispose()
       value = null
     } else if (method === 'refresh') {
+      if (refreshing) await currentRefresh?.catch(() => {})
+      if (shuttingDown) throw appError('The workspace is closing.', { code: 'WINDOW_UNAVAILABLE' })
       force = true
-      if (refreshing) await currentRefresh
       value = await refresh()
     } else if (method === 'performance')
       value = { documents: documents.stats(), inventoryRevision: catalogRevision, revision }

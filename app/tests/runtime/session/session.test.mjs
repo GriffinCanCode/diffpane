@@ -306,6 +306,40 @@ test('a replacement workspace advances previously published revisions', async t 
   assert.ok(captured.checkpoint && captured.checkpoint.id > 12)
 })
 
+test('manual refresh retries after the already running watcher refresh fails', async t => {
+  const repo = await fixture(t, {
+    fileCount: 1,
+    setup: `${injectedWatchSetup}
+      const snapshot = Repository.prototype.snapshot;
+      let fail = false;
+      let release;
+      testPort.on('message', message => {
+        if (message.testFailSnapshot) fail = true;
+        if (message.testReleaseSnapshot) release?.();
+      });
+      Repository.prototype.snapshot = async function () {
+        if (fail) {
+          fail = false;
+          const pending = new Promise(resolve => { release = resolve; });
+          testPort.postMessage({ event: 'test-refresh-started' });
+          await pending;
+          throw new Error('temporary Git failure');
+        }
+        return snapshot.call(this);
+      };
+    `,
+  })
+  const filename = 'src/file0.txt'
+  await repo.write(filename, 'manual refresh fixture\n')
+  repo.signal({ testFailSnapshot: true })
+  repo.emit([{ path: filename, type: 'update' }])
+  await repo.waitNotice('test-refresh-started')
+  const manual = repo.call('refresh')
+  repo.signal({ testReleaseSnapshot: true })
+  assert.deepEqual((await manual).changedPaths, ['*'])
+  assert.equal(repo.updateFailures.length, 1)
+})
+
 test('concurrent saves retain the inventory and unrelated cached documents; new files and commits invalidate correctly', async t => {
   const repo = await fixture(t)
   assert.equal((await repo.call('files')).length, 1000)
