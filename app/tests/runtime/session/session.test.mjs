@@ -275,6 +275,10 @@ test('a committed rename returns its destination even if the following refresh f
       recoverable: true,
     },
   ])
+  assert.deepEqual(
+    (await repo.call('files')).map(file => file.path),
+    ['src/renamed.txt'],
+  )
   repo.signal({ testFailSnapshot: true })
   await assert.rejects(repo.call('refresh'), {
     message: 'temporary Git failure',
@@ -338,6 +342,23 @@ test('manual refresh retries after the already running watcher refresh fails', a
   repo.signal({ testReleaseSnapshot: true })
   assert.deepEqual((await manual).changedPaths, ['*'])
   assert.equal(repo.updateFailures.length, 1)
+})
+
+test('renaming an expanded ignored folder preserves its nested expansions', async t => {
+  const repo = await fixture(t, { fileCount: 1, setup: injectedWatchSetup })
+  await repo.write('.gitignore', 'cache*/\n')
+  await mkdir(path.join(repo.root, 'cache/inner'), { recursive: true })
+  await repo.write('cache/inner/note.txt', 'ignored contents\n')
+  await repo.call('refresh')
+  await repo.call('directory-expanded', 'cache', true)
+  await repo.call('directory-expanded', 'cache/inner', true)
+  const before = await repo.call('files-delta', null)
+  assert.ok(before.files.some(file => file.path === 'cache/inner/note.txt'))
+
+  assert.equal(await repo.call('rename', 'cache', 'cache-renamed'), 'cache-renamed')
+  const after = await repo.call('files-delta', before.revision)
+  assert.ok(after.files.some(file => file.path === 'cache-renamed/inner/note.txt'))
+  assert.ok(after.removed.includes('cache/inner/note.txt'))
 })
 
 test('concurrent saves retain the inventory and unrelated cached documents; new files and commits invalidate correctly', async t => {

@@ -99,6 +99,7 @@ let shuttingDown = false
 const activeRequests = new Set()
 /** @type {AbortController | undefined} */
 let contentSearchController
+/** @type {Promise<unknown>} */
 let directoryChanges = Promise.resolve()
 /** @type {Set<string>} */
 const changes = new Set()
@@ -721,6 +722,13 @@ async function findFile(filePath) {
   return file?.directory ? undefined : (file ?? (await repository.ignoredFile(filePath)))
 }
 
+/** @template T @param {() => Promise<T>} run */
+function changeDirectory(run) {
+  const change = directoryChanges.then(run)
+  directoryChanges = change.catch(() => {})
+  return change
+}
+
 /** @param {string} filePath */
 async function claudeFile(filePath) {
   if (!claudeVisiblePath(filePath)) throw new Error('Choose an available, nonignored project text file.')
@@ -816,20 +824,37 @@ async function receive({ id, method, args }) {
     let value
     if (method === 'snapshot') value = snapshot ?? (await refresh())
     else if (method === 'capture-checkpoint') value = await captureCheckpoint()
-    else if (method === 'operation-path' || method === 'rename') {
+    else if (method === 'operation-path') {
       await files()
       const filename = sessionString(args[0], 'file path')
       if (catalogIndex.get(filename)?.submodule) throw new Error('Open the submodule to change its files.')
-      if (method === 'operation-path') value = await operationPath(repository, filename)
-      else {
+      value = await operationPath(repository, filename)
+    } else if (method === 'rename') {
+      const filename = sessionString(args[0], 'file path')
+      value = await changeDirectory(async () => {
+        await files()
+        if (catalogIndex.get(filename)?.submodule) throw new Error('Open the submodule to change its files.')
+        const expanded = [...repository.expandedIgnored].filter(
+          directory => directory === filename || directory.startsWith(`${filename}/`),
+        )
         const renamed = await renameEntry(repository, filename, args[1])
-        value = renamed
+        if (filename === renamed) return renamed
+        // Move expansion state after any older inventory scan that still has the source.
+        await catalogLoading?.catch(() => {})
+        for (const directory of expanded) {
+          repository.expandedIgnored.delete(directory)
+          repository.expandedIgnored.add(renamed + directory.slice(filename.length))
+        }
+        invalidateCatalog()
         documents.invalidate([filename, renamed])
-        force = true
         await currentRefresh?.catch(() => {})
         // The rename has committed; refresh reports its own failures separately.
-        await refresh().catch(() => {})
-      }
+        if (!shuttingDown) {
+          force = true
+          await refresh().catch(() => {})
+        }
+        return renamed
+      })
     } else if (method === 'files') value = (await files()).filter(file => !file.ignored)
     else if (method === 'content-search') {
       contentSearchController?.abort()
@@ -890,9 +915,7 @@ async function receive({ id, method, args }) {
           }
         }
       }
-      const change = directoryChanges.then(() => updateExpansion())
-      directoryChanges = change.catch(() => {})
-      await change
+      await changeDirectory(updateExpansion)
       value = null
     } else if (method === 'files-delta') {
       const base = args[0]
