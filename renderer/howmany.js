@@ -259,13 +259,17 @@ export function createHowMany(monaco, api, navigator, statusbar) {
   });
   const unsubscribe = api.howmany.onEvent(event => {
     if (event.type === 'analysis') render(event);
-    if (event.type === 'file' && active?.file.path === event.path && active.model) {
-      const model = active.model;
+    if (event.type === 'file' && active?.file.path === event.path && active.model)
+      showWarnings(active, event.diagnostics ?? []);
+  });
+
+  function showWarnings(card, diagnostics) {
+    if (card.model) {
       // HowMany owns separate markers so language-server diagnostics remain visible.
       monaco.editor.setModelMarkers(
-        model,
+        card.model,
         'howmany',
-        (event.diagnostics ?? []).map(diagnostic => ({
+        diagnostics.map(diagnostic => ({
           startLineNumber: diagnostic.range.start.line + 1,
           startColumn: diagnostic.range.start.character + 1,
           endLineNumber: diagnostic.range.end.line + 1,
@@ -276,11 +280,12 @@ export function createHowMany(monaco, api, navigator, statusbar) {
           code: diagnostic.code,
         })),
       );
-      const warnings = active.element.querySelector('.howmany-warnings');
-      warnings.textContent = (event.diagnostics ?? []).map(value => value.message).join(' · ');
-      warnings.hidden = !warnings.textContent;
     }
-  });
+    const warnings = card.element.querySelector('.howmany-warnings');
+    const text = diagnostics.map(value => value.message).join(' · ');
+    if (warnings.textContent !== text) warnings.textContent = text;
+    warnings.hidden = !text;
+  }
 
   function clearFile(card = active) {
     if (!card || card !== active) return;
@@ -289,25 +294,26 @@ export function createHowMany(monaco, api, navigator, statusbar) {
     fileRequest++;
     active = null;
     card.howmanyVersion = null;
-    if (card.model) monaco.editor.setModelMarkers(card.model, 'howmany', []);
+    const counts = card.element.querySelector('.howmany-counts');
+    counts.textContent = '';
+    counts.hidden = true;
+    showWarnings(card, []);
     void api.howmany.close(card.file.path).catch(() => {});
   }
   function updateFile(card, document, force = false) {
     if (disposed) return;
+    if (document.note) {
+      clearFile(card);
+      return;
+    }
     const version = card.model.getVersionId();
-    if (!force && !document.note && active === card && card.howmanyVersion === version) return;
+    if (!force && active === card && card.howmanyVersion === version) return;
     active = card;
     cancelFile?.();
     card.howmanyVersion = version;
     const request = ++fileRequest;
     const counts = card.element.querySelector('.howmany-counts');
-    const warnings = card.element.querySelector('.howmany-warnings');
-    counts.hidden = true;
-    warnings.hidden = true;
-    if (document.note) {
-      clearFile(card);
-      return;
-    }
+    // Keep the editor positioned while replacement counts and diagnostics arrive.
     cancelFile = afterPaint(() => {
       cancelFile = null;
       if (
@@ -322,25 +328,27 @@ export function createHowMany(monaco, api, navigator, statusbar) {
   }
 
   async function loadFile(card, version, request, counts) {
+    let result;
     try {
-      const result = await api.howmany.file(card.file.path);
-      if (
-        disposed ||
-        request !== fileRequest ||
-        !card.active ||
-        card.model?.getVersionId() !== version
-      )
-        return;
-      if (!result || result.message) card.howmanyVersion = null;
-      counts.textContent = result?.title ?? '';
-      counts.hidden = !counts.textContent;
-      counts.title = result?.live
-        ? 'Counted by HowMany from the displayed file'
-        : 'Counted by HowMany from the saved file';
+      result = await api.howmany.file(card.file.path);
     } catch {
-      if (request === fileRequest) card.howmanyVersion = null;
       /* Missing tools never prevent a file from opening. */
     }
+    if (
+      disposed ||
+      request !== fileRequest ||
+      !card.active ||
+      card.model?.getVersionId() !== version
+    )
+      return;
+    if (!result || result.message) card.howmanyVersion = null;
+    if (!result || result.message || result.live === false) showWarnings(card, []);
+    const text = result?.title ?? '';
+    if (counts.textContent !== text) counts.textContent = text;
+    counts.hidden = !text;
+    counts.title = result?.live
+      ? 'Counted by HowMany from the displayed file'
+      : 'Counted by HowMany from the saved file';
   }
   return {
     start() {

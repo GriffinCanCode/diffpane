@@ -259,9 +259,33 @@ test.skipIf(!existsSync(bundled))(
     const report = await runtime.analyze();
     assert.equal(report.status, 'ready');
     assert.ok(report.report.basic.total_lines >= 4);
+    const longer = `${text}print(x + 1)\n`;
+    await writeFile(path.join(root, filename), longer);
+    const beforeLonger = events.length;
+    assert.match((await runtime.file(filename, longer)).title, /5 Python/);
+    await until(() =>
+      events
+        .slice(beforeLonger)
+        .some(
+          event =>
+            event.type === 'file' &&
+            event.diagnostics.some(
+              item => item.code === 'long-file' && /5 lines/.test(item.message),
+            ),
+        ),
+    );
+    assert.equal(
+      events.slice(beforeLonger).some(event => event.type === 'file' && !event.diagnostics.length),
+      false,
+      'refreshing the active file keeps its existing warnings until replacements arrive',
+    );
     const changed = '# explanation\nx = 1\n';
     await writeFile(path.join(root, filename), changed);
+    const beforeShorter = events.length;
     assert.match((await runtime.file(filename, changed)).title, /2 Python.*1 code.*1 comment/);
+    await until(() =>
+      events.slice(beforeShorter).some(event => event.type === 'file' && !event.diagnostics.length),
+    );
     await writeFile(config, '[lsp]\ncode_lens = false\nmax_file_lines = 0\nmin_doc_ratio = 0\n');
     assert.equal(
       (await runtime.file(filename, await readFile(path.join(root, filename), 'utf8'))).title,

@@ -309,7 +309,11 @@ export class HowManyRuntime {
 
   async file(relative, text) {
     if (this.disposed) return null;
-    this.closeFile();
+    if (this.activeFile === relative) {
+      // A new request can update the open LSP document without clearing its diagnostics.
+      this.fileGeneration++;
+      this.fileAbort?.abort();
+    } else this.closeFile();
     const generation = this.fileGeneration;
     await this.configure();
     if (generation !== this.fileGeneration || this.disposed) return null;

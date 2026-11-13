@@ -135,12 +135,60 @@ try {
     }
     globalThis.howmanyProbe.pending = [];
   });
-  await page.locator('.howmany-counts').filter({ hasText: 'SECOND COUNTS' }).waitFor();
+  const counts = page.locator('.howmany-counts');
+  const warnings = page.locator('.howmany-warnings');
+  const editor = page.locator('.editor-host');
+  await counts.filter({ hasText: 'SECOND COUNTS' }).waitFor();
   assert.equal(await page.getByText('STALE FIRST COUNTS', { exact: true }).count(), 0);
   assert.equal(await page.evaluate(() => window.__diffpane.stats().models), 1);
+
+  await application.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0].webContents.send('howmany-event', {
+      type: 'file',
+      path: 'second.txt',
+      diagnostics: [
+        {
+          message: 'SECOND WARNING',
+          range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } },
+        },
+      ],
+    });
+  });
+  await warnings.filter({ hasText: 'SECOND WARNING' }).waitFor();
+  const editorBounds = await editor.boundingBox();
+  assert.ok(editorBounds);
+  await writeFile(path.join(root, 'second.txt'), 'UPDATED FILE\n');
+  await page.waitForFunction(() =>
+    document
+      .querySelector('.view-lines')
+      ?.textContent.replaceAll('\u00a0', ' ')
+      .includes('UPDATED FILE'),
+  );
+  await waitForRequests(4, true);
+  assert.deepEqual(
+    await editor.boundingBox(),
+    editorBounds,
+    'a pending count must not move the editor',
+  );
+  assert.equal(await counts.innerText(), 'SECOND COUNTS');
+  assert.equal(await counts.isVisible(), true);
+  assert.equal(await warnings.innerText(), 'SECOND WARNING');
+  assert.equal(await warnings.isVisible(), true);
+
+  await application.evaluate(({ BrowserWindow }) => {
+    const [work] = globalThis.howmanyProbe.pending;
+    BrowserWindow.getAllWindows()[0].webContents.send('howmany-event', {
+      type: 'file',
+      path: 'second.txt',
+      diagnostics: [],
+    });
+    work.resolve({ title: 'UPDATED COUNTS' });
+  });
+  await counts.filter({ hasText: 'UPDATED COUNTS' }).waitFor();
+  await warnings.waitFor({ state: 'hidden' });
   assert.deepEqual(errors, []);
   console.log(
-    'HowMany startup checks passed: files paint first, stalled analysis allows navigation, stale counts are discarded.',
+    'HowMany checks passed: files paint first, stalled analysis allows navigation, and live counts update without moving the editor while pending.',
   );
 } catch (error) {
   if (application) {
