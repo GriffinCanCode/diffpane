@@ -21,14 +21,14 @@ jobs:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-node@v6.5.0
         with:
-          node-version-file: .node-version
+          node-version-file: .github/config/node-version
           cache: npm
       - name: Cache bundled HowMany
         uses: actions/cache@v6.1.0
         with:
           path: resources/howmany
-          key: howmany-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('howmany-tool.json', 'setup-howmany.ts') }}
+          key: howmany-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('app/tooling/dependencies/howmany-tool.json', 'app/tooling/dependencies/setup-howmany.ts') }}
       - run: npm ci --prefer-offline
-      - run: git diff --exit-code -- electron/preload.cjs
+      - run: git diff --exit-code -- app/electron/runtime/window/preload.cjs
       - run: npm run setup:howmany
       - run: npm run verify

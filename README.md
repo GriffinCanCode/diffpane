@@ -1,19 +1,19 @@
 ---
 doc_radar:
   sentinels:
-    - file: electron/main.mjs
+    - file: app/electron/runtime/window/main.mjs
       contains: ['contextIsolation: true', 'nodeIntegration: false', 'sandbox: true']
-    - file: renderer/main.js
+    - file: app/renderer/shell/workspace/main.js
       contains: ['createNavigator', 'createLanguageFeatures', 'saveViewState', 'editorReadOnly', 'diff-gutter-${kind}']
-    - file: renderer/navigator.js
+    - file: app/renderer/explorer/tree/navigator.js
       contains: ['ROW_HEIGHT', 'buildNavigationTree', 'navigator-root']
-    - file: renderer/syntax.ts
+    - file: app/renderer/editor/highlighting/syntax.ts
       contains: ['configureSyntax', 'parseDocument']
-    - file: renderer/icons.ts
+    - file: app/renderer/shell/layout/icons.ts
       contains: ['material-icon-theme', 'projectIcon']
-    - file: electron/language.mjs
+    - file: app/electron/tools/languages/language.mjs
       contains: ['LanguageRuntime', 'textDocument/didOpen']
-    - file: electron/servers.ts
+    - file: app/electron/tools/languages/servers.ts
       contains: ['basedpyright', 'rust-analyzer', 'ElixirLS', 'gopls', 'SourceKit-LSP', 'typescript-language-server']
 ---
 
@@ -55,11 +55,11 @@ Diffpane calls Claude Haiku directly. Your prompts, context references, and the 
 
 ## Build from source
 
-Use the Node.js version in `.node-version`. Building the macOS app also requires Rust 1.88+ and the Xcode command-line tools.
+Use the Node.js version in `.github/config/node-version`. Building the macOS app also requires Rust 1.88+ and the Xcode command-line tools.
 
 ```sh
-make setup
-make install
+npm ci
+npm run install:app
 ```
 
 Then, from any project folder:
@@ -79,8 +79,19 @@ Open **Settings → Keyboard shortcuts** from the title-bar gear or the Diffpane
 ## Development
 
 ```sh
-make dev     # run from source
-make test    # run tests
-make build   # build the app
-make verify  # formatting, lint, tests, and build
+npm run dev -- .  # open this repo from source
+npm test          # run tests
+npm run build     # build the renderer
+npm run verify    # check formatting, lint, types, tests, and build
 ```
+
+Run `make -f app/tooling/commands/Makefile <target>` from the repository root to use the Make targets.
+
+## Repository layout
+
+- [Application](app/README.md) indexes the Electron runtime, renderer, shared contracts, tooling, and tests.
+- [Branding](branding/README.md) contains the icon source and generated assets for Electron and the renderer.
+- [Changelog](changelog/README.md) records shipped changes by feature.
+- [Legal](legal/README.md) holds the third-party notices included in the macOS bundle.
+
+Source directories contain at most five files, including the README. Keep code in leaf directories and use lowercase kebab-case for authored file and folder names. Standard entry points and metadata keep their tool-required names, including `README.md`, `Makefile`, and `vite.config.ts`. The file limit applies to the checked-in tree. Git metadata, installed dependencies, and generated build outputs are outside that tree.

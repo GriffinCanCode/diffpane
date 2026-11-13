@@ -1,0 +1,25 @@
+# Billy Rulebook RB-DESIGN-003 source file exceptions.
+# Remove the marker and matching entry together after extracting the named responsibility.
+entry = [
+  { path = "app/electron/tools/assistant/claude-session.mjs", category = "tightly-coupled-protocol", reason = "The turn owns its streamed tool activity, read editions, proposal identity and apply decision. Extract tool dispatch once it can carry the same per-turn read evidence independently.", fix = true },
+  { path = "app/electron/tools/analysis/howmany.mjs", category = "state-machine", reason = "Workspace report and file-analysis generations share subprocess cancellation and teardown. Extract file analysis once its invalidation and shutdown are independently owned.", fix = true },
+  { path = "app/electron/tools/languages/language.mjs", category = "tightly-coupled-protocol", reason = "Language-server negotiation, document versions and request cancellation share connection state. Extract the framed transport once its process-lifetime contract is independently exercised.", fix = true },
+  { path = "app/electron/runtime/window/main.mjs", category = "orchestration-graph", reason = "Electron window registration, worker ownership, save flushing and application shutdown share the session registry. Extract IPC families once their session and shutdown boundaries can be tested independently.", fix = true },
+  { path = "app/electron/runtime/window/preload.ts", category = "tightly-coupled-protocol", reason = "The sandboxed preload is emitted from one entrypoint and validates every exposed IPC channel. Extract validators when the generator can inline them without runtime imports.", fix = true },
+  { path = "app/electron/workspace/repository/repository.mjs", category = "tightly-coupled-protocol", reason = "Git inventory, content, checkpoint and save paths share repository confinement and byte limits. Extract checkpoint storage once its captured-identity and read-budget contract is independent.", fix = true },
+  { path = "app/electron/runtime/session/session.mjs", category = "state-machine", reason = "The worker owns a single repository session with shared revision, watcher and document-cache lifetimes. Extract polling when its state and native shutdown join have an independent contract.", fix = true },
+  { path = "app/renderer/panels/assistant/assistant.js", category = "state-machine", reason = "The panel reconciles streamed activity, the selected context and proposal actions against one request lifecycle. Extract the activity view once its updates can be verified without sharing panel state.", fix = true },
+  { path = "app/renderer/review/queue/change-review.js", category = "state-machine", reason = "Queue order, focus, baseline selection and reviewed revisions update together. Extract the review model once keyboard selection and checkpoint replacement have independent coverage.", fix = true },
+  { path = "app/renderer/panels/ideas/ideas.ts", category = "complex-canvas-editor", reason = "Idea selection, drafts, saves and incoming cross-window edits share one controller. Extract persistence transitions once they expose the same conflict and close behavior independently.", fix = true },
+  { path = "app/renderer/editor/languages/languages.js", category = "tightly-coupled-protocol", reason = "Monaco registrations, document versions and language-service cancellation share one editor attachment. Extract providers once their disposer and request ownership can be tested independently.", fix = true },
+  { path = "app/renderer/shell/workspace/main.js", category = "orchestration-graph", reason = "The renderer composition root coordinates card selection, editor lifetime, save flushing and workspace updates. Extract the card controller once it owns these transitions through a verified interface.", fix = true },
+  { path = "app/renderer/explorer/tree/navigator.js", category = "state-machine", reason = "Incremental tree reconciliation, virtualized rows and keyboard focus share one navigation state. Extract the viewport once focus restoration and expansion can be verified at its boundary.", fix = true },
+  { path = "app/renderer/review/notes/review-notes.ts", category = "state-machine", reason = "The note panel coordinates draft anchors, persistence, conflict feedback and focus restoration. Extract the composer once it has an independent save and dismissal contract.", fix = true },
+  { path = "app/renderer/shell/layout/workspace-layout.ts", category = "state-machine", reason = "Panel placement, resize, drag and notebook mode share a single geometry and focus owner. Extract geometry once its persisted bounds and drag behavior can be tested independently.", fix = true },
+]
+
+[limits]
+max_entries = 15
+
+[categories]
+allowed = ["complex-canvas-editor", "orchestration-graph", "state-machine", "tightly-coupled-protocol"]

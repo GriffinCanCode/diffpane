@@ -1,6 +1,6 @@
 import { defineConfig, lazyPlugins } from 'vite-plus'
-import { safetyLint } from './oxlint-safety.ts'
-import { typeAwareLint } from './oxlint-typeaware.ts'
+import { safetyLint } from './app/tooling/quality/oxlint-safety.ts'
+import { typeAwareLint } from './app/tooling/quality/oxlint-typeaware.ts'
 export default defineConfig({
   staged: {
     '*': 'vp check --fix',
@@ -19,14 +19,14 @@ export default defineConfig({
       partitionByNewline: true,
       groups: ['builtin', 'external', ['internal', 'subpath'], ['parent', 'sibling', 'index'], 'unknown'],
     },
-    ignorePatterns: ['syntax/*.json'],
+    ignorePatterns: ['app/tooling/grammars/snapshots/**/*.json'],
   },
   lint: {
     extends: [safetyLint, typeAwareLint],
     plugins: ['eslint', 'typescript', 'unicorn', 'oxc', 'import', 'promise', 'node'],
     categories: { correctness: 'error', suspicious: 'error', perf: 'error' },
     env: { node: true },
-    ignorePatterns: ['electron/preload.cjs'],
+    ignorePatterns: ['app/electron/runtime/window/preload.cjs'],
     jsPlugins: [{ name: 'vite-plus', specifier: 'vite-plus/oxlint-plugin' }],
     rules: {
       'vite-plus/prefer-vite-plus-imports': 'error',
@@ -42,14 +42,18 @@ export default defineConfig({
       'typescript/consistent-type-definitions': ['error', 'interface'],
     },
     overrides: [
-      { files: ['renderer/**/*.{ts,js}', 'shortcuts.ts'], env: { browser: true } },
+      { files: ['app/renderer/**/*.{ts,js}', 'app/shared/preferences/shortcuts.ts'], env: { browser: true } },
       // Node Worker and MessagePort are point-to-point and have no target origin argument.
       {
-        files: ['electron/main.mjs', 'electron/session.mjs', 'electron/diff-worker.ts'],
+        files: [
+          'app/electron/runtime/window/main.mjs',
+          'app/electron/runtime/session/session.mjs',
+          'app/electron/workspace/comparison/diff-worker.ts',
+        ],
         rules: { 'unicorn/require-post-message-target-origin': 'off' },
       },
       {
-        files: ['tests/*.test.{ts,mjs}'],
+        files: ['app/tests/**/*.test.{ts,mjs}'],
         plugins: ['vitest'],
         rules: {
           'vitest/no-focused-tests': 'error',
@@ -65,14 +69,17 @@ export default defineConfig({
     options: { denyWarnings: true, reportUnusedDisableDirectives: 'error', typeAware: true, typeCheck: true },
   },
   plugins: lazyPlugins(async () => {
-    const { syntaxCatalog } = await import('./syntax.ts')
+    const { syntaxCatalog } = await import('./app/tooling/grammars/catalog/syntax-catalog.ts')
     return [syntaxCatalog()]
   }),
+  root: 'app',
+  publicDir: '../branding/public',
   base: './',
   build: {
     target: 'esnext',
     chunkSizeWarningLimit: 2500,
-    outDir: 'dist',
+    outDir: '../dist',
+    emptyOutDir: true,
     reportCompressedSize: false,
     sourcemap: false,
   },
@@ -81,10 +88,11 @@ export default defineConfig({
     exclude: ['@wooorm/starry-night', '@shikijs/langs'],
   },
   test: {
+    root: '.',
     environment: 'node',
     // Git-backed suites spawn native processes and watchers. Bound their shared concurrency.
     maxWorkers: 4,
-    include: ['tests/*.test.mjs', 'tests/*.test.ts'],
+    include: ['app/tests/**/*.test.{mjs,ts}'],
   },
   run: {
     tasks: {
@@ -94,16 +102,12 @@ export default defineConfig({
           env: ['NODE_ENV', 'VITE_*'],
           input: [
             { auto: true },
-            'renderer/**',
-            'syntax/**',
-            'syntax.ts',
-            'app-errors.ts',
-            'ideas.ts',
-            'media-types.ts',
-            'review-notes.ts',
-            'text-lines.ts',
-            'shortcuts.ts',
-            'public/**',
+            'app/index.html',
+            'app/tsconfig.json',
+            'app/renderer/**',
+            'app/shared/**',
+            'app/tooling/grammars/**',
+            'branding/public/**',
             '!dist/**',
           ],
           output: ['dist/**'],
