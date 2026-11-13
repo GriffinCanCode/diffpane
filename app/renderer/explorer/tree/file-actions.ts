@@ -46,6 +46,7 @@ export function createFileActions(
     if (focus) returnFocus?.focus()
   }
   function rename(node: Entry) {
+    if (dialog.open) return
     entry = node
     close()
     error.textContent = ''
@@ -91,7 +92,6 @@ export function createFileActions(
   dialog.addEventListener('cancel', event => {
     if (busy) event.preventDefault()
   })
-  dialog.addEventListener('close', () => returnFocus?.focus())
   const pointer = (event: PointerEvent) => {
     if (!(event.target instanceof Node) || !menu.contains(event.target)) close()
   }

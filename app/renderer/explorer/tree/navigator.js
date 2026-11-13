@@ -197,7 +197,7 @@ export function createNavigator(
   let activeKey = tree.root.key
   /** @type {string | null} */
   let selectedPath = null
-  /** @type {string | null} */
+  /** @type {{ path: string, directory: boolean } | null} */
   let revealPath = null
   /** @type {Set<NavigationNode>} */
   let statusNodes = new Set()
@@ -359,8 +359,9 @@ export function createNavigator(
   }
 
   /** @param {string} pathname */
-  function ensureVisible(pathname, focus = false) {
-    const node = tree.files.get(pathname) ?? tree.nodes.get(`dir:${pathname}`)
+  function ensureVisible(pathname, focus = false, directory = false) {
+    const folder = tree.nodes.get(`dir:${pathname}`)
+    const node = directory ? folder : (tree.files.get(pathname) ?? folder)
     if (!node) return false
     let parent = node.parentKey === null ? undefined : tree.nodes.get(node.parentKey)
     while (parent) {
@@ -431,7 +432,7 @@ export function createNavigator(
           markChanges()
           if (generation === wanted) loading = false
           refreshProjection()
-          if (revealPath && ensureVisible(revealPath)) revealPath = null
+          revealSelection()
         } else {
           reportError(result.error, { silent: true })
           if (generation === wanted) summary.textContent = result.error.message
@@ -485,7 +486,7 @@ export function createNavigator(
       tree = buildNavigationTree([], scopePrefix(next))
       activeKey = tree.root.key
       selectedPath = next.initialPath?.length ? next.initialPath : null
-      revealPath = selectedPath
+      revealPath = selectedPath === null ? null : { path: selectedPath, directory: false }
       list.scrollTop = 0
       input.value = ''
       query = ''
@@ -529,13 +530,15 @@ export function createNavigator(
 
   /** @param {NavigationNode} node */
   function choose(node) {
-    if (node.kind === 'directory' && searching()) {
+    if (node === tree.root) {
+      setExpanded(node, !expanded.has(node.path))
+      refreshProjection()
+    } else if (node.kind === 'directory' && searching()) {
       input.value = ''
       query = ''
       filters.reset()
-      ensureVisible(node.path, true)
       setExpanded(node, true)
-      refreshProjection()
+      ensureVisible(node.path, true, true)
     } else if (node.kind === 'directory') {
       setExpanded(node, !expanded.has(node.path))
       activeKey = node.key
@@ -712,6 +715,19 @@ export function createNavigator(
   const resize = new ResizeObserver(schedule)
   resize.observe(list)
 
+  function revealSelection() {
+    if (!revealPath) return false
+    const { path, directory } = revealPath
+    if (directory) {
+      const node = tree.nodes.get(`dir:${path}`)
+      if (!node) return false
+      setExpanded(node, true)
+    }
+    const found = ensureVisible(path, directory, directory)
+    if (found) revealPath = null
+    return found
+  }
+
   return {
     update,
     focusSearch,
@@ -729,16 +745,14 @@ export function createNavigator(
       input.value = ''
       query = ''
       filters.reset()
-      ensureVisible(pathname, true)
-      const node = tree.nodes.get(`dir:${pathname}`)
-      if (node) setExpanded(node, true)
-      refreshProjection()
+      revealPath = { path: pathname, directory: true }
+      if (!revealSelection()) refreshProjection()
     },
     /** @param {string | null} pathname */
     select(pathname) {
       selectedPath = pathname
-      revealPath = pathname
-      if (pathname !== null && ensureVisible(pathname)) revealPath = null
+      revealPath = pathname === null ? null : { path: pathname, directory: false }
+      if (!revealSelection()) schedule()
     },
     toggle() {
       container.hidden = !container.hidden
