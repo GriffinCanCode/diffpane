@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { discoverBoxServers, discoverServers } from './servers.ts';
+import { discoverServers } from './servers.ts';
 
 const MAX_MESSAGE = 16 * 1024 * 1024;
 const MAX_DOCUMENT = 2 * 1024 * 1024;
@@ -344,7 +344,6 @@ export class LanguageRuntime {
     this.onEvent = onEvent;
     this.options = options;
     this.specs = options.servers ?? discoverServers(options);
-    this.boxDiscovery = null;
     this.servers = new Map();
     this.documents = new Map();
     this.openings = new Map();
@@ -354,23 +353,11 @@ export class LanguageRuntime {
     this.clock = 0;
   }
 
-  loadBoxServers() {
-    if (this.options.servers || this.disposed) return Promise.resolve();
-    if (!this.boxDiscovery) {
-      this.boxAbort = new AbortController();
-      this.boxDiscovery = discoverBoxServers(this.options.env, this.boxAbort.signal).then(specs => {
-        if (!this.disposed) Object.assign(this.specs, specs);
-      });
-    }
-    return this.boxDiscovery;
-  }
-
   status() {
     return Object.entries(this.specs).map(([language, spec]) => {
       const server = this.servers.get(language);
       return {
         language,
-        ...(spec.languageIds ? { languageIds: spec.languageIds } : {}),
         name: spec.name,
         command: spec.command,
         status: server?.status ?? (spec.command ? 'available' : 'missing'),
@@ -406,16 +393,14 @@ export class LanguageRuntime {
   }
 
   async projectRoot(absolute, language) {
-    const spec = this.specs[language];
     for (
       let directory = path.dirname(absolute);
       within(this.root, directory);
       directory = path.dirname(directory)
     ) {
-      for (const filename of spec?.manifests ?? []) {
+      for (const filename of this.specs[language]?.manifests ?? []) {
         try {
-          const marker = await stat(path.join(directory, filename));
-          if (marker.isFile() || (spec.languageIds && marker.isDirectory())) return directory;
+          if ((await stat(path.join(directory, filename))).isFile()) return directory;
         } catch {
           /* Continue toward the selected directory root. */
         }
@@ -431,8 +416,7 @@ export class LanguageRuntime {
     if (!spec) return null;
     if (
       (!spec.command || this.servers.get(language)?.status === 'error') &&
-      !this.options.servers &&
-      !spec.languageIds
+      !this.options.servers
     ) {
       spec = discoverServers(this.options)[language];
       this.specs[language] = spec;
@@ -700,7 +684,7 @@ export class LanguageRuntime {
     server.diagnosticTimers.set(relative, timer);
   }
 
-  async open({ path: relative, language, languageId, text, version = 1 }) {
+  async open({ path: relative, language, languageId = language, text, version = 1 }) {
     if (typeof text !== 'string' || Buffer.byteLength(text) > MAX_DOCUMENT)
       throw new Error('Language document exceeds 2 MiB');
     if (!Number.isSafeInteger(version) || version < 1)
@@ -709,13 +693,6 @@ export class LanguageRuntime {
     this.openings.set(relative, opening);
     try {
       const { uri, absolute } = await this.documentPath(relative);
-      if (typeof language === 'string' && language.startsWith('box:')) {
-        await this.loadBoxServers();
-        languageId ??= this.documents.get(relative)?.languageId;
-        if (!this.specs[language]?.languageIds?.includes(languageId))
-          return { available: false, capabilities: {} };
-      }
-      languageId ??= language;
       const workspace = await this.projectRoot(absolute, language);
       if (this.openings.get(relative) !== opening) return { available: false, stale: true };
       const previous = this.documents.get(relative);
@@ -897,11 +874,10 @@ export class LanguageRuntime {
   async dispose() {
     if (this.disposed) return;
     this.disposed = true;
-    this.boxAbort?.abort();
     for (const requestId of this.requests.keys()) this.cancel(requestId);
     for (const language of this.servers.keys()) this.stop(language);
     this.documents.clear();
     this.openings.clear();
-    await Promise.allSettled([this.boxDiscovery, ...this.stopping]);
+    await Promise.allSettled(this.stopping);
   }
 }

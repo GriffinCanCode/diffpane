@@ -35,8 +35,6 @@ Diff calculation runs in a separate lazy worker so it cannot block watcher or la
 
 The language runtime discovers tools without launching them, selects the nearest project manifest, and starts servers only for opened documents. It owns framing, configuration, cancellation, diagnostics, idle eviction, and process-group shutdown. The main process tracks owned PIDs so closing a window also cleans up a stalled worker's servers.
 
-The session worker reads Box's active registrations with `box language-servers --json --offline` once per workspace window. Registrations match Monaco's LSP document language IDs and can name relative files or directories that identify the nearest project root. If Box is unavailable, Diffpane's built-in discovery supplies language services as usual.
-
 HowMany runs in the session worker with a separate language runtime, so its all-language counts and diagnostics do not displace either language server. Workspace analyses coalesce, run without a shell or disk cache, cap output at 16 MiB, time out after 30 seconds, and use two threads. The main process tracks both analysis and LSP processes for window cleanup. The binary bundled by `setup-howmany.ts` takes precedence over PATH and is unpacked from ASAR so the installed app can execute it without shell setup.
 
 We bundle the released HowMany counter by revision and source checksum. Workspace reports must include consistent source totals and category rows before they reach the renderer; older reports cannot silently supply the code headline. Normal ignore rules apply, and new untracked source files remain part of the analysis.

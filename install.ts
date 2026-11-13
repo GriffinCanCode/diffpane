@@ -19,38 +19,12 @@ if (
 )
   throw new Error('Diffpane requires a numeric release version in package.json.');
 const { version } = metadata;
-const [mode, ...extra] = process.argv.slice(2);
-if ((mode !== undefined && mode !== '--box') || extra.length)
-  throw new Error('Usage: node install.ts [--box]');
-const box = mode === '--box';
+if (process.argv.length > 2) throw new Error('Usage: node install.ts');
 
 if (process.platform !== 'darwin')
   throw new Error(
     'The terminal launcher installer currently targets macOS. Use npm start on other platforms.',
   );
-const identity = process.env.DIFFPANE_SIGN_IDENTITY;
-const {
-  APPLE_API_KEY: appleApiKey,
-  APPLE_API_KEY_ID: appleApiKeyId,
-  APPLE_API_ISSUER: appleApiIssuer,
-} = process.env;
-const signing =
-  identity && appleApiKey && appleApiKeyId && appleApiIssuer
-    ? {
-        osxSign: { identity, preAutoEntitlements: false, continueOnError: false },
-        osxNotarize: { appleApiKey, appleApiKeyId, appleApiIssuer },
-      }
-    : undefined;
-if (box) {
-  if (process.arch !== 'arm64') throw new Error('The Box release targets Apple Silicon.');
-  if (!signing)
-    throw new Error(
-      'Set DIFFPANE_SIGN_IDENTITY, APPLE_API_KEY, APPLE_API_KEY_ID, and APPLE_API_ISSUER to package for Box.',
-    );
-  const manifest = await readFile(new URL('./Boxfile', import.meta.url), 'utf8');
-  if (!manifest.split(/\r?\n/).includes(`version = "${version}"`))
-    throw new Error('Boxfile version must match package.json.');
-}
 async function buildRenderer() {
   const [code, signal] = await once(spawn('npm', ['run', 'build'], { stdio: 'inherit' }), 'exit');
   if (code !== 0) throw new Error(`Renderer build failed (${signal ?? code})`);
@@ -71,7 +45,6 @@ const [bundle] = await packager({
   icon: 'assets/diffpane.icns',
   appVersion: version,
   overwrite: true,
-  ...(box ? signing : undefined),
   asar: { unpack: '**/*.node' },
   beforeAsar: [
     async ({ buildPath }) => {
@@ -108,51 +81,23 @@ const [bundle] = await packager({
 }).finally(() => rm(scratch, { recursive: true, force: true }));
 if (!bundle) throw new Error('Electron Packager did not produce a macOS app.');
 const app = path.join(bundle, 'Diffpane.app');
-const launcher = (await readFile(new URL('./scripts/diffpane.sh', import.meta.url), 'utf8'))
-  .replace('@MODE@', box ? 'box' : 'source')
-  .replace('@VERSION@', version);
-if (box) {
-  execFileSync('codesign', ['--verify', '--deep', '--strict', app], { stdio: 'inherit' });
-  execFileSync('xcrun', ['stapler', 'validate', app], { stdio: 'inherit' });
-  const staging = await mkdtemp('release/.box-');
-  try {
-    await mkdir(path.join(staging, 'bin'));
-    await mkdir(path.join(staging, 'share/diffpane'), { recursive: true });
-    await writeFile(path.join(staging, 'bin/diffpane'), launcher, { mode: 0o755 });
-    execFileSync(
-      'ditto',
-      [
-        '-c',
-        '-k',
-        '--sequesterRsrc',
-        '--keepParent',
-        app,
-        path.join(staging, 'share/diffpane/Diffpane.app.zip'),
-      ],
-      { stdio: 'inherit' },
-    );
-    await rm('release/box', { recursive: true, force: true });
-    await rename(staging, 'release/box');
-  } finally {
-    await rm(staging, { recursive: true, force: true });
-  }
-  console.log('Staged release/box. Run box pack --dry-run before packing the release.');
-} else {
-  const home = os.homedir();
-  const destination = path.join(home, 'Applications/Diffpane.app');
-  try {
-    await rename(destination, path.join(os.tmpdir(), `Diffpane-previous-${Date.now()}.app`));
-  } catch (error) {
-    if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
-  }
-  await mkdir(path.dirname(destination), { recursive: true });
-  await cp(app, destination, {
-    recursive: true,
-    verbatimSymlinks: true,
-    mode: constants.COPYFILE_FICLONE,
-  });
-  execFileSync('codesign', ['--force', '--deep', '--sign', '-', destination], { stdio: 'inherit' });
-  await mkdir(path.join(home, '.local/bin'), { recursive: true });
-  await writeFile(path.join(home, '.local/bin/diffpane'), launcher, { mode: 0o755 });
-  console.log(`Installed ${destination}\nRun diffpane in a Git working directory.`);
+const launcher = (
+  await readFile(new URL('./scripts/diffpane.sh', import.meta.url), 'utf8')
+).replace('@VERSION@', version);
+const userDirectory = os.homedir();
+const destination = path.join(userDirectory, 'Applications/Diffpane.app');
+try {
+  await rename(destination, path.join(os.tmpdir(), `Diffpane-previous-${Date.now()}.app`));
+} catch (error) {
+  if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
 }
+await mkdir(path.dirname(destination), { recursive: true });
+await cp(app, destination, {
+  recursive: true,
+  verbatimSymlinks: true,
+  mode: constants.COPYFILE_FICLONE,
+});
+execFileSync('codesign', ['--force', '--deep', '--sign', '-', destination], { stdio: 'inherit' });
+await mkdir(path.join(userDirectory, '.local/bin'), { recursive: true });
+await writeFile(path.join(userDirectory, '.local/bin/diffpane'), launcher, { mode: 0o755 });
+console.log(`Installed ${destination}\nRun diffpane in a Git working directory.`);

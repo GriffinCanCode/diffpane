@@ -880,7 +880,6 @@ function applySnapshot(next) {
   ui.start_screen.hidden = true;
   ui.feed_scroll.hidden = false;
   if (first) {
-    void languageFeatures.loadBoxServers();
     setSidebarVisible(true);
     ui.review_toggle.hidden = false;
     reviewNotes?.setContext(true);

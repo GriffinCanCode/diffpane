@@ -1,4 +1,3 @@
-import { execFile } from 'node:child_process';
 import { accessSync, constants, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
@@ -30,7 +29,6 @@ type ServerSpec = {
 
 export type DiscoveredServer = ServerSpec & {
   language: string;
-  languageIds?: readonly string[];
   command: string | null;
   env: NodeJS.ProcessEnv;
 };
@@ -124,101 +122,6 @@ function exists(file: string, executable = false) {
   } catch {
     return false;
   }
-}
-
-export async function discoverBoxServers(
-  env = process.env,
-  signal?: AbortSignal,
-): Promise<Record<string, DiscoveredServer>> {
-  const home = homedir();
-  const searchPath = [
-    ...(env.PATH ?? '').split(path.delimiter).filter(directory => path.isAbsolute(directory)),
-    path.join(home, '.local/bin'),
-    '/opt/homebrew/bin',
-    '/usr/local/bin',
-    '/usr/bin',
-    '/bin',
-  ];
-  const binary = searchPath
-    .map(directory => path.join(directory, process.platform === 'win32' ? 'box.exe' : 'box'))
-    .find(file => exists(file, true));
-  if (!binary || signal?.aborted) return {};
-
-  const cleanEnv: NodeJS.ProcessEnv = {
-    ...env,
-    PATH: [...new Set(searchPath)].join(path.delimiter),
-  };
-  for (const token of ['BOX_REGISTRY_TOKEN', 'BOX_REGISTRY_READ_TOKEN', 'BOX_GITHUB_TOKEN'])
-    delete cleanEnv[token];
-
-  const entries = await new Promise<unknown[]>(resolve => {
-    execFile(
-      binary,
-      ['language-servers', '--json', '--offline'],
-      {
-        cwd: home,
-        env: cleanEnv,
-        timeout: 2000,
-        maxBuffer: 1024 * 1024,
-        killSignal: 'SIGKILL',
-        signal,
-      },
-      (error, stdout) => {
-        if (error) return resolve([]);
-        try {
-          const output = JSON.parse(stdout);
-          resolve(Array.isArray(output?.servers) ? output.servers : []);
-        } catch {
-          resolve([]);
-        }
-      },
-    );
-  });
-
-  const servers: Record<string, DiscoveredServer> = {};
-  for (const entry of entries) {
-    if (!entry || typeof entry !== 'object') continue;
-    const { id, name, languages, command, args, root_markers } = entry as Record<string, unknown>;
-    if (
-      typeof id !== 'string' ||
-      !/^[a-z0-9][a-z0-9_.:-]*$/i.test(id) ||
-      typeof name !== 'string' ||
-      !name ||
-      typeof command !== 'string' ||
-      command.includes('\0') ||
-      !path.isAbsolute(command) ||
-      !exists(command, true) ||
-      !Array.isArray(languages) ||
-      !languages.length ||
-      !languages.every(
-        value => typeof value === 'string' && /^[a-z0-9][a-z0-9_.+-]*$/i.test(value),
-      ) ||
-      !Array.isArray(args) ||
-      !args.every(value => typeof value === 'string' && !value.includes('\0')) ||
-      !Array.isArray(root_markers) ||
-      !root_markers.every(
-        marker =>
-          typeof marker === 'string' &&
-          !/[\\:\0]/.test(marker) &&
-          marker.split('/').every(part => part && part !== '.' && part !== '..'),
-      )
-    )
-      continue;
-
-    const language = `box:${id}`;
-    servers[language] ??= {
-      name,
-      language,
-      languageIds: languages,
-      manifests: root_markers,
-      commands: [],
-      command,
-      args,
-      settings: {},
-      env: cleanEnv,
-    };
-  }
-  return servers;
 }
 
 export function discoverServers({

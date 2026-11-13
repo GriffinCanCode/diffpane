@@ -6,7 +6,7 @@ import type { SyntaxRuntime } from './grammars.ts';
 import type { SyntaxCatalogEntry } from 'virtual:syntax-catalog';
 import type { editor, languages } from 'monaco-editor';
 
-type MonacoModel = { getLanguageId: () => string };
+type MonacoModel = { uri: { path: string }; getLanguageId: () => string };
 
 type MonacoApi = {
   languages: Pick<
@@ -20,6 +20,49 @@ type MonacoApi = {
   };
   editor: Pick<typeof editor, 'defineTheme' | 'setTheme'>;
 };
+
+const MAX_FORMAT_LENGTH = 65_536;
+const configKey = String.raw`[\w-]+(?:\s*\.\s*[\w-]+)*`;
+const configTable = new RegExp(
+  String.raw`^(?:\[\s*${configKey}\s*\]|\[\[\s*${configKey}\s*\]\])\s*(?:#.*)?$`,
+);
+const configAssignment = new RegExp(String.raw`^${configKey}\s*=\s*(.+)$`);
+const configCollection = /^(?:\[.*\]|\{.*\})\s*(?:#.*)?$/;
+const configScalar =
+  /^(?:"(?:[^"\\]|\\.)*"|'[^']*'|true|false|[+-]?(?:\d[\d_]*(?:\.\d[\d_]*)?(?:[eE][+-]?\d[\d_]*)?|inf|nan))\s*(?:#.*)?$/;
+
+function looksLikeToml(text: string) {
+  let assignments = 0;
+  let table = false;
+  let collection = false;
+  let typedValue = false;
+  let arrayOpen = false;
+  for (const source of text.split(/\r\n|\r|\n/)) {
+    const line = source.trim();
+    if (!line || line.startsWith('#')) continue;
+    if (arrayOpen) {
+      if (!/^\]\s*(?:#.*)?$/.test(line)) continue;
+      arrayOpen = false;
+      collection = typedValue = true;
+    } else if (configTable.test(line)) {
+      table = true;
+    } else {
+      const value = configAssignment.exec(line)?.[1];
+      if (!value) return false;
+      assignments++;
+      if (/^\[\s*(?:#.*)?$/.test(value)) {
+        arrayOpen = true;
+        continue;
+      }
+      const structured = configCollection.test(value);
+      if (!structured && !configScalar.test(value)) return false;
+      collection ||= structured;
+      typedValue ||= structured || /^(?:["']|true\b|false\b)/.test(value);
+    }
+    if ((table && typedValue) || (assignments >= 2 && collection)) return true;
+  }
+  return false;
+}
 
 /** Supplement Monaco from upstream associations without stealing existing language IDs. */
 export function configureSyntax(monaco: MonacoApi) {
@@ -142,7 +185,10 @@ export function configureSyntax(monaco: MonacoApi) {
       const document = new DOMParser().parseFromString(text, 'application/xml');
       if (!document.querySelector('parsererror')) return 'xml';
     }
-    if (text.length <= 65_536) {
+    if (text.length <= MAX_FORMAT_LENGTH) {
+      const filename = model.uri.path.slice(model.uri.path.lastIndexOf('/') + 1);
+      if (language === 'plaintext' && filename && !filename.includes('.') && looksLikeToml(text))
+        return 'toml';
       try {
         const document = parseDocument(text, { uniqueKeys: false });
         if (!document.errors.length && (isMap(document.contents) || isSeq(document.contents)))

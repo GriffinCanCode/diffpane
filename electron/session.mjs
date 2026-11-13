@@ -625,10 +625,8 @@ parentPort.on('message', async ({ id, method, args = [] }) => {
     } else if (method === 'language-close') {
       languages.close(args[0]);
       value = null;
-    } else if (method === 'language-status') {
-      await languages.loadBoxServers();
-      value = languages.status();
-    } else if (method === 'language-dispose') {
+    } else if (method === 'language-status') value = languages.status();
+    else if (method === 'language-dispose') {
       shuttingDown = true;
       clearTimeout(timer);
       clearTimeout(fallbackTimer);

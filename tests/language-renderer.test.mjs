@@ -1,5 +1,5 @@
-import { test, vi } from 'vite-plus/test';
 import assert from 'node:assert/strict';
+import { test, vi } from 'vite-plus/test';
 import { createLanguageFeatures } from '../renderer/languages.js';
 
 vi.mock('monaco-editor/editor/contrib/folding/browser/folding.js', () => ({}));
@@ -13,13 +13,8 @@ vi.mock(
   () => ({}),
 );
 
-function fixture(t, open, request, { language = 'typescript', status } = {}) {
+function fixture(t, open, request, { language = 'typescript' } = {}) {
   const disposed = { dispose() {} };
-  const events = [];
-  const markers = [];
-  const canceled = [];
-  const providers = [];
-  let receive;
   const filename = 'example.ts';
   const model = {
     uri: { toString: () => `file:///${filename}` },
@@ -38,90 +33,42 @@ function fixture(t, open, request, { language = 'typescript', status } = {}) {
     onDidFocusEditorText: () => disposed,
   };
   const monaco = {
-    languages: {
-      getLanguages: () => [{ id: language }],
-      ...Object.fromEntries(
-        [
-          'Hover',
-          'DocumentSymbol',
-          'FoldingRange',
-          'DocumentSemanticTokens',
-          'DocumentRangeSemanticTokens',
-          'InlayHints',
-        ].map(name => [
-          `register${name}Provider`,
-          selector => {
-            providers.push({ name, ...selector });
-            return disposed;
-          },
-        ]),
-      ),
-    },
-    editor: { setModelMarkers: (_model, _owner, values) => markers.push(values) },
+    languages: Object.fromEntries(
+      [
+        'Hover',
+        'DocumentSymbol',
+        'FoldingRange',
+        'DocumentSemanticTokens',
+        'DocumentRangeSemanticTokens',
+        'InlayHints',
+      ].map(name => [`register${name}Provider`, () => disposed]),
+    ),
+    editor: { setModelMarkers() {} },
     MarkerSeverity: { Error: 1 },
   };
-  const features = createLanguageFeatures(
-    monaco,
-    {
-      language: {
-        open,
-        request,
-        status,
-        close: async () => {},
-        cancel: async id => canceled.push(id),
-        onEvent: listener => {
-          receive = listener;
-          return () => {};
-        },
-      },
+  const features = createLanguageFeatures(monaco, {
+    language: {
+      open,
+      request,
+      close: async () => {},
+      onEvent: () => () => {},
     },
-    { onState: state => events.push(state) },
-  );
+  });
   features.attach(editor, model, filename);
   t.onTestFinished(() => features.dispose());
   return {
     symbols: () => features.symbols(filename),
-    receive: event => receive({ path: filename, language: 'typescript', ...event }),
-    events,
-    markers,
-    canceled,
-    providers,
   };
 }
 
-test('Box discovery binds providers for a known syntax without a built-in language server', async t => {
-  const opens = [];
-  const requests = [];
-  const { symbols, providers } = fixture(
-    t,
-    async input => {
-      opens.push(input);
-      return { available: true, capabilities: { documentSymbolProvider: true } };
-    },
-    async input => {
-      requests.push(input);
-      return [];
-    },
-    {
-      language: 'lua',
-      status: async () => [
-        { language: 'box:lua', languageIds: ['lua'] },
-        { language: 'box:other', languageIds: ['lua'] },
-      ],
-    },
-  );
+test('TOML models use syntax without opening a language server', async t => {
+  const { symbols } = fixture(t, () => assert.fail('Unexpected language server'), null, {
+    language: 'toml',
+  });
   assert.deepEqual(await symbols(), []);
-  assert.equal(
-    providers.filter(value => value.language === 'lua' && value.name === 'Hover').length,
-    1,
-  );
-  assert.equal(opens.length, 1);
-  assert.equal(opens[0].languageId, 'lua');
-  assert.equal(opens[0].language, 'box:lua');
-  assert.equal(requests[0].language, 'box:lua');
 });
 
-test('a Box TypeScript declaration leaves undeclared TSX documents on the built-in server', async t => {
+test('TSX documents use the TypeScript server with their own language ID', async t => {
   const opens = [];
   const { symbols } = fixture(
     t,
@@ -130,10 +77,7 @@ test('a Box TypeScript declaration leaves undeclared TSX documents on the built-
       return { available: true, capabilities: { documentSymbolProvider: true } };
     },
     async () => [],
-    {
-      language: 'tsx',
-      status: async () => [{ language: 'box:typescript', languageIds: ['typescript'] }],
-    },
+    { language: 'tsx' },
   );
   assert.deepEqual(await symbols(), []);
   assert.equal(opens[0]?.language, 'typescript');

@@ -1,8 +1,6 @@
 ---
 doc_radar:
   sentinels:
-    - file: Boxfile
-      contains: ['id = "diffpane"', 'platforms = ["macos-aarch64"]']
     - file: electron/main.mjs
       contains: ['contextIsolation: true', 'nodeIntegration: false', 'sandbox: true']
     - file: renderer/main.js
@@ -62,21 +60,6 @@ Use **Ask** to ask about the open project. Claude uses the current editor path a
 
 Diffpane calls Claude Haiku directly. Prompts and any project paths or file excerpts Claude requests go to Anthropic and use your API workspace. Chat history lasts for the window session.
 
-## Install from Box
-
-On an Apple Silicon Mac with macOS 13 or later, install Git and connect Box to The Billy Company's registry. Then run:
-
-```sh
-box unpack diffpane
-export PATH="$(box env):$PATH"
-cd /path/to/your/project
-diffpane
-```
-
-The first launch unpacks the signed app. Electron and HowMany come bundled. To make `diffpane` available in new terminals, add the Box directory to your shell's PATH.
-
-Diffpane also uses language-server plugins installed through Box. Install the plugin with `box unpack PACKAGE`, then open or reopen your project window. Run `box language-servers` to see which installed packages provide servers. Diffpane starts the first matching Box server when you open a supported file and uses its own language tools for other files.
-
 ## Build from source
 
 Use the Node.js version in `.node-version`. Building the macOS app also requires Rust 1.88+ and the Xcode command-line tools.
@@ -107,12 +90,4 @@ make dev     # run from source
 make test    # run tests
 make build   # build the app
 make verify  # formatting, lint, tests, and build
-```
-
-To prepare a Box release, set `DIFFPANE_SIGN_IDENTITY` to a Developer ID Application identity. Supply the App Store Connect key path, key ID, and issuer through `APPLE_API_KEY`, `APPLE_API_KEY_ID`, and `APPLE_API_ISSUER`. Keep the Boxfile and package.json versions in sync.
-
-```sh
-npm run package:box
-box pack --dry-run
-box pack
 ```

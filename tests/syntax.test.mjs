@@ -4,6 +4,7 @@ import { createHighlighterCore } from '@shikijs/core';
 import { createOnigurumaEngine } from '@shikijs/engine-oniguruma';
 import dark from '@shikijs/themes/dark-plus';
 import { createSyntaxRuntime } from '../renderer/grammars.ts';
+import { configureSyntax } from '../renderer/syntax.ts';
 import { catalog, grammarBytes } from '../syntax.ts';
 
 test('every grammar dependency exists in the pinned lazy catalog', () => {
@@ -12,6 +13,39 @@ test('every grammar dependency exists in the pinned lazy catalog', () => {
   for (const entry of catalog)
     for (const dependency of entry.dependencies)
       assert.ok(scopes.has(dependency), `${entry.id} needs ${dependency}`);
+});
+
+test('unknown extensionless files use local TOML syntax when their contents are recognizable', () => {
+  const registered = new Set();
+  const { resolve } = configureSyntax({
+    languages: {
+      getLanguages: () => [],
+      register: language => void registered.add(language.id),
+      onLanguage: () => ({ dispose() {} }),
+      registerTokensProviderFactory() {},
+    },
+    editor: { defineTheme() {}, setTheme() {} },
+  });
+  /** @param {string} text */
+  const languageFor = (text, filename = 'ProjectSettings', language = 'plaintext') =>
+    resolve({ uri: { path: `/project/${filename}` }, getLanguageId: () => language }, text);
+  const project =
+    '# Project configuration\r\nversion = 1\r\n[build.tools]\r\ncommand = "build"\r\n';
+  assert.ok(registered.has('toml'));
+  assert.equal(languageFor(project), 'toml');
+  assert.equal(languageFor('version = 1\nfeatures = ["release", "debug"] # targets'), 'toml');
+  assert.equal(
+    languageFor('version = 1\nfeatures = [\n  "release",\n  "debug",\n] # targets\n'),
+    'toml',
+  );
+  assert.equal(languageFor(`${project}notes = """\nMultiple lines\n"""\n`), 'toml');
+  assert.notEqual(languageFor('version = 1\nfeatures = [\n  "release",\n'), 'toml');
+  assert.equal(languageFor('NAME="example"\nPORT=8080'), 'plaintext');
+  assert.notEqual(languageFor('[app]\nNAME=example\nPORT=8080'), 'toml');
+  assert.notEqual(languageFor(project, 'example.txt'), 'toml');
+  assert.equal(languageFor(project, 'example.ini', 'ini'), 'ini');
+  assert.equal(languageFor('{"name":"example"}'), 'json');
+  assert.equal(languageFor('name: example\nversion: 1'), 'yaml');
 });
 
 test('real grammars color custom formats and preserve source characters exactly', async () => {
@@ -43,6 +77,7 @@ test('real grammars color custom formats and preserve source characters exactly'
       ],
       ['amadeus', '# Score\ntempo 104;\ntrack "Keys" channel 1 { play theme at 1; }\n'],
       ['designcraft-script', 'file.new {"width": 432, "title": "Night Shift"}\n'],
+      ['toml', '# Configuration\n[build]\ncommand = "build"\nretries = 2\n'],
       ['json5', '// Config\n{unquoted: "value", enabled: true,}\n'],
       ['jsx', '// View\nexport const view = <div title="hi">{42}</div>;\n'],
       ['jinja', 'Hello {{ person.name }}\n{% if ready %}Yes{% endif %}\n'],
