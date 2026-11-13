@@ -8,6 +8,7 @@ import path from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { Worker } from 'node:worker_threads'
 import { test } from 'vite-plus/test'
+import { parseDiagnostic } from '../../../shared/diagnostics/diagnostics.ts'
 
 import {
   isWorkspaceSnapshot,
@@ -82,6 +83,8 @@ async function fixture(t, { fileCount = 1000, setup = '', scope = '', versions }
   const snapshots = []
   /** @type {ErrorDetails[]} */
   const updateFailures = []
+  /** @type {unknown[]} */
+  const diagnostics = []
   /** @type {string[]} */
   const pathEvents = []
   /** @type {Set<string>} */
@@ -99,6 +102,7 @@ async function fixture(t, { fileCount = 1000, setup = '', scope = '', versions }
       assert.ok(message.failure)
       updateFailures.push(message.failure)
     }
+    if (message.event === 'diagnostic') diagnostics.push(message.value)
     if (message.event === 'paths') {
       assert.ok(
         Array.isArray(message.value) &&
@@ -175,7 +179,7 @@ async function fixture(t, { fileCount = 1000, setup = '', scope = '', versions }
     return event
   }
   const signal = (/** @type {unknown} */ message) => postWorkerMessage(worker, message)
-  return { root, write, git, commit, call, waitFor, pathEvents, updateFailures, emit, waitNotice, signal }
+  return { root, write, git, commit, call, waitFor, pathEvents, updateFailures, diagnostics, emit, waitNotice, signal }
 }
 
 const injectedWatchSetup = `
@@ -188,6 +192,39 @@ const injectedWatchSetup = `
         if (message.testEvents) callbacks[0](null, message.testEvents);
       });
     `
+
+test('workspace request diagnostics correlate failures without exposing request data', async t => {
+  const repo = await fixture(t, {
+    fileCount: 1,
+    setup: `${injectedWatchSetup}
+      Repository.prototype.save = async (_path, text) => {
+        throw Object.assign(new Error(text), { code: 'SAVE_CONFLICT' });
+      };
+    `,
+  })
+  const privateValue = 'private-checkout-data'
+  repo.signal({ id: 9999, method: privateValue, args: [privateValue] })
+  await assert.rejects(repo.call('save', 'src/file0.txt', privateValue, ''), {
+    code: 'SAVE_CONFLICT',
+    message: privateValue,
+  })
+  await repo.call('performance')
+  const diagnostics = repo.diagnostics.map(event => {
+    const parsed = parseDiagnostic(event, 'workspace')
+    assert.ok(parsed, 'the worker emitted an invalid diagnostic')
+    return parsed
+  })
+  const unknown = diagnostics.find(event => event.operation === 'workspace-request.unknown')
+  assert.equal(unknown?.requestId, 9999)
+  const save = diagnostics.find(event => event.operation === 'workspace-request.save')
+  assert.equal(save?.requestId, 1)
+  assert.equal(save?.kind, 'duration')
+  assert.equal(save.outcome, 'failure')
+  assert.deepEqual(save.failure, { code: 'SAVE_CONFLICT', recoverable: true })
+  assert.doesNotMatch(JSON.stringify(repo.diagnostics), new RegExp(privateValue))
+  assert.ok(diagnostics.some(event => event.operation === 'workspace.open'))
+  assert.ok(diagnostics.some(event => event.operation === 'workspace.ready'))
+})
 
 test('review versions follow individual working contents and staged blobs', async t => {
   const repo = await fixture(t, { fileCount: 2, setup: injectedWatchSetup })

@@ -72,7 +72,8 @@ const COUNT_FIELDS = [
 /** @typedef {{type: 'process', status: 'started' | 'stopped', pid: number}} ProcessEvent */
 /** @typedef {{type: 'file', path: string, diagnostics: unknown, request: string}} FileEvent */
 /** @typedef {AnalysisEvent | ProcessEvent | FileEvent} HowManyEvent */
-/** @typedef {{command?: string | null, env?: NodeJS.ProcessEnv, timeoutMs?: number, debounceMs?: number}} HowManyOptions */
+/** @typedef {ReturnType<typeof import('../../../shared/diagnostics/diagnostics.ts').createDiagnostics>} Diagnostics */
+/** @typedef {{command?: string | null, env?: NodeJS.ProcessEnv, timeoutMs?: number, debounceMs?: number, diagnostics?: Diagnostics}} HowManyOptions */
 
 /** @param {unknown} value @returns {value is Record<string, unknown>} */
 function isRecord(value) {
@@ -259,6 +260,7 @@ export class HowManyRuntime {
         },
         maxServers: 1,
         initializeTimeoutMs: 5000,
+        diagnostics: this.options.diagnostics,
       },
     )
     return languages
@@ -360,7 +362,9 @@ export class HowManyRuntime {
         const report = validateReport(JSON.parse(await this.run([this.scope, ...ANALYSIS_ARGS])))
         this.analyzedGeneration = generation
         this.publish({ status: 'ready', report, updatedAt: Date.now(), message: '' })
+        this.options.diagnostics?.measure('workspace.analysis.scan', startedAt)
       } catch (error) {
+        this.options.diagnostics?.measure('workspace.analysis.scan', startedAt, { ok: false, error })
         this.publish({ status: 'error', message: error instanceof Error ? error.message : 'HowMany analysis failed.' })
       } finally {
         // A large workspace must spend more time idle than counting. Repeated
@@ -382,7 +386,7 @@ export class HowManyRuntime {
       this.timer = setTimeout(
         () => {
           void this.analyze(true).catch((/** @type {unknown} */ error) => {
-            process.emitWarning(error instanceof Error ? error : 'HowMany analysis failed.')
+            this.options.diagnostics?.error('workspace.analysis.automatic', error)
           })
         },
         Math.max(this.options.debounceMs ?? 1200, this.nextAutomaticAnalysisAt - performance.now()),
@@ -476,7 +480,10 @@ export class HowManyRuntime {
             Number.isSafeInteger(major) && Number.isSafeInteger(minor) && (major > 3 || (major === 3 && minor >= 1))
           )
         })
-        .catch(() => false)
+        .catch((/** @type {unknown} */ error) => {
+          if (this.command) this.options.diagnostics?.error('workspace.analysis.version', error)
+          return false
+        })
       const live = await this.version
       if (signal.aborted) return null
       if (live) {
@@ -519,6 +526,7 @@ export class HowManyRuntime {
       }
     } catch (error) {
       if (signal.aborted || this.disposed) return null
+      this.options.diagnostics?.error('workspace.analysis.file', error)
       return { path: relative, title: '', message: error instanceof Error ? error.message : 'HowMany failed.' }
     }
   }

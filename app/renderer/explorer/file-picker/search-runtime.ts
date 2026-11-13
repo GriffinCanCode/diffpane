@@ -1,4 +1,5 @@
 import { appError } from '../../../shared/recovery/app-errors.ts'
+import { rendererDiagnostics } from '../../shell/diagnostics/diagnostics.ts'
 import { compileFileQuery, rankFiles } from './file-search.ts'
 import type { FileQuery, SearchableFile } from './file-search.ts'
 
@@ -10,6 +11,7 @@ export interface FileSearchResults<T> {
 interface Query<T> {
   id: number
   query: string
+  startedAt: number
   resolve: (value: FileSearchResults<T> | null) => void
   reject: (reason: Error) => void
   canceled?: boolean
@@ -94,8 +96,12 @@ export function createFileSearch<T extends SearchableFile>() {
       operation: 'Search files',
       message: 'File search failed. Try again.',
     })
+    rendererDiagnostics.error('renderer.search-worker-error', error)
     const active = queued ?? (running?.canceled ? undefined : running)
-    active?.reject(error)
+    if (active) {
+      rendererDiagnostics.measure('renderer.search-worker-query', active.startedAt, { ok: false, error })
+      active.reject(error)
+    }
     queued = undefined
     releaseWorker()
   }
@@ -128,6 +134,7 @@ export function createFileSearch<T extends SearchableFile>() {
             hits = results(files, compileFileQuery(work.query), data.matches)
           }
           running = undefined
+          if (publish) rendererDiagnostics.measure('renderer.search-worker-query', work.startedAt)
           work.resolve(hits)
           dispatch()
         },
@@ -142,8 +149,10 @@ export function createFileSearch<T extends SearchableFile>() {
       current.addEventListener('messageerror', onWorkerError, options)
     }
     const current = worker
-    // oxlint-disable-next-line unicorn/require-post-message-target-origin -- Worker messages have a dedicated port and no targetOrigin.
-    current.postMessage({ paths: files.map(file => file.path) })
+    rendererDiagnostics.run('renderer.search-worker-inventory', () => {
+      // oxlint-disable-next-line unicorn/require-post-message-target-origin -- Worker messages have a dedicated port and no targetOrigin.
+      current.postMessage({ paths: files.map(file => file.path) })
+    })
   }
 
   return {
@@ -166,13 +175,15 @@ export function createFileSearch<T extends SearchableFile>() {
         cancelQueued()
         cancelRunning()
         if (!hasQuery) return results(files, EMPTY_QUERY)
-        const compiled = compileFileQuery(query)
-        const indexes = Uint32Array.from(rankFiles(files, compiled), match => match.index)
-        return results(files, compiled, indexes)
+        return rendererDiagnostics.run('renderer.search-local-query', () => {
+          const compiled = compileFileQuery(query)
+          const indexes = Uint32Array.from(rankFiles(files, compiled), match => match.index)
+          return results(files, compiled, indexes)
+        })
       }
       cancelQueued()
       return new Promise((resolve, reject) => {
-        queued = { id: ++sequence, query, resolve, reject }
+        queued = { id: ++sequence, query, startedAt: performance.now(), resolve, reject }
         if (running) {
           cancelRunning()
           return

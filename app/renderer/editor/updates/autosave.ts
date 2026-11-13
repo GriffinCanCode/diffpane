@@ -1,5 +1,6 @@
 import { attemptAsync } from '../../../shared/recovery/app-errors.ts'
 import type { AppError, Result } from '../../../shared/recovery/app-errors.ts'
+import { rendererDiagnostics } from '../../shell/diagnostics/diagnostics.ts'
 import { reportError } from '../../shell/recovery/errors.ts'
 
 /** Serialize writes and coalesce typing while a write is in flight. */
@@ -59,10 +60,12 @@ export class Autosave {
     try {
       while (this.latest !== this.saved) {
         const text = this.latest
+        const startedAt = performance.now()
         // oxlint-disable-next-line eslint/no-await-in-loop -- The next save uses this write's text as its precondition.
         const result = await attemptAsync(() => this.write(text, this.saved), {
           operation: 'Save file',
         })
+        rendererDiagnostics.measure('renderer.autosave-write', startedAt, result)
         if (!result.ok) {
           this.failed = this.latest !== this.saved
           if (!this.failed) break

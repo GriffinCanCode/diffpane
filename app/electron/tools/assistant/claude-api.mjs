@@ -1,3 +1,5 @@
+import { appError } from '../../../shared/recovery/app-errors.ts'
+
 const API = 'https://api.anthropic.com/v1'
 const MODEL = 'claude-haiku-5-5'
 const API_VERSION = '2026-10-21'
@@ -26,8 +28,10 @@ function isRecord(value) {
 
 /** @param {AbortSignal | undefined} signal @param {AbortSignal} timeout @param {string} fallback */
 function requestFailure(signal, timeout, fallback) {
-  if (signal?.aborted) return new DOMException('Request canceled.', 'AbortError')
-  if (timeout.aborted) return new Error('Claude took too long to respond. Try again.')
+  if (signal?.aborted && signal.reason instanceof DOMException && signal.reason.name === 'TimeoutError')
+    return appError('Claude took too long to respond. Try again.', { code: 'ETIMEDOUT' })
+  if (signal?.aborted) return appError('Request canceled.', { code: 'ABORT_ERR' })
+  if (timeout.aborted) return appError('Claude took too long to respond. Try again.', { code: 'ETIMEDOUT' })
   return new Error(fallback)
 }
 
@@ -61,7 +65,10 @@ async function request(endpoint, key, options, signal, timeout, streaming = fals
   if (!response.ok) {
     await response.body?.cancel().catch(() => {})
     const message = API_ERRORS.get(response.status)
-    if (message) throw new Error(message)
+    if (message) {
+      if (response.status === 504) throw appError(message, { code: 'ETIMEDOUT' })
+      throw new Error(message)
+    }
     if (response.status >= 500) throw new Error('Claude is temporarily unavailable. Try again.')
     if (response.status === 400 && options.method === 'GET') {
       throw new Error('Claude could not verify this key. Use a key scoped to one Claude workspace.')

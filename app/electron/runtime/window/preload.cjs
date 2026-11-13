@@ -2,10 +2,12 @@
 // MONOLITHIC: The sandboxed preload is emitted from one entrypoint and validates every exposed IPC channel. Extract validators when the generator can inline them without runtime imports.
 const electron_1 = require('electron')
 async function invoke(channel, validate, ...args) {
+  const startedAt = performance.now()
   let result
   try {
     result = await electron_1.ipcRenderer.invoke(channel, ...args)
   } catch {
+    reportBridgeFailure(channel, startedAt, 'IPC_UNAVAILABLE')
     // oxlint-disable-next-line typescript/prefer-promise-reject-errors -- Electron preserves plain data across the context bridge.
     return Promise.reject({
       message: 'The window could not reach Diffpane. Try again.',
@@ -20,6 +22,7 @@ async function invoke(channel, validate, ...args) {
     if (result.ok === false && isErrorDetails(result.error)) return Promise.reject(result.error)
     if (result.ok === true && 'value' in result && validate(result.value)) return result.value
   }
+  reportBridgeFailure(channel, startedAt, 'INVALID_IPC_RESPONSE')
   // oxlint-disable-next-line typescript/prefer-promise-reject-errors -- Electron preserves plain data across the context bridge.
   return Promise.reject({
     message: 'Diffpane sent an invalid reply. Try again.',
@@ -27,6 +30,49 @@ async function invoke(channel, validate, ...args) {
     operation: channel,
     recoverable: true,
   })
+}
+function reportBridgeFailure(channel, startedAt, code) {
+  try {
+    electron_1.ipcRenderer.send(
+      'preload-diagnostic',
+      channel,
+      Math.round((performance.now() - startedAt) * 100) / 100,
+      code,
+    )
+  } catch {
+    // Keep the original bridge error when the diagnostic channel is also unavailable.
+  }
+}
+function reportDiagnostic(input) {
+  if (
+    !isRecord(input) ||
+    input.source !== 'renderer' ||
+    typeof input.operation !== 'string' ||
+    input.operation.length > 96
+  )
+    return
+  const { source, operation, level, kind } = input
+  if (level !== 'info' && level !== 'warn' && level !== 'error') return
+  const base = { source, operation, level }
+  if (kind === 'metric') {
+    const { value, unit } = input
+    if (isTimestamp(value) && (unit === 'ms' || unit === 'count' || unit === 'bytes' || unit === 'percent'))
+      electron_1.ipcRenderer.send('renderer-diagnostic', { ...base, kind, value, unit })
+    return
+  }
+  let failure
+  if (input.failure !== undefined) {
+    if (!isRecord(input.failure)) return
+    const { code, recoverable } = input.failure
+    if (typeof code !== 'string' || code.length > 64 || typeof recoverable !== 'boolean') return
+    failure = { code, recoverable }
+  }
+  if (kind === 'event') electron_1.ipcRenderer.send('renderer-diagnostic', { ...base, kind, failure })
+  if (kind === 'duration') {
+    const { durationMs, outcome } = input
+    if (isTimestamp(durationMs) && (outcome === 'success' || outcome === 'failure' || outcome === 'canceled'))
+      electron_1.ipcRenderer.send('renderer-diagnostic', { ...base, kind, durationMs, outcome, failure })
+  }
 }
 function listen(channel, validate, callback) {
   const listener = (_event, value) => {
@@ -480,6 +526,7 @@ const API = {
   savesFlushed: (success, id) => electron_1.ipcRenderer.send('saves-flushed', success, id),
   setSaveState: dirty => electron_1.ipcRenderer.send('save-state', dirty),
   rendererReady: () => electron_1.ipcRenderer.send('renderer-ready'),
+  reportDiagnostic: event => reportDiagnostic(event),
   media: path => invoke('media', isMedia, path),
   refresh: () => invoke('refresh', isSnapshot),
   openFolder: () => invoke('open-folder', isBoolean),

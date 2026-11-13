@@ -8,6 +8,8 @@ import { fileURLToPath } from 'node:url'
 import { Worker } from 'node:worker_threads'
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, protocol, shell } from 'electron'
 import { colorHex } from '../../../shared/appearance/palette.ts'
+import { createDiagnostics, parseDiagnostic } from '../../../shared/diagnostics/diagnostics.ts'
+import { rendererOperations } from '../../../shared/diagnostics/renderer-operations.ts'
 import {
   effectiveBinding,
   electronAccelerator,
@@ -32,6 +34,8 @@ import { ReviewNotesStore } from '../../persistence/project/review-notes.ts'
 import { ClaudeCredentials } from '../../tools/assistant/claude-credentials.mjs'
 import { ClaudeSession } from '../../tools/assistant/claude-session.mjs'
 import { mediaResponse } from '../../workspace/documents/media.ts'
+import { startDesktopMetrics } from '../diagnostics/desktop-metrics.ts'
+import { createDiagnosticLog } from '../diagnostics/diagnostic-log.ts'
 
 /** @import { IpcMainEvent, IpcMainInvokeEvent, OpenDialogOptions, SaveDialogOptions, WebContents } from 'electron' */
 /** @import { AppError } from '../../../shared/recovery/app-errors.ts' */
@@ -43,8 +47,12 @@ import { mediaResponse } from '../../workspace/documents/media.ts'
 /** @typedef {{directory: string | null, contents: WebContents, claude: ClaudeSession, mediaToken: string, hasPendingSaves: boolean, rendererReady: boolean, settingsRequested: boolean, repositoryRoot?: string, repositoryScope?: string, flushing?: {id: number, promise: Promise<boolean>}, finishFlush?: (success: boolean) => void, stopping?: Promise<void>, restarting?: Promise<unknown>, root: () => Promise<string>, reviewWorkspace: () => Promise<WorkspaceLocation>, flush: () => Promise<boolean>, call: (method: string, args?: readonly unknown[]) => Promise<unknown>, restart: () => Promise<unknown>, announceFatal: () => void, stop: () => Promise<void>}} WindowSession */
 
 const here = path.dirname(fileURLToPath(import.meta.url))
+/** @type {Set<string>} */
+const invokeChannels = new Set()
 /** @type {Map<number, WindowSession>} */
 const sessions = new Map()
+/** @type {WeakMap<WindowSession, number>} */
+const rendererNavigationStarts = new WeakMap()
 /** @type {Map<string, WindowSession>} */
 const mediaSessions = new Map()
 /** @type {Map<string, Promise<unknown>>} */
@@ -61,6 +69,23 @@ const shutdowns = new Set()
 /** @type {string[]} */
 const pendingOpenPaths = []
 app.setName('Diffpane')
+const diagnosticDirectory = attempt(() => path.join(app.getPath('logs'), 'diagnostics'))
+const diagnosticLog = diagnosticDirectory.ok
+  ? createDiagnosticLog(diagnosticDirectory.value, { appVersion: app.getVersion() })
+  : undefined
+if (!diagnosticLog) console.warn('Diffpane could not open its local diagnostic log directory.')
+const diagnostics = createDiagnostics('main', event => diagnosticLog?.record(event))
+/** @type {(() => void) | undefined} */
+let stopDesktopMetrics
+diagnostics.event('app-start')
+process.on('uncaughtExceptionMonitor', cause => {
+  createDiagnostics('main', event => diagnosticLog?.recordFatal(event)).error('uncaught-main-error', cause)
+})
+app.on('child-process-gone', (_event, details) => {
+  const group = details.type === 'GPU' ? 'gpu' : details.type === 'Utility' ? 'utility' : 'other'
+  const reason = details.reason
+  diagnostics.event(`electron-child-gone.${group}.${reason}`, reason === 'clean-exit' ? 'info' : 'error')
+})
 const userData = app.getPath('userData')
 const localState = new LocalState(path.join(userData, 'state', 'local.sqlite'), localStateKeys)
 const shortcutPreferences = new ShortcutPreferences(localState, path.join(userData, 'shortcuts.sqlite'))
@@ -79,7 +104,6 @@ let preferenceUpdates = Promise.resolve()
 let preferenceRevision = 0
 /** @type {Set<Promise<unknown>>} */
 const storageOperations = new Set()
-
 /** @type {Set<Promise<unknown>>} */
 const mutationOperations = new Set()
 
@@ -95,15 +119,15 @@ async function trackOperation(operations, pending) {
 
 /** @param {unknown} error @param {string} operation */
 function logError(error, operation) {
-  const { code, message } = serializeAppError(error, { operation })
-  console.error(`Diffpane [${operation}] ${code}: ${message}`)
+  diagnostics.error(operation, error)
 }
 
 /** @param {string} operation @param {() => unknown} run @param {(error: AppError) => unknown} [onError] */
 async function background(operation, run, onError) {
+  const startedAt = performance.now()
   const result = await attemptAsync(run, { operation })
+  diagnostics.measure(`background.${operation}`, startedAt, result)
   if (result.ok) return
-  logError(result.error, operation)
   if (!onError) return
   const recovery = await attemptAsync(() => onError(result.error))
   if (!recovery.ok) logError(recovery.error, operation)
@@ -162,7 +186,10 @@ function workspaceMedia(value) {
 
 /** @param {string} channel @param {(session: WindowSession, event: IpcMainInvokeEvent, ...args: unknown[]) => unknown} listener */
 function handle(channel, listener) {
+  invokeChannels.add(channel)
   ipcMain.handle(channel, async (event, ...args) => {
+    const startedAt = performance.now()
+    const windowId = event.sender.id
     const input = /** @type {unknown[]} */ (args)
     const result = await attemptAsync(
       () => {
@@ -174,8 +201,8 @@ function handle(channel, listener) {
         operation: channel,
       },
     )
+    windowDiagnostics(windowId).measure(`ipc.${channel}`, startedAt, result)
     if (result.ok) return result
-    if (result.error.code === 'UNEXPECTED') logError(result.error, channel)
     return { ok: false, error: serializeAppError(result.error) }
   })
 }
@@ -183,11 +210,68 @@ function handle(channel, listener) {
 /** @param {string} channel @param {(session: WindowSession, ...args: unknown[]) => void} listener */
 function onRenderer(channel, listener) {
   ipcMain.on(channel, (event, ...args) => {
+    const startedAt = performance.now()
     const input = /** @type {unknown[]} */ (args)
     const result = attempt(() => listener(sessionFor(event), ...input), { operation: channel })
-    if (!result.ok && result.error.code !== 'WINDOW_UNAVAILABLE') logError(result.error, channel)
+    if (result.ok || result.error.code !== 'WINDOW_UNAVAILABLE')
+      windowDiagnostics(event.sender.id).measure(`ipc.${channel}`, startedAt, result)
   })
 }
+
+/** @param {number} windowId */
+function windowDiagnostics(windowId) {
+  return createDiagnostics('main', event => diagnosticLog?.record(event, { windowId }))
+}
+
+/** @type {WeakMap<WindowSession, {until: number, ordinary: number, important: number}>} */
+const rendererDiagnosticBudgets = new WeakMap()
+/** @param {WindowSession} session @param {boolean} important */
+function allowRendererDiagnostic(session, important) {
+  const now = performance.now()
+  let budget = rendererDiagnosticBudgets.get(session)
+  if (!budget || budget.until <= now) {
+    budget = { until: now + 10_000, ordinary: 240, important: 60 }
+    rendererDiagnosticBudgets.set(session, budget)
+  }
+  const key = important ? 'important' : 'ordinary'
+  if (budget[key] <= 0) return false
+  budget[key]--
+  return true
+}
+
+ipcMain.on('renderer-diagnostic', (event, value) => {
+  const owner = attempt(() => sessionFor(event))
+  if (!owner.ok || !diagnosticLog) return
+  const record = parseDiagnostic(value, 'renderer')
+  if (
+    record &&
+    rendererOperations.has(record.operation) &&
+    allowRendererDiagnostic(owner.value, record.level !== 'info')
+  )
+    diagnosticLog.record(record, { windowId: event.sender.id })
+})
+ipcMain.on(
+  'preload-diagnostic',
+  (event, /** @type {unknown} */ channel, /** @type {unknown} */ durationMs, /** @type {unknown} */ code) => {
+    const owner = attempt(() => sessionFor(event))
+    if (!owner.ok || !diagnosticLog || typeof channel !== 'string' || !invokeChannels.has(channel)) return
+    if (code !== 'INVALID_IPC_RESPONSE' && code !== 'IPC_UNAVAILABLE') return
+    const record = parseDiagnostic(
+      {
+        source: 'preload',
+        kind: 'duration',
+        level: 'error',
+        operation: `preload.${channel}`,
+        durationMs,
+        outcome: 'failure',
+        failure: { code, recoverable: true },
+      },
+      'preload',
+    )
+    if (record && allowRendererDiagnostic(owner.value, true))
+      diagnosticLog.record(record, { windowId: event.sender.id })
+  },
+)
 
 /** @param {string} operation @param {() => unknown} run */
 function windowAction(operation, run) {
@@ -228,6 +312,7 @@ function changeFiles(session, files, change) {
 
 /** @param {string | null} [directory] */
 function createWindow(directory = null) {
+  const windowStartedAt = performance.now()
   const window = new BrowserWindow({
     width: 1400,
     height: 960,
@@ -246,6 +331,11 @@ function createWindow(directory = null) {
       spellcheck: false,
     },
   })
+  const windowId = window.webContents.id
+  const scoped = windowDiagnostics(windowId)
+  scoped.measure('window-create', windowStartedAt)
+  /** @type {number | undefined} */
+  let unresponsiveAt
   /** @type {Worker | undefined} */
   let worker
   /** @type {Promise<void>} */
@@ -277,7 +367,7 @@ function createWindow(directory = null) {
       operation: 'workspace-worker',
       recoverable: false,
     })
-    logError(fatal, 'workspace-worker')
+    scoped.error('workspace-worker', fatal)
     killLanguageProcesses()
     for (const request of requests.values()) request.reject(fatal)
     requests.clear()
@@ -295,6 +385,11 @@ function createWindow(directory = null) {
       }
       if (!('value' in message)) throw new Error('Invalid workspace worker event.')
       const { value } = message
+      if (message.event === 'diagnostic') {
+        const record = parseDiagnostic(value, 'workspace')
+        if (record) diagnosticLog?.record(record, { windowId })
+        return
+      }
       if (message.event === 'change') {
         const location = workspaceLocation(value)
         if (!location) throw new Error('Invalid workspace snapshot location.')
@@ -349,14 +444,17 @@ function createWindow(directory = null) {
 
   function startWorker() {
     fatal = undefined
+    const startedAt = performance.now()
     const result = attempt(
       () => new Worker(new URL('../session/session.mjs', import.meta.url), { workerData: { directory, versions } }),
     )
     if (!result.ok) {
+      scoped.measure('workspace-worker-online', startedAt, result)
       fail(result.error)
       return
     }
     const current = (worker = result.value)
+    current.once('online', () => scoped.measure('workspace-worker-online', startedAt))
     workerExited = new Promise(resolve => {
       current.once('exit', () => resolve())
     })
@@ -370,7 +468,7 @@ function createWindow(directory = null) {
     current.on('message', message => {
       if (worker !== current || fatal) return
       const received = attempt(() => receive(message))
-      if (!received.ok) logError(received.error, 'receive-workspace-message')
+      if (!received.ok) scoped.error('receive-workspace-message', received.error)
     })
     current.on('messageerror', error => {
       if (worker === current) {
@@ -380,12 +478,11 @@ function createWindow(directory = null) {
     })
   }
 
-  const windowId = window.webContents.id
   /** @type {WindowSession} */
   const session = {
     directory,
     contents: window.webContents,
-    claude: new ClaudeSession(),
+    claude: new ClaudeSession(scoped),
     mediaToken: randomUUID(),
     hasPendingSaves: false,
     rendererReady: false,
@@ -419,6 +516,7 @@ function createWindow(directory = null) {
       // A healthy project renderer also freezes clean editors, preventing new
       // edits while application quit waits for workers to finish shutting down.
       if (!this.flushing) {
+        const startedAt = performance.now()
         const id = ++nextFlush
         const promise = new Promise(
           /** @type {(resolve: (success: boolean) => void) => void} */ (
@@ -426,6 +524,12 @@ function createWindow(directory = null) {
               const timer = setTimeout(() => this.finishFlush?.(false), 5000)
               this.finishFlush = (/** @type {boolean} */ success) => {
                 clearTimeout(timer)
+                if (success) scoped.measure('flush-saves', startedAt)
+                else
+                  scoped.measure('flush-saves', startedAt, {
+                    ok: false,
+                    error: appError('Save flush failed.', { code: 'SAVE_FLUSH_FAILED' }),
+                  })
                 this.flushing = undefined
                 this.finishFlush = undefined
                 if (success) this.hasPendingSaves = false
@@ -448,14 +552,24 @@ function createWindow(directory = null) {
         return method === 'snapshot'
           ? Promise.resolve(null)
           : Promise.reject(appError('Open a file or folder first.', { code: 'WORKSPACE_REQUIRED' }))
+      const id = ++nextRequest
+      const startedAt = performance.now()
       return new Promise((resolve, reject) => {
-        const id = ++nextRequest
-        requests.set(id, { resolve, reject })
+        requests.set(id, {
+          resolve(value) {
+            scoped.measure(`worker-roundtrip.${method}`, startedAt, { ok: true }, { requestId: id })
+            resolve(value)
+          },
+          reject(error) {
+            scoped.measure(`worker-roundtrip.${method}`, startedAt, { ok: false, error }, { requestId: id })
+            reject(error)
+          },
+        })
         try {
           current.postMessage({ id, method, args })
         } catch (error) {
+          requests.get(id)?.reject(error)
           requests.delete(id)
-          reject(error)
         }
       })
     },
@@ -514,7 +628,10 @@ function createWindow(directory = null) {
           requests.clear()
           // Native watcher completion callbacks must drain in the worker's live
           // environment. Force termination is reserved for failed or stuck workers.
-          if (!graceful) await worker.terminate()
+          if (!graceful) {
+            scoped.event('workspace-worker-forced-stop', 'warn')
+            await worker.terminate()
+          }
         }
       })()
       const stopping = this.stopping
@@ -568,9 +685,28 @@ function createWindow(directory = null) {
     session.contents.setIgnoreMenuShortcuts(false)
   }
   window.webContents.on('did-start-navigation', ({ isSameDocument, isMainFrame }) => {
-    if (isMainFrame && !isSameDocument) runBackground('detach-renderer', detachRenderer)
+    if (isMainFrame && !isSameDocument) {
+      rendererNavigationStarts.set(session, performance.now())
+      runBackground('detach-renderer', detachRenderer)
+    }
+  })
+  window.webContents.on('unresponsive', () => {
+    if (unresponsiveAt !== undefined) return
+    unresponsiveAt = performance.now()
+    scoped.event('renderer-unresponsive', 'warn')
+  })
+  window.webContents.on('responsive', () => {
+    if (unresponsiveAt === undefined) return
+    scoped.measure('renderer-unresponsive-duration', unresponsiveAt)
+    unresponsiveAt = undefined
+  })
+  window.webContents.on('preload-error', (_event, _filename, error) => {
+    scoped.error('preload-error', error)
   })
   window.webContents.on('render-process-gone', (_event, details) => {
+    unresponsiveAt = undefined
+    rendererNavigationStarts.delete(session)
+    scoped.event(`renderer-process-gone.${details.reason}`, details.reason === 'clean-exit' ? 'info' : 'error')
     const hadPendingSaves = session.hasPendingSaves
     // An exited renderer has no buffers left to flush. Keep the flag for the warning.
     session.hasPendingSaves = false
@@ -580,7 +716,7 @@ function createWindow(directory = null) {
         code: 'RENDERER_UNAVAILABLE',
         operation: 'render-window',
       })
-      logError(error, 'render-window')
+      scoped.error('render-window', error)
       runBackground('recover-window', () => offerWindowRecovery(error, { crashed: true, hadPendingSaves }))
     }
   })
@@ -930,6 +1066,11 @@ onRenderer('save-state', (session, dirty) => {
   session.hasPendingSaves = dirty === true
 })
 onRenderer('renderer-ready', session => {
+  const startedAt = rendererNavigationStarts.get(session)
+  if (startedAt !== undefined) {
+    rendererNavigationStarts.delete(session)
+    windowDiagnostics(session.contents.id).measure('renderer-shell-ready', startedAt)
+  }
   session.rendererReady = true
   session.announceFatal()
   if (session.settingsRequested && send(session.contents, 'open-settings')) session.settingsRequested = false
@@ -1105,7 +1246,25 @@ function setApplicationMenu() {
       },
       {
         label: 'View',
-        submenu: [{ role: 'zoomIn' }, { role: 'zoomOut' }, { role: 'resetZoom' }, { role: 'togglefullscreen' }],
+        submenu: [
+          { role: 'zoomIn' },
+          { role: 'zoomOut' },
+          { role: 'resetZoom' },
+          { role: 'togglefullscreen' },
+          { type: 'separator' },
+          { role: 'toggleDevTools' },
+          {
+            label: 'Open Diagnostics Folder',
+            enabled: diagnosticDirectory.ok,
+            click: () =>
+              windowAction('open-diagnostics-folder', async () => {
+                if (!diagnosticDirectory.ok) return
+                await diagnosticLog?.flush()
+                const message = await shell.openPath(diagnosticDirectory.value)
+                if (message) throw new Error('Diffpane could not open the diagnostics folder.')
+              }),
+          },
+        ],
       },
       { label: 'Window', submenu: [{ role: 'minimize' }, { role: 'zoom' }] },
     ]),
@@ -1116,7 +1275,9 @@ runBackground(
   'start-app',
   async () => {
     await app.whenReady()
+    if (diagnosticLog) stopDesktopMetrics = startDesktopMetrics(diagnostics)
     protocol.handle('diffpane-media', async request => {
+      const startedAt = performance.now()
       const result = await attemptAsync(async () => {
         const url = new URL(request.url)
         const session = mediaSessions.get(url.hostname)
@@ -1124,6 +1285,8 @@ runBackground(
         const media = workspaceMedia(await session.call('media', [decodeURIComponent(url.pathname.slice(1))]))
         return mediaResponse(media.root, media.path, request)
       })
+      if (result.ok) diagnostics.measure(`media-protocol.status-${result.value.status}`, startedAt)
+      else diagnostics.measure('media-protocol', startedAt, result)
       return result.ok ? result.value : new Response(null, { status: 404 })
     })
     if (process.platform === 'darwin' && !app.isPackaged)
@@ -1153,8 +1316,10 @@ runBackground(
       if (!BrowserWindow.getAllWindows().length) windowAction('new-window', () => createWindow())
     })
   },
-  error => {
+  async error => {
     dialog.showErrorBox('Diffpane could not start', error.message)
+    stopDesktopMetrics?.()
+    await diagnosticLog?.close()
     app.exit(1)
   },
 )
@@ -1197,7 +1362,25 @@ app.on('before-quit', event => {
   )
 })
 app.on('window-all-closed', () => app.quit())
-app.on('will-quit', () => {
+let diagnosticsDrained = false
+let drainingDiagnostics = false
+app.on('will-quit', event => {
+  if (diagnosticsDrained) return
+  if (diagnosticLog) event.preventDefault()
+  if (drainingDiagnostics) return
+  drainingDiagnostics = true
+  quitPhase = 'quitting'
+  stopDesktopMetrics?.()
   const result = attempt(() => localState.close())
   if (!result.ok) logError(result.error, 'close-local-state')
+  diagnostics.event('app-stop')
+  if (!diagnosticLog) return
+  const quit = () => {
+    diagnosticsDrained = true
+    app.quit()
+  }
+  void diagnosticLog.close().then(quit, () => {
+    console.warn('Diffpane could not finish writing its local diagnostic log.')
+    quit()
+  })
 })

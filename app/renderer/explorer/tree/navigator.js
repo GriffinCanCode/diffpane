@@ -1,6 +1,7 @@
 import { IDEA_FILE_DRAG_TYPE } from '../../../shared/ideas/ideas.ts'
 // MONOLITHIC: Incremental tree reconciliation, virtualized rows and keyboard focus share one navigation state. Extract the viewport once focus restoration and expansion can be verified at its boundary.
 import { attemptAsync } from '../../../shared/recovery/app-errors.ts'
+import { rendererDiagnostics } from '../../shell/diagnostics/diagnostics.ts'
 import { reportError, runTask } from '../../shell/recovery/errors.ts'
 import { requireElement } from '../../shell/workspace/dom.js'
 import { createSearchFilters, filterPredicate, hasFilters } from '../project-search/search-filters.ts'
@@ -492,6 +493,7 @@ export function createNavigator(
       const generation = wanted
       const base = scopePrefix(snapshot)
       catalogRequests++
+      const startedAt = performance.now()
       const result = await attemptAsync(
         async () => {
           if (api.filesDelta) return { delta: await api.filesDelta(appliedInventoryRevision) }
@@ -530,6 +532,7 @@ export function createNavigator(
         }
         reportInitialScan(result.ok)
       }
+      rendererDiagnostics.measure('renderer.navigator-catalog-scan', startedAt, result)
       if (generation !== wanted) await scan()
     }
 

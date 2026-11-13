@@ -4,6 +4,7 @@ import path from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { parentPort, workerData } from 'node:worker_threads'
 import watcher from '@parcel/watcher'
+import { createDiagnostics } from '../../../shared/diagnostics/diagnostics.ts'
 import { mediaType } from '../../../shared/documents/media-types.ts'
 import { countLines } from '../../../shared/documents/text-lines.ts'
 import { appError, attemptAsync, serializeAppError } from '../../../shared/recovery/app-errors.ts'
@@ -38,14 +39,26 @@ import {
 
 if (!parentPort) throw new Error('Workspace session requires a worker port')
 const port = parentPort
-const { directory: requestedDirectory, versions } = parseSessionLaunch(workerData)
-
-const repository = await Repository.open(requestedDirectory)
-const launchPath = await realpath(requestedDirectory)
-const initialPath = (await lstat(launchPath)).isFile() ? path.relative(repository.root, launchPath) : null
-const languages = new LanguageRuntime(repository.root, value => port.postMessage({ event: 'language-event', value }))
-const howmany = new HowManyRuntime(repository.root, repository.scope, value =>
-  port.postMessage({ event: 'howmany-event', value }),
+const diagnostics = createDiagnostics('workspace', value => port.postMessage({ event: 'diagnostic', value }))
+const startupTime = performance.now()
+const { repository, initialPath, versions } = await diagnostics.run('workspace.open', async () => {
+  const launch = parseSessionLaunch(workerData)
+  const opened = await Repository.open(launch.directory)
+  const launchPath = await realpath(launch.directory)
+  return {
+    repository: opened,
+    initialPath: (await lstat(launchPath)).isFile() ? path.relative(opened.root, launchPath) : null,
+    versions: launch.versions,
+  }
+})
+const languages = new LanguageRuntime(repository.root, value => port.postMessage({ event: 'language-event', value }), {
+  diagnostics,
+})
+const howmany = new HowManyRuntime(
+  repository.root,
+  repository.scope,
+  value => port.postMessage({ event: 'howmany-event', value }),
+  { diagnostics },
 )
 /** @type {WorkspaceSnapshot | undefined} */
 let snapshot
@@ -109,8 +122,27 @@ const languageChanges = new Map()
 const documentStamps = new Map()
 /** @type {import('@parcel/watcher').AsyncSubscription[]} */
 const subscriptions = []
-const diffs = new DiffRuntime()
-const documents = new DocumentCache(loadDocument)
+const diffs = new DiffRuntime({ diagnostics })
+const documents = new DocumentCache((filename, comparison) =>
+  diagnostics.run('workspace.document.load', () => loadDocument(filename, comparison)),
+)
+let previousUtilization = performance.eventLoopUtilization()
+const performanceTimer = setInterval(() => {
+  const currentUtilization = performance.eventLoopUtilization()
+  const { utilization } = performance.eventLoopUtilization(currentUtilization, previousUtilization)
+  previousUtilization = currentUtilization
+  diagnostics.metric('workspace.event-loop.utilization', utilization * 100, 'percent')
+  const { heapUsed, external } = process.memoryUsage()
+  diagnostics.metric('workspace.heap.used', heapUsed, 'bytes')
+  diagnostics.metric('workspace.memory.external', external, 'bytes')
+  const { bytes, entries, queued, hits, loads, retries } = documents.stats()
+  diagnostics.metric('workspace.document.cache.bytes', bytes, 'bytes')
+  diagnostics.metric('workspace.document.cache.entries', entries, 'count')
+  diagnostics.metric('workspace.document.cache.hits', hits, 'count')
+  diagnostics.metric('workspace.document.cache.loads', loads, 'count')
+  diagnostics.metric('workspace.document.cache.retries', retries, 'count')
+  diagnostics.metric('workspace.document.cache.queued', queued, 'count')
+}, 60_000).unref()
 
 /** @param {string} filePath @param {string} comparison @returns {Promise<Omit<WorkspaceDocument, 'revision'>>} */
 async function loadDocument(filePath, comparison) {
@@ -120,12 +152,18 @@ async function loadDocument(filePath, comparison) {
     throw appError('This review checkpoint has been replaced.', { code: 'CHECKPOINT_EXPIRED' })
   const checkpointFile = baseline && checkpointIndex.get(filePath)
   const file = baseline ? (checkpointFile ?? { path: filePath }) : await findFile(filePath)
-  if (!file) throw appError('This file is no longer available in this directory.', { code: 'DOCUMENT_UNAVAILABLE' })
+  if (!file)
+    throw appError('This file is no longer available in this directory.', {
+      code: 'DOCUMENT_UNAVAILABLE',
+    })
   const start = performance.now()
-  const contents = baseline
-    ? await repository.checkpointContents(baseline, file)
-    : await repository.contents(file, comparison)
-  const decorations = await diffs.calculate(contents.before, contents.after)
+  const contents = await diagnostics.run('workspace.document.read', () =>
+    baseline ? repository.checkpointContents(baseline, file) : repository.contents(file, comparison),
+  )
+  const decorations = await diagnostics.run('workspace.document.diff', () =>
+    diffs.calculate(contents.before, contents.after),
+  )
+  if (decorations.diffNote) diagnostics.event('workspace.document.diff.budget', 'warn')
   return {
     path: filePath,
     reviewVersion: baseline ? checkpointFile?.reviewVersion : file.reviewVersion,
@@ -157,6 +195,8 @@ function reportUpdateError(cause, operation) {
     operation,
     recoverable: true,
   })
+  // A refresh span already captures its underlying failure.
+  if (operation !== 'refresh') diagnostics.error(`workspace.${operation}`, failure)
   if (!shuttingDown) port.postMessage({ event: 'error', value: failure.message, failure })
   return failure
 }
@@ -205,12 +245,15 @@ function schedule(all = false) {
     }, 0)
 }
 
-/** @param {string} message */
-function watchFailed(message) {
-  watchError = `${message}; using a 2s refresh.`
+/** @param {unknown} cause @param {'WATCHER_FAILED' | 'WATCHER_UNAVAILABLE'} code */
+function watchFailed(cause, code) {
+  const failure = appError(cause, { code })
+  const title = code === 'WATCHER_FAILED' ? 'Live watcher failed' : 'Live watcher unavailable'
+  watchError = `${title}: ${failure.message}; using a 2s refresh.`
   // Healthy native subscriptions need no polling or periodic wakeups.
   if (fallbackActive) return
   fallbackActive = true
+  diagnostics.error('workspace.watch.fallback', failure)
   queueFallback()
   schedule(true)
 }
@@ -413,10 +456,13 @@ async function versionReviewFiles(statusFiles, changedPaths, scanAll, stamps = n
 
 /** @param {RepositoryStatus} result @returns {Promise<{ value: WorkspaceCheckpoint | null, index: typeof checkpointIndex, changedPaths: string[] }>} */
 async function scanCheckpoint(result) {
-  if (!checkpoint) return { value: null, index: checkpointIndex, changedPaths: [] }
-  const { id, capturedAt } = checkpoint
+  const baseline = checkpoint
+  if (!baseline) return { value: null, index: checkpointIndex, changedPaths: [] }
+  const { id, capturedAt } = baseline
   try {
-    const checkpointFiles = await repository.checkpointFiles(checkpoint, result)
+    const checkpointFiles = await diagnostics.run('workspace.checkpoint.scan', () =>
+      repository.checkpointFiles(baseline, result),
+    )
     const sameCheckpoint = id === snapshot?.checkpoint?.id
     /** @type {typeof checkpointIndex} */
     const index = new Map()
@@ -503,7 +549,7 @@ function refresh() {
   if (refreshing && currentRefresh) return currentRefresh
   clearTimeout(timer)
   timer = undefined
-  currentRefresh = performRefresh()
+  currentRefresh = diagnostics.run('workspace.refresh', performRefresh)
   return currentRefresh
 }
 
@@ -544,7 +590,7 @@ async function performRefresh() {
       return snapshot
     languages.changed([...languageEvents.values()])
     const start = performance.now()
-    const result = await repository.snapshot()
+    const result = await diagnostics.run('workspace.git.status', () => repository.snapshot())
     let changedPaths = paths.map(file => path.relative(repository.root, file))
     const observed = fallbackActive && (poll || !fallbackState) ? await pollState(result) : null
     const review = await versionReviewFiles(result.files, changedPaths, all, observed?.files)
@@ -645,6 +691,7 @@ async function performRefresh() {
     checkpointIndex = checkpointReview.index
     syncExternalReviewPaths(reviewStates)
     if (refreshInventory) invalidateCatalog()
+    const firstSnapshot = !snapshot
     snapshot = {
       ...result,
       files: [...snapshotIndex.values()],
@@ -659,6 +706,7 @@ async function performRefresh() {
       gitMs: performance.now() - start,
     }
     publishSnapshot()
+    if (firstSnapshot) diagnostics.measure('workspace.ready', startupTime)
     return snapshot
   } catch (error) {
     // Reconcile all paths when Git is available again after a failed refresh.
@@ -675,7 +723,7 @@ async function files() {
     const requestedRevision = catalogRevision
     async function scan() {
       try {
-        const inventory = await repository.files()
+        const inventory = await diagnostics.run('workspace.catalog.scan', () => repository.files())
         catalogIndex = new Map(inventory.map(file => [file.path, file]))
         catalogIndexRevision = requestedRevision
         // A later request reconciles changes observed during this scan. Waiting
@@ -777,6 +825,7 @@ port.on('message', (/** @type {unknown} */ message) => {
   const request = parseSessionRequest(message)
   if (!request) return
   if ('failure' in request) {
+    diagnostics.error('workspace.message.invalid', request.failure)
     respondError(request.id, request.failure, 'workspace-message')
     return
   }
@@ -799,6 +848,7 @@ function respondError(id, cause, operation) {
 
 async function dispose() {
   shuttingDown = true
+  clearInterval(performanceTimer)
   contentSearchController?.abort()
   clearTimeout(timer)
   clearTimeout(fallbackTimer)
@@ -819,6 +869,8 @@ async function dispose() {
 
 /** @param {import('./session-protocol.ts').SessionRequest} request */
 async function receive({ id, method, args }) {
+  const startedAt = performance.now()
+  let operation = `workspace-request.${method}`
   try {
     /** @type {unknown} */
     let value
@@ -861,7 +913,10 @@ async function receive({ id, method, args }) {
       const controller = new AbortController()
       contentSearchController = controller
       try {
-        value = await searchRepositoryContent(repository, args[0], controller.signal)
+        const results = await searchRepositoryContent(repository, args[0], controller.signal)
+        if (results === null) diagnostics.event('workspace.search.canceled')
+        else if (results.truncated) diagnostics.event('workspace.search.truncated')
+        value = results
       } finally {
         if (contentSearchController === controller) contentSearchController = undefined
       }
@@ -931,7 +986,9 @@ async function receive({ id, method, args }) {
       const claude = method === 'claude-save'
       const file = await (claude ? claudeFile(filePath) : findFile(filePath))
       if (!file || file.submodule)
-        throw appError('This file is no longer available in this directory.', { code: 'DOCUMENT_UNAVAILABLE' })
+        throw appError('This file is no longer available in this directory.', {
+          code: 'DOCUMENT_UNAVAILABLE',
+        })
       await repository.save(filePath, text, expected, claude)
       documents.invalidate([filePath])
       const absolute = path.join(repository.root, filePath)
@@ -983,16 +1040,21 @@ async function receive({ id, method, args }) {
       value = await refresh()
     } else if (method === 'performance')
       value = { documents: documents.stats(), inventoryRevision: catalogRevision, revision }
-    else throw new Error('Unknown request')
+    else {
+      operation = 'workspace-request.unknown'
+      throw new Error('Unknown request')
+    }
     port.postMessage({ id, value })
+    diagnostics.measure(operation, startedAt, undefined, { requestId: id })
   } catch (error) {
+    diagnostics.measure(operation, startedAt, { ok: false, error }, { requestId: id })
     respondError(id, error, method)
   } finally {
     if (method === 'language-dispose') port.close()
   }
 }
 
-const watchSetup = (async () => {
+const watchSetup = diagnostics.run('workspace.watch.setup', async () => {
   for (const watchPath of new Set([repository.scope, repository.gitDir, repository.commonDir])) {
     if (shuttingDown) break
     try {
@@ -1000,7 +1062,7 @@ const watchSetup = (async () => {
       const subscription = await watcher.subscribe(watchPath, (error, events) => {
         if (shuttingDown) return
         if (error) {
-          watchFailed(`Live watcher failed: ${error.message}`)
+          watchFailed(error, 'WATCHER_FAILED')
           return
         }
         const livePaths = new Set()
@@ -1056,10 +1118,10 @@ const watchSetup = (async () => {
       // returned after shutdown began.
       subscriptions.push(subscription)
     } catch (error) {
-      if (!shuttingDown) watchFailed(`Live watcher unavailable: ${appError(error).message}`)
+      if (!shuttingDown) watchFailed(error, 'WATCHER_UNAVAILABLE')
     }
   }
-})()
+})
 await watchSetup
 if (!shuttingDown) {
   force = true

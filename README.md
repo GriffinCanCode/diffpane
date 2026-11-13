@@ -87,6 +87,8 @@ npm run verify    # check formatting, lint, types, tests, and build
 
 Run `make <target>` from the repository root to use the Make targets.
 
+Choose **View → Open Diagnostics Folder** to inspect local operation timings and failures. The [desktop diagnostics guide](app/electron/runtime/diagnostics/README.md) describes the record format, retention, and profiling tools.
+
 ## Repository layout
 
 - [Application](app/README.md) indexes the Electron runtime, renderer, shared contracts, tooling, and tests.

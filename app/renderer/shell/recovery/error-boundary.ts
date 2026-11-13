@@ -1,4 +1,5 @@
 import { appError } from '../../../shared/recovery/app-errors.ts'
+import { rendererDiagnostics } from '../diagnostics/diagnostics.ts'
 import './error-boundary.css'
 
 type RecoveryAction = () => void | Promise<void>
@@ -17,7 +18,6 @@ export interface ErrorBoundaryOptions {
   reloadLabel?: string
   dismiss?: boolean
   focus?: boolean
-  onActionError?: (cause: unknown) => void
   onRemove?: () => void
 }
 
@@ -90,7 +90,14 @@ export function showErrorBoundary(container: HTMLElement, options: ErrorBoundary
     options.onRemove?.()
   }
 
-  function addAction(label: string, pending: string, action: RecoveryAction, removeOnSuccess: boolean, success = '') {
+  function addAction(
+    operation: string,
+    label: string,
+    pending: string,
+    action: RecoveryAction,
+    removeOnSuccess: boolean,
+    success = '',
+  ) {
     const button = element(owner, 'button', 'error-boundary__action', label)
     button.type = 'button'
     async function recover() {
@@ -100,7 +107,7 @@ export function showErrorBoundary(container: HTMLElement, options: ErrorBoundary
       button.textContent = pending
       for (const control of buttons) control.setAttribute('aria-disabled', 'true')
       try {
-        await action()
+        await rendererDiagnostics.run(operation, action)
         if (boundary.parentElement === container) {
           if (removeOnSuccess) remove()
           else feedback.textContent = success
@@ -111,11 +118,6 @@ export function showErrorBoundary(container: HTMLElement, options: ErrorBoundary
             message: 'This recovery action couldn’t finish. Try again.',
           }).message
         }
-        try {
-          options.onActionError?.(cause)
-        } catch (reportError) {
-          console.error('Could not report error recovery failure', reportError)
-        }
       } finally {
         running = false
         button.textContent = label
@@ -123,15 +125,18 @@ export function showErrorBoundary(container: HTMLElement, options: ErrorBoundary
       }
     }
     button.addEventListener('click', () => {
-      recover().catch((cause: unknown) => console.error('Could not finish error recovery', cause))
+      recover().catch((cause: unknown) => rendererDiagnostics.error('renderer.recovery-action-failure', cause))
     })
     buttons.push(button)
     actions.append(button)
   }
 
-  if (options.retry) addAction(options.retryLabel ?? 'Try again', 'Retrying…', options.retry, true)
-  if (options.copy) addAction('Copy unsaved text', 'Copying…', options.copy, false, 'Unsaved text copied.')
-  if (options.reload) addAction(options.reloadLabel ?? 'Reload Diffpane', 'Reloading…', options.reload, false)
+  if (options.retry)
+    addAction('renderer.recovery-retry', options.retryLabel ?? 'Try again', 'Retrying…', options.retry, true)
+  if (options.copy)
+    addAction('renderer.recovery-copy', 'Copy unsaved text', 'Copying…', options.copy, false, 'Unsaved text copied.')
+  if (options.reload)
+    addAction('renderer.recovery-reload', options.reloadLabel ?? 'Reload Diffpane', 'Reloading…', options.reload, false)
   if (options.dismiss) {
     const dismiss = element(owner, 'button', 'error-boundary__action', 'Dismiss')
     dismiss.type = 'button'

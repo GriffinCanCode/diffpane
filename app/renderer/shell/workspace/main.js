@@ -45,6 +45,7 @@ import { changedFunctionRanges } from '../../review/comparison/function-ranges.t
 import { createReviewFocus } from '../../review/comparison/review-focus.js'
 import { createReviewNotes } from '../../review/notes/review-notes.ts'
 import { createChangeReview } from '../../review/queue/change-review.js'
+import { rendererDiagnostics } from '../diagnostics/diagnostics.ts'
 import { projectIcon } from '../layout/icons.ts'
 import { createWorkspaceLayout } from '../layout/workspace-layout.ts'
 import { clearErrorNotice, guard, renderFailure, reportError, runTask, setErrorNoticeHost } from '../recovery/errors.ts'
@@ -88,6 +89,7 @@ import { getWorkspacePreferences } from './preferences.ts'
  * @property {boolean} dirty
  * @property {boolean} active
  * @property {boolean} loading
+ * @property {number} openedAt
  * @property {number} generation
  * @property {number[]} changes
  * @property {number} changeIndex
@@ -281,6 +283,8 @@ let closingRequested = false
 let workspaceFailure = null
 /** @type {number | null} */
 let documentFrame = null
+let firstDocumentRendered = false
+let welcomeRendered = false
 let navigationVersion = 0
 /** @type {Set<{path: string}>} */
 const mutations = new Set()
@@ -329,7 +333,10 @@ const appearance = createAppearanceSettings(uiPreferences, (preferences, scheme)
 
 const overviewRulerColors = {
   added: { color: colorHex('light', 'addedEdge'), darkColor: colorHex('dark', 'addedEdge') },
-  modified: { color: colorHex('light', 'modifiedEdge'), darkColor: colorHex('dark', 'modifiedEdge') },
+  modified: {
+    color: colorHex('light', 'modifiedEdge'),
+    darkColor: colorHex('dark', 'modifiedEdge'),
+  },
   deleted: { color: colorHex('light', 'removedEdge'), darkColor: colorHex('dark', 'removedEdge') },
 }
 
@@ -432,6 +439,7 @@ function revealWorkspace() {
     await waitForWorkspaceOpeningPeeks(workspaceOpening)
     if (closed || workspaceOpening?.hidden !== false) return
     finishWorkspaceOpening()
+    rendererDiagnostics.measure('renderer.workspace-first-render', 0)
   })
 }
 
@@ -472,6 +480,10 @@ function showStartScreen(failed = false) {
       await waitForWorkspaceOpeningPeeks(workspaceOpening)
       if (closed || snapshot || workspaceOpening?.hidden !== false) return
       finishWorkspaceOpening()
+      if (!welcomeRendered) {
+        welcomeRendered = true
+        rendererDiagnostics.measure('renderer.welcome-first-render', 0)
+      }
     })
   runTask('Load recent projects', loadRecentTargets)
 }
@@ -1020,6 +1032,7 @@ async function openFile(
   } = {},
 ) {
   if (closingRequested || closed) return false
+  const openedAt = performance.now()
   const version = ++navigationVersion
   const current = openedFile ? cards.get(openedFile.path) : undefined
   if (current?.autosave?.pending) {
@@ -1107,7 +1120,7 @@ async function openFile(
   cards.clear()
   openedFile = file
   assistant?.refreshContext()
-  const card = createCard(reviewFiles(comparison).find(value => value.path === file.path) ?? file)
+  const card = createCard(reviewFiles(comparison).find(value => value.path === file.path) ?? file, openedAt)
   card.markdownAnchor = file.anchor ?? null
   const anchorLine = anchor?.line
   card.markdownSource = source || compare || Boolean(match) || (anchorLine !== null && anchorLine !== undefined)
@@ -1290,8 +1303,8 @@ function updateEmptyStateHint() {
     : `Select a file in the explorer, or press ${shortcutLabel('searchFiles')}.`
 }
 
-/** @param {OpenFile} file */
-function createCard(file) {
+/** @param {OpenFile} file @param {number} openedAt */
+function createCard(file, openedAt) {
   const element = document.createElement('section')
   element.className = 'file-card'
   element.dataset.path = file.path
@@ -1334,6 +1347,7 @@ function createCard(file) {
   /** @type {Card} */
   const card = {
     file,
+    openedAt,
     element,
     reviewFocus,
     reviewNotice,
@@ -1443,6 +1457,11 @@ function createCard(file) {
 
 /** @param {WorkspaceSnapshot | null} next */
 function applySnapshot(next) {
+  rendererDiagnostics.run('renderer.snapshot-apply', () => renderSnapshot(next))
+}
+
+/** @param {WorkspaceSnapshot | null} next */
+function renderSnapshot(next) {
   if (closed) return
   if (!next) {
     if (!snapshot) showStartScreen()
@@ -1490,6 +1509,7 @@ function applySnapshot(next) {
       key: 'watcher',
       code: 'WATCHER_FALLBACK',
       operation: 'Watch workspace files',
+      diagnostic: 'renderer.workspace-watch-fallback',
       title: 'Live updates are using polling',
     })
   } else if (!next.watchError) clearErrorNotice('watcher')
@@ -1531,6 +1551,7 @@ async function loadDocument(card, retry = false) {
   }
   card.loading = true
   card.dirty = false
+  const startedAt = performance.now()
   const generation = card.generation
   const comparison = card.comparison
   const editVersion = card.editVersion ?? 0
@@ -1541,9 +1562,13 @@ async function loadDocument(card, retry = false) {
       api.document(card.file.path, comparison),
       mediaType(card.file.path) && card.file.worktree !== 'D' ? attemptAsync(() => api.media(card.file.path)) : null,
     ])
-    if (!card.active || generation !== card.generation || !cards.has(card.file.path)) return
+    if (!card.active || generation !== card.generation || !cards.has(card.file.path)) {
+      rendererDiagnostics.measure('renderer.document-load-discarded', startedAt)
+      return
+    }
     if (card.autosave?.pending || editVersion !== (card.editVersion ?? 0)) {
       card.dirty = true
+      rendererDiagnostics.measure('renderer.document-load-discarded', startedAt)
       return
     }
     // Paint completed reads during edit storms, then reconcile any newer invalidation.
@@ -1556,7 +1581,13 @@ async function loadDocument(card, retry = false) {
     renderDocument(card, document)
     clearDocumentFailure(card)
     initialDocumentReady = true
+    rendererDiagnostics.measure('renderer.document-load', startedAt)
+    if (!firstDocumentRendered) {
+      firstDocumentRendered = true
+      rendererDiagnostics.measure('renderer.document-first-render', card.openedAt)
+    }
   } catch (cause) {
+    rendererDiagnostics.measure('renderer.document-load', startedAt, { ok: false, error: cause })
     if (card.active && generation === card.generation) {
       if (retry && card.errorBoundary?.isConnected) throw appError(cause, { operation: 'Load file' })
       finishWorkspaceOpening()
@@ -2330,7 +2361,10 @@ function syncLanguageAttachment(card) {
   if (document.workingMissing) {
     card.languageCleanup?.()
     card.languageCleanup = null
-  } else card.languageCleanup ??= languageFeatures.attach(editor, model, card.file.path, { active: true })
+  } else
+    card.languageCleanup ??= languageFeatures.attach(editor, model, card.file.path, {
+      active: true,
+    })
 }
 
 /** @param {ReturnType<typeof changedFunctionRanges>} functions @param {'before' | 'after'} kind */
@@ -2367,7 +2401,10 @@ async function highlightFunctions(card) {
       range: new monaco.Range(change.startLine, 1, change.endLine ?? change.startLine, 1),
       options: {
         linesDecorationsClassName: `diff-gutter-${change.kind}`,
-        overviewRuler: { ...overviewRulerColors.deleted, position: monaco.editor.OverviewRulerLane.Left },
+        overviewRuler: {
+          ...overviewRulerColors.deleted,
+          position: monaco.editor.OverviewRulerLane.Left,
+        },
       },
     }))
     card.originalDecorations.set([...functionDecorations(original, 'before'), ...markers])
@@ -2495,11 +2532,17 @@ function showWorkspaceFailure(cause) {
   const title = snapshot ? 'Workspace connection interrupted' : 'Couldn’t open this project'
   if (snapshot) {
     finishWorkspaceOpening()
-    reportError(error, { key: 'workspace', title, retry: recoverWorkspace, retryLabel })
+    reportError(error, {
+      key: 'workspace',
+      title,
+      retry: recoverWorkspace,
+      retryLabel,
+      diagnostic: 'renderer.workspace-error',
+    })
     return
   }
   showStartScreen(true)
-  reportError(error, { silent: true })
+  reportError(error, { silent: true, diagnostic: 'renderer.workspace-error' })
   const boundary = renderFailure(ui.startError, error, {
     scope: 'panel',
     title,
@@ -2662,18 +2705,19 @@ Object.assign(window, {
     syncReviewState()
   }
   const unsubscribeResume = api.onResumeEditing(resumeEditing)
-  const flushSaves = async () => {
-    const results = await Promise.allSettled([
-      ...[...cards.values()].map(card => card.autosave?.flush()),
-      applyingAssistantEdit,
-      ideas?.flush(),
-      uiPreferences.settled(),
-    ])
-    const failed = results.find(result => result.status === 'rejected')
-    if (failed) throw appError(failed.reason, { operation: 'Save before closing' })
-    syncSaveState()
-    clearErrorNotice('close')
-  }
+  const flushSaves = () =>
+    rendererDiagnostics.run('renderer.workspace-flush-saves', async () => {
+      const results = await Promise.allSettled([
+        ...[...cards.values()].map(card => card.autosave?.flush()),
+        applyingAssistantEdit,
+        ideas?.flush(),
+        uiPreferences.settled(),
+      ])
+      const failed = results.find(result => result.status === 'rejected')
+      if (failed) throw appError(failed.reason, { operation: 'Save before closing' })
+      syncSaveState()
+      clearErrorNotice('close')
+    })
   const unsubscribeFlush = api.onFlushSaves(id =>
     runTask('Flush file saves', async () => {
       closingRequested = true

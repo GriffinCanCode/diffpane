@@ -1,6 +1,7 @@
 // MONOLITHIC: The sandboxed preload is emitted from one entrypoint and validates every exposed IPC channel. Extract validators when the generator can inline them without runtime imports.
 import { contextBridge, ipcRenderer } from 'electron'
 import type { IpcRendererEvent } from 'electron'
+import type { DiagnosticEvent } from '../../../shared/diagnostics/diagnostics.ts'
 import type { Idea, IdeaChange, IdeaLink } from '../../../shared/ideas/ideas.ts'
 import type { ShortcutAction, ShortcutBinding, ShortcutOverrides } from '../../../shared/preferences/shortcuts.ts'
 import type { ErrorDetails } from '../../../shared/recovery/app-errors.ts'
@@ -40,10 +41,12 @@ type ClaudeApplied = Awaited<ReturnType<ClaudeSession['apply']>>
 type ClaudeProposal = NonNullable<ClaudeReply['proposal']>
 
 async function invoke<T>(channel: string, validate: Validator<T>, ...args: unknown[]): Promise<T> {
+  const startedAt = performance.now()
   let result: unknown
   try {
     result = await ipcRenderer.invoke(channel, ...args)
   } catch {
+    reportBridgeFailure(channel, startedAt, 'IPC_UNAVAILABLE')
     // oxlint-disable-next-line typescript/prefer-promise-reject-errors -- Electron preserves plain data across the context bridge.
     return Promise.reject({
       message: 'The window could not reach Diffpane. Try again.',
@@ -58,6 +61,7 @@ async function invoke<T>(channel: string, validate: Validator<T>, ...args: unkno
     if (result.ok === false && isErrorDetails(result.error)) return Promise.reject(result.error)
     if (result.ok === true && 'value' in result && validate(result.value)) return result.value
   }
+  reportBridgeFailure(channel, startedAt, 'INVALID_IPC_RESPONSE')
   // oxlint-disable-next-line typescript/prefer-promise-reject-errors -- Electron preserves plain data across the context bridge.
   return Promise.reject({
     message: 'Diffpane sent an invalid reply. Try again.',
@@ -65,6 +69,46 @@ async function invoke<T>(channel: string, validate: Validator<T>, ...args: unkno
     operation: channel,
     recoverable: true,
   } satisfies ErrorDetails)
+}
+
+function reportBridgeFailure(channel: string, startedAt: number, code: 'IPC_UNAVAILABLE' | 'INVALID_IPC_RESPONSE') {
+  try {
+    ipcRenderer.send('preload-diagnostic', channel, Math.round((performance.now() - startedAt) * 100) / 100, code)
+  } catch {
+    // Keep the original bridge error when the diagnostic channel is also unavailable.
+  }
+}
+
+function reportDiagnostic(input: unknown): void {
+  if (
+    !isRecord(input) ||
+    input.source !== 'renderer' ||
+    typeof input.operation !== 'string' ||
+    input.operation.length > 96
+  )
+    return
+  const { source, operation, level, kind } = input
+  if (level !== 'info' && level !== 'warn' && level !== 'error') return
+  const base = { source, operation, level }
+  if (kind === 'metric') {
+    const { value, unit } = input
+    if (isTimestamp(value) && (unit === 'ms' || unit === 'count' || unit === 'bytes' || unit === 'percent'))
+      ipcRenderer.send('renderer-diagnostic', { ...base, kind, value, unit })
+    return
+  }
+  let failure
+  if (input.failure !== undefined) {
+    if (!isRecord(input.failure)) return
+    const { code, recoverable } = input.failure
+    if (typeof code !== 'string' || code.length > 64 || typeof recoverable !== 'boolean') return
+    failure = { code, recoverable }
+  }
+  if (kind === 'event') ipcRenderer.send('renderer-diagnostic', { ...base, kind, failure })
+  if (kind === 'duration') {
+    const { durationMs, outcome } = input
+    if (isTimestamp(durationMs) && (outcome === 'success' || outcome === 'failure' || outcome === 'canceled'))
+      ipcRenderer.send('renderer-diagnostic', { ...base, kind, durationMs, outcome, failure })
+  }
 }
 
 function listen<T>(channel: string, validate: Validator<T>, callback: (value: T) => void): Unsubscribe {
@@ -570,6 +614,7 @@ const API = {
   savesFlushed: (success: boolean, id: number) => ipcRenderer.send('saves-flushed', success, id),
   setSaveState: (dirty: boolean) => ipcRenderer.send('save-state', dirty),
   rendererReady: () => ipcRenderer.send('renderer-ready'),
+  reportDiagnostic: (event: DiagnosticEvent) => reportDiagnostic(event),
   media: (path: string) => invoke('media', isMedia, path),
   refresh: () => invoke('refresh', isSnapshot),
   openFolder: () => invoke('open-folder', isBoolean),

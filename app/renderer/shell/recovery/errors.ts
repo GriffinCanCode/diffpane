@@ -1,9 +1,11 @@
 import { appError, attempt, attemptAsync } from '../../../shared/recovery/app-errors.ts'
 import type { AppError, ErrorContext } from '../../../shared/recovery/app-errors.ts'
+import { rendererDiagnostics } from '../diagnostics/diagnostics.ts'
 import { showErrorBoundary } from './error-boundary.ts'
 import type { ErrorBoundaryOptions } from './error-boundary.ts'
 
 interface ReportOptions extends ErrorContext {
+  diagnostic?: string
   key?: string
   title?: string
   silent?: boolean
@@ -12,7 +14,7 @@ interface ReportOptions extends ErrorContext {
   copy?: ErrorBoundaryOptions['copy']
 }
 
-type BoundaryOptions = Omit<ErrorBoundaryOptions, 'operation' | 'onActionError' | 'message'> & { message?: string }
+type BoundaryOptions = Omit<ErrorBoundaryOptions, 'operation' | 'message'> & { message?: string }
 
 const NOTICES = new Map<
   string,
@@ -42,17 +44,22 @@ export function clearErrorNotice(key: string): void {
 
 export function reportError(cause: unknown, options: ReportOptions = {}): AppError {
   const error = appError(cause, options)
+  displayError(error, options, options.diagnostic ?? 'renderer.error')
+  return error
+}
+
+function displayError(error: AppError, options: ReportOptions, diagnostic?: string): void {
   if (options.silent || typeof document === 'undefined') {
-    console.error(error)
-    return error
+    if (diagnostic) rendererDiagnostics.error(diagnostic, error)
+    return
   }
 
   const key = options.key ?? error.operation ?? error.code
   const previous = NOTICES.get(key)
   if (previous?.boundary.isConnected && previous.error.code === error.code && previous.error.message === error.message)
-    return error
+    return
 
-  console.error(error)
+  if (diagnostic) rendererDiagnostics.error(diagnostic, error)
   if (!noticeHost?.isConnected) {
     noticeHost = document.createElement('div')
     noticeHost.className = 'error-notice-overlay'
@@ -73,7 +80,6 @@ export function reportError(cause: unknown, options: ReportOptions = {}): AppErr
     onRemove: clear,
   })
   NOTICES.set(key, { host, boundary, error, focusBefore })
-  return error
 }
 
 export function renderFailure(host: HTMLElement, error: AppError, options: BoundaryOptions): HTMLElement {
@@ -82,17 +88,15 @@ export function renderFailure(host: HTMLElement, error: AppError, options: Bound
     message: options.message ?? error.message,
     detail: options.detail ?? `Error code ${error.code}`,
     operation: error.operation,
-    onActionError: cause => reportError(cause, { operation: error.operation, silent: true }),
   })
 }
 
 export function showStartupFailure(cause: unknown): void {
   if (startupBoundary?.isConnected) return
-  const error = reportError(cause, {
+  const error = appError(cause, {
     operation: 'Start Diffpane',
     message: 'Diffpane could not finish starting.',
     recoverable: false,
-    silent: true,
   })
   const app = document.getElementById('app')
   if (app) app.inert = true
@@ -115,11 +119,19 @@ export function showStartupFailure(cause: unknown): void {
 export function installErrorHandlers(): void {
   window.addEventListener('error', event => {
     if (!(event instanceof ErrorEvent)) return
-    reportError(event.error ?? event.message, { key: 'uncaught', operation: 'Run Diffpane' })
+    reportError(event.error ?? event.message, {
+      key: 'uncaught',
+      operation: 'Run Diffpane',
+      diagnostic: 'renderer.uncaught-error',
+    })
   })
   window.addEventListener('unhandledrejection', event => {
     event.preventDefault()
-    reportError(event.reason, { key: 'uncaught', operation: 'Run Diffpane' })
+    reportError(event.reason, {
+      key: 'uncaught',
+      operation: 'Run Diffpane',
+      diagnostic: 'renderer.unhandled-rejection',
+    })
   })
 }
 
@@ -129,15 +141,19 @@ export function guard<T extends unknown[]>(
   options: ReportOptions = {},
 ): (...args: T) => void {
   return (...args) => {
+    const start = performance.now()
     const result = attempt(() => run(...args), { operation, ...options })
-    if (!result.ok) reportError(result.error, options)
+    rendererDiagnostics.measure(options.diagnostic ?? 'renderer.action', start, result)
+    if (!result.ok) displayError(result.error, options)
   }
 }
 
 export function runTask(operation: string, run: () => unknown, options: ReportOptions = {}): void {
   async function observe() {
+    const start = performance.now()
     const result = await attemptAsync(run, { operation, ...options })
-    if (!result.ok) reportError(result.error, options)
+    rendererDiagnostics.measure(options.diagnostic ?? 'renderer.task', start, result)
+    if (!result.ok) displayError(result.error, options)
   }
-  observe().catch((cause: unknown) => console.error('Could not report task failure', cause))
+  observe().catch((cause: unknown) => rendererDiagnostics.error('renderer.task-report-failure', cause))
 }

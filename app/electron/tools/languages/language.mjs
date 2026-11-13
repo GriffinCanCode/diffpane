@@ -3,11 +3,13 @@ import { spawn } from 'node:child_process'
 import { realpath, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { appError } from '../../../shared/recovery/app-errors.ts'
 import { discoverServers } from './servers.ts'
 
 /** @import { DiscoveredServer } from './servers.ts' */
 /** @typedef {Pick<DiscoveredServer, 'name' | 'command' | 'args' | 'env'> & Partial<Pick<DiscoveredServer, 'manifests' | 'settings'>>} ServerSpec */
-/** @typedef {Parameters<typeof discoverServers>[0] & {servers?: Record<string, ServerSpec>, requestTimeoutMs?: number, initializeTimeoutMs?: number, retryMs?: number, idleMs?: number, maxServers?: number}} RuntimeOptions */
+/** @typedef {ReturnType<typeof import('../../../shared/diagnostics/diagnostics.ts').createDiagnostics>} Diagnostics */
+/** @typedef {Parameters<typeof discoverServers>[0] & {servers?: Record<string, ServerSpec>, requestTimeoutMs?: number, initializeTimeoutMs?: number, retryMs?: number, idleMs?: number, maxServers?: number, diagnostics?: Diagnostics}} RuntimeOptions */
 /** @typedef {{resolve: (value: unknown) => void, reject: (error: unknown) => void, cleanup: () => void}} PendingRequest */
 /** @typedef {{uri: string, workspace: string, language: string, languageId: string, text: string, version: number}} LanguageDocument */
 /** @typedef {{uri: string, type: number}} WatchedChange */
@@ -208,6 +210,7 @@ class Connection {
     this.processClosed = false
     this.stopping = false
     this.onExit = onExit
+    this.diagnostics = options.diagnostics
     this.stderr = ''
     this.child = spawn(spec.command, spec.args, {
       cwd: root,
@@ -324,7 +327,9 @@ class Connection {
     }
     this.pending.clear()
     // oxlint-disable-next-line promise/no-promise-in-callback -- The connection starts owned process teardown when any stream fails.
-    this.stopProcess().catch((/** @type {unknown} */ cause) => console.error('Could not stop language server', cause))
+    this.stopProcess().catch((/** @type {unknown} */ cause) =>
+      this.diagnostics?.error('workspace.language.stop', cause),
+    )
     this.onExit(expected, error instanceof Error ? error.message : 'Language server connection failed')
   }
 
@@ -572,6 +577,10 @@ export class LanguageRuntime {
           starting.status = 'error'
           starting.failedAt = Date.now()
           starting.message = message
+          this.options.diagnostics?.error(
+            'workspace.language.connection',
+            appError(message, { code: 'LANGUAGE_SERVER_UNAVAILABLE' }),
+          )
           this.event({ type: 'status', language, status: 'error', message, pid: connection.child.pid })
         }
         const pid = connection.child.pid
@@ -581,7 +590,7 @@ export class LanguageRuntime {
               this.event({ type: 'process', language, pid, status: 'stopped' })
               return undefined
             })
-            .catch((/** @type {unknown} */ cause) => console.error('Could not report language server shutdown', cause))
+            .catch((/** @type {unknown} */ cause) => this.options.diagnostics?.error('workspace.language.exit', cause))
         }
       },
       this.options,
@@ -619,7 +628,9 @@ export class LanguageRuntime {
         pid: server.connection.child.pid,
         status: 'started',
       })
-    server.ready = this.initialize(server).catch((/** @type {unknown} */ error) => {
+    const initialize = () => this.initialize(starting)
+    const initializing = this.options.diagnostics?.run('workspace.language.initialize', initialize) ?? initialize()
+    server.ready = initializing.catch((/** @type {unknown} */ error) => {
       starting.connection.fail(error)
       return null
     })
@@ -789,6 +800,7 @@ export class LanguageRuntime {
       if (!document || server.docs.get(relative) !== document) return
       const controller = new AbortController()
       server.diagnosticRequests.set(relative, controller)
+      const startedAt = performance.now()
       try {
         const result = await server.connection.request(
           'textDocument/diagnostic',
@@ -812,14 +824,19 @@ export class LanguageRuntime {
             diagnostics: Array.isArray(result.items) ? result.items : [],
           })
         }
-      } catch {
+        if (!controller.signal.aborted) this.options.diagnostics?.measure('workspace.language.diagnostics', startedAt)
+      } catch (error) {
         /* Canceled or failed pulls are retried when the document or server refreshes. */
+        if (!controller.signal.aborted)
+          this.options.diagnostics?.measure('workspace.language.diagnostics', startedAt, { ok: false, error })
       } finally {
         if (server.diagnosticRequests.get(relative) === controller) server.diagnosticRequests.delete(relative)
       }
     }
     const timer = setTimeout(() => {
-      pull().catch((/** @type {unknown} */ cause) => console.error('Could not update language diagnostics', cause))
+      pull().catch((/** @type {unknown} */ cause) =>
+        this.options.diagnostics?.error('workspace.language.diagnostics', cause),
+      )
     }, 60)
     timer.unref()
     server.diagnosticTimers.set(relative, timer)
@@ -1058,7 +1075,7 @@ export class LanguageRuntime {
     this.stopping.add(stopping)
     stopping
       .finally(() => this.stopping.delete(stopping))
-      .catch((/** @type {unknown} */ cause) => console.error('Could not dispose language server', cause))
+      .catch((/** @type {unknown} */ cause) => this.options.diagnostics?.error('workspace.language.dispose', cause))
   }
 
   async dispose() {

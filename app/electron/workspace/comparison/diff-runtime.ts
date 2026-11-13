@@ -1,4 +1,5 @@
 import { Worker } from 'node:worker_threads'
+import type { createDiagnostics } from '../../../shared/diagnostics/diagnostics.ts'
 import type { DiffDecorations, LineDecoration } from './changes.ts'
 import type { DiffReply, DiffRequest } from './diff-worker.ts'
 
@@ -52,9 +53,9 @@ export class DiffRuntime {
   timer?: ReturnType<typeof setTimeout>
   stopping = new Set<Promise<number>>()
 
-  private readonly options: { idleMs?: number }
+  private readonly options: { idleMs?: number; diagnostics?: ReturnType<typeof createDiagnostics> }
 
-  constructor(options: { idleMs?: number } = {}) {
+  constructor(options: { idleMs?: number; diagnostics?: ReturnType<typeof createDiagnostics> } = {}) {
     this.options = options
   }
 
@@ -136,7 +137,7 @@ export class DiffRuntime {
       () => this.stopping.delete(stopping),
       (error: unknown) => {
         this.stopping.delete(stopping)
-        process.emitWarning(error instanceof Error ? error : 'Could not stop the diff worker.')
+        this.options.diagnostics?.error('workspace.diff.stop', error)
       },
     )
   }

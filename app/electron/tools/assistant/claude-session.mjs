@@ -5,6 +5,7 @@ import {
   MAX_IDEA_CHAT_CONTEXT_LENGTH,
   MAX_IDEA_TITLE_LENGTH,
 } from '../../../shared/ideas/ideas.ts'
+import { appError } from '../../../shared/recovery/app-errors.ts'
 import { requestClaude } from './claude-api.mjs'
 import { claudeVisiblePath } from './claude-workspace.mjs'
 
@@ -129,6 +130,7 @@ const TOOL_LABELS = {
 /** @typedef {{ type: 'text', text: string, step: number } | (ToolActivity & { label: string, status: 'running' | 'done' | 'error' })} Activity */
 /** @typedef {Activity & { requestId: string }} ClaudeActivity */
 /** @typedef {{ role: 'user' | 'assistant', content: string }} HistoryMessage */
+/** @typedef {ReturnType<typeof import('../../../shared/diagnostics/diagnostics.ts').createDiagnostics>} Diagnostics */
 /**
  * @typedef {object} ClaudeWorkspace
  * @property {(query: string) => Promise<unknown>} list
@@ -335,6 +337,13 @@ export class ClaudeSession {
   /** @type {Proposal | undefined} */
   #proposal
   #applying = false
+  /** @type {Diagnostics | undefined} */
+  #diagnostics
+
+  /** @param {Diagnostics} [diagnostics] */
+  constructor(diagnostics) {
+    this.#diagnostics = diagnostics
+  }
 
   cancel() {
     this.#controller?.abort()
@@ -515,22 +524,32 @@ export class ClaudeSession {
     }
 
     const maxSteps = 6
+    const diagnostics = this.#diagnostics
+    const startedAt = performance.now()
+    let receivedText = false
     try {
       const key = await getKey()
       for (let step = 0; step < maxSteps; step++) {
         signal.throwIfAborted()
         let streamed = false
-        // oxlint-disable-next-line no-await-in-loop -- Each model round requires the previous tool results.
-        const reply = await requestClaude(key, { system, messages, tools: availableTools }, signal, text => {
+        /** @param {string} text */
+        const onText = text => {
           streamed = true
+          if (!receivedText) {
+            receivedText = true
+            diagnostics?.measure('assistant.first-response', startedAt)
+          }
           emit({ type: 'text', text, step })
-        })
+        }
+        const request = () => requestClaude(key, { system, messages, tools: availableTools }, signal, onText)
+        // oxlint-disable-next-line no-await-in-loop -- Each model round requires the previous tool results.
+        const reply = await (diagnostics?.run('assistant.model.request', request) ?? request())
         signal.throwIfAborted()
         const text = reply.text
           .map(block => block.text)
           .join('\n\n')
           .trim()
-        if (text && !streamed) emit({ type: 'text', text, step })
+        if (text && !streamed) onText(text)
         if (reply.stopReason !== 'tool_use') {
           const proposed = reply.stopReason === 'end_turn' ? proposal : undefined
           const fallback = proposed ? 'Creature has a change for you to look at.' : 'Creature has no answer this time.'
@@ -543,9 +562,10 @@ export class ClaudeSession {
         const results = []
         for (const block of calls) {
           const args = block.input
-          const [running, done, failed] = (Object.hasOwn(TOOL_LABELS, block.name)
-            ? TOOL_LABELS[block.name]
-            : undefined) ?? ['Using tool', 'Used tool', 'Tool unavailable']
+          const knownTool = Object.hasOwn(TOOL_LABELS, block.name) ? TOOL_LABELS[block.name] : undefined
+          const [running, done, failed] = knownTool ?? ['Using tool', 'Used tool', 'Tool unavailable']
+          const operation = knownTool ? `assistant.tool.${block.name.replaceAll('_', '-')}` : 'assistant.tool.unknown'
+          const toolStartedAt = performance.now()
           /** @type {ToolActivity} */
           const activity = { type: 'tool', id: block.id, name: block.name, step }
           if (block.name === 'read_file' || block.name === 'propose_edit') {
@@ -563,7 +583,9 @@ export class ClaudeSession {
             toolResultChars += content.length
             results.push({ type: 'tool_result', tool_use_id: block.id, content })
             emit({ ...activity, label: done, status: 'done' })
+            diagnostics?.measure(operation, toolStartedAt)
           } catch (error) {
+            if (!signal.aborted) diagnostics?.measure(operation, toolStartedAt, { ok: false, error })
             const content = error instanceof Error ? error.message : 'This tool could not finish.'
             results.push({ type: 'tool_result', tool_use_id: block.id, content, is_error: true })
             emit({ ...activity, label: failed, status: 'error' })
@@ -572,6 +594,7 @@ export class ClaudeSession {
         }
         messages.push({ role: 'assistant', content: reply.content }, { role: 'user', content: results })
       }
+      diagnostics?.event('assistant.tool.budget', 'warn')
       return finish(
         proposal
           ? 'Creature has a change for you to look at.'
@@ -580,8 +603,12 @@ export class ClaudeSession {
         proposal,
       )
     } catch (error) {
-      if (controller.signal.aborted) throw new Error('Request canceled.', { cause: error })
-      if (timeout.aborted) throw new Error('The Creature took too long to respond. Try again.', { cause: error })
+      if (controller.signal.aborted)
+        throw appError(new Error('Request canceled.', { cause: error }), { code: 'ABORT_ERR' })
+      if (timeout.aborted)
+        throw appError(new Error('The Creature took too long to respond. Try again.', { cause: error }), {
+          code: 'ETIMEDOUT',
+        })
       throw error
     } finally {
       if (this.#controller === controller) this.#controller = undefined

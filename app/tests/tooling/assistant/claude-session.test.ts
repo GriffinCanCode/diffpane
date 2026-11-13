@@ -1,6 +1,8 @@
 import { expect, test, vi } from 'vite-plus/test'
 import { ClaudeSession } from '../../../electron/tools/assistant/claude-session.mjs'
 import type { ClaudeActivity, ClaudeWorkspace } from '../../../electron/tools/assistant/claude-session.mjs'
+import { createDiagnostics } from '../../../shared/diagnostics/diagnostics.ts'
+import type { DiagnosticEvent } from '../../../shared/diagnostics/diagnostics.ts'
 
 const key = () => Promise.resolve('test-key')
 
@@ -134,7 +136,8 @@ test('streams ordered activity and fetches attached workspace content only when 
     fetch.mockRestore()
   })
 
-  const session = new ClaudeSession()
+  const diagnostics: DiagnosticEvent[] = []
+  const session = new ClaudeSession(createDiagnostics('main', event => diagnostics.push(event)))
   const activity: ClaudeActivity[] = []
   const result = await session.send(
     {
@@ -165,6 +168,14 @@ test('streams ordered activity and fetches attached workspace content only when 
     [1, 'agree.'],
   ])
   expect(activity[3]).toMatchObject({ requestId: 'first', path: 'src/main.ts', side: 'head', startLine: 2, endLine: 3 })
+  expect(diagnostics.map(event => event.operation)).toEqual([
+    'assistant.first-response',
+    'assistant.model.request',
+    'assistant.tool.read-file',
+    'assistant.tool.read-idea',
+    'assistant.model.request',
+  ])
+  expect(JSON.stringify(diagnostics)).not.toMatch(/src\/main\.ts|Selected line|Does this selection|test-key/u)
 
   const [initial = '', continuation = ''] = requests
   expect(initial).toContain("You are The Creature. You live in the user's code and help them figure things out.")

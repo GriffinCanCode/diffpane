@@ -1,4 +1,5 @@
 import { attemptAsync } from '../../../shared/recovery/app-errors.ts'
+import { rendererDiagnostics } from '../../shell/diagnostics/diagnostics.ts'
 import { showErrorBoundary } from '../../shell/recovery/error-boundary.ts'
 import { reportError, runTask } from '../../shell/recovery/errors.ts'
 import { requireElement } from '../../shell/workspace/dom.js'
@@ -151,6 +152,7 @@ export function createContentSearch(api: SearchApi, onSelect: (match: ContentMat
   }
 
   async function search(preserve: boolean) {
+    const startedAt = performance.now()
     const request = generation
     inFlight = true
     if (!preserve) {
@@ -161,6 +163,7 @@ export function createContentSearch(api: SearchApi, onSelect: (match: ContentMat
       const result = await attemptAsync(() => api.contentSearch({ query: input.value, scope, matchCase }), {
         operation: 'Search project contents',
       })
+      rendererDiagnostics.measure('renderer.project-search-query', startedAt, result)
       if (request !== generation || !dialog.open) return
       if (!result.ok) {
         reportError(result.error, { silent: true })
