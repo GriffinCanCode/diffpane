@@ -1,4 +1,5 @@
 import { createFileActions } from './file-actions.ts';
+import { IDEA_FILE_DRAG_TYPE } from '../ideas.ts';
 import { createSearchFilters, hasFilters, matchesFilters } from './search-filters.ts';
 import { applyNavigationDelta, reconcileNavigationTree } from './navigation-reconcile.ts';
 
@@ -91,7 +92,7 @@ export function createNavigator(
   container,
   api,
   onOpen,
-  { iconFor, onPick, onFolder, onOutline, onMutate, languageFor, onReady } = {},
+  { iconFor, onPick, onFolder, onOutline, onMutate, onAttach, languageFor, onReady } = {},
 ) {
   const id = ++instance;
   container.classList.add('navigator');
@@ -149,6 +150,7 @@ export function createNavigator(
       summary.textContent = message;
       container.dataset.searching = 'true';
     },
+    onAttach,
   );
   const searching = () => Boolean(query) || filters.active();
 
@@ -211,6 +213,7 @@ export function createNavigator(
       row.dataset.key = node.key;
       row.dataset.path = node.path;
       row.dataset.kind = node.kind;
+      row.draggable = Boolean(onAttach && node.kind === 'file');
       row.dataset.active = String(node.key === activeKey);
       row.style.top = `${index * ROW_HEIGHT}px`;
       row.style.paddingLeft = `${8 + depth * 12}px`;
@@ -231,6 +234,7 @@ export function createNavigator(
         const image = document.createElement('img');
         image.src = glyph;
         image.alt = '';
+        image.draggable = false;
         icon.replaceChildren(image);
         icon.dataset.glyph = glyph;
       }
@@ -588,6 +592,16 @@ export function createNavigator(
     render();
     actions.show(node, event.clientX, event.clientY, list);
   }
+  function onDragStart(event) {
+    const row = event.target.closest('.navigator-row[draggable="true"]');
+    if (!row || !event.dataTransfer || !snapshot?.root) return;
+    event.dataTransfer.setData(
+      IDEA_FILE_DRAG_TYPE,
+      JSON.stringify({ path: row.dataset.path, workspace: snapshot.root }),
+    );
+    event.dataTransfer.effectAllowed = 'link';
+  }
+  list.addEventListener('dragstart', onDragStart);
   list.addEventListener('contextmenu', onContextMenu);
   list.addEventListener('scroll', schedule, { passive: true });
   list.addEventListener('click', onClick);
@@ -636,6 +650,7 @@ export function createNavigator(
       if (frame !== null) cancelAnimationFrame(frame);
       resize.disconnect();
       actions.dispose();
+      list.removeEventListener('dragstart', onDragStart);
       list.removeEventListener('contextmenu', onContextMenu);
       outline.removeEventListener('toggle', onOutlineToggle);
       list.removeEventListener('scroll', schedule);

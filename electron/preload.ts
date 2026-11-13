@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
+import type { Idea, IdeaChange } from '../ideas.ts';
 import type { ReviewNote, ReviewNoteChange } from '../review-notes.ts';
 
 type Unsubscribe = () => void;
@@ -20,13 +21,19 @@ contextBridge.exposeInMainWorld('diffpane', {
     status: () => ipcRenderer.invoke('claude-status'),
     saveKey: (key: string) => ipcRenderer.invoke('claude-save-key', key),
     removeKey: () => ipcRenderer.invoke('claude-remove-key'),
-    send: (input: { prompt: string; path?: string; proposeEdits: boolean }) =>
+    send: (input: { prompt: string; path?: string; proposeEdits: boolean; ideaContext?: string }) =>
       ipcRenderer.invoke('claude-send', input),
     apply: (id: string) => ipcRenderer.invoke('claude-apply', id),
     discard: (id: string) => ipcRenderer.invoke('claude-discard', id),
     reset: () => ipcRenderer.invoke('claude-reset'),
     cancel: () => ipcRenderer.invoke('claude-cancel'),
     onReset: (callback: (status: unknown) => void) => listen('claude-reset', callback),
+  },
+  ideas: {
+    list: (): Promise<Idea[]> => ipcRenderer.invoke('ideas-list'),
+    upsert: (idea: Idea): Promise<Idea> => ipcRenderer.invoke('ideas-upsert', idea),
+    delete: (id: string): Promise<void> => ipcRenderer.invoke('ideas-delete', id),
+    onChange: (callback: (change: IdeaChange) => void) => listen('ideas-change', callback),
   },
   howmany: {
     export: () => ipcRenderer.invoke('howmany-export'),

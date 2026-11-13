@@ -108,12 +108,6 @@
   display: none;
 }
 
-@media (max-width: 800px) {
-  #sidebar:has(.change-review:not([hidden])) {
-    max-width: 36vw;
-  }
-}
-
 .file-card:has(.monaco-diff-editor:not(.side-by-side)) .comparison-labels {
   grid-template-columns: minmax(0, 1fr);
 

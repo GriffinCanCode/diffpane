@@ -10,6 +10,7 @@ import { mediaResponse } from './media.ts';
 import { RecentTargets } from './recent-targets.ts';
 import { ClaudeCredentials } from './claude-credentials.mjs';
 import { ClaudeSession } from './claude-session.mjs';
+import { IdeaStore } from './idea-store.ts';
 import { ReviewNotesStore } from './review-notes.ts';
 import { formatReviewHandoff } from '../review-notes.ts';
 
@@ -17,6 +18,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const sessions = new Map();
 const mediaSessions = new Map();
 const fileChanges = new Map();
+let ideaStore;
 protocol.registerSchemesAsPrivileged([
   { scheme: 'diffpane-media', privileges: { standard: true, secure: true, stream: true } },
 ]);
@@ -393,6 +395,40 @@ for (const [method, handler] of Object.entries(claudeHandlers)) {
   });
 }
 
+const ideaHandlers = {
+  list: (store, root) => store.list(root),
+  upsert: (store, root, idea, sender) => {
+    const saved = store.upsert(root, idea);
+    broadcastIdeaChange(root, sender, { type: 'upsert', idea: saved });
+    return saved;
+  },
+  delete: (store, root, id, sender) => {
+    if (store.delete(root, id)) broadcastIdeaChange(root, sender, { type: 'delete', id });
+  },
+};
+
+function broadcastIdeaChange(root, sender, change) {
+  for (const session of sessions.values()) {
+    if (
+      session.repositoryRoot === root &&
+      session.contents !== sender &&
+      !session.contents.isDestroyed()
+    ) {
+      session.contents.send('ideas-change', change);
+    }
+  }
+}
+
+for (const [method, handler] of Object.entries(ideaHandlers)) {
+  ipcMain.handle(`ideas-${method}`, async (event, input) => {
+    const session = sessions.get(event.sender.id);
+    if (!session || event.senderFrame !== event.sender.mainFrame) throw new Error('Unknown window');
+    const root = await session.root();
+    ideaStore ??= new IdeaStore(path.join(app.getPath('userData'), 'ideas.sqlite'));
+    return handler(ideaStore, root, input, event.sender);
+  });
+}
+
 for (const method of ['list', 'change', 'copy']) {
   ipcMain.handle(`review-notes-${method}`, async (event, input) => {
     const session = sessions.get(event.sender.id);
@@ -645,3 +681,4 @@ app.on('before-quit', event => {
   })();
 });
 app.on('window-all-closed', () => app.quit());
+app.on('will-quit', () => ideaStore?.close());

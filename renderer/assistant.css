@@ -1,13 +1,4 @@
-.titlebar:has(#claude-toggle:not([hidden])) {
-  grid-template-columns: auto 1px minmax(0, 1fr) auto auto;
-}
-
-.titlebar:has(#review-toggle:not([hidden])):has(#claude-toggle:not([hidden])) {
-  grid-template-columns: auto 1px minmax(0, 1fr) auto auto auto;
-}
-
 #claude-toggle {
-  grid-column: -2;
   display: flex;
   align-items: center;
   gap: 5px;
@@ -45,9 +36,8 @@
 .claude-panel {
   display: flex;
   flex-direction: column;
-  flex: 0 0 clamp(330px, 31vw, 426px);
   min-width: 0;
-  border-left: 1px solid var(--claude-line);
+  container: claude / size;
 }
 
 .claude-heading {
@@ -298,6 +288,37 @@
   white-space: nowrap;
 }
 
+.claude-idea {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 0 3px 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--claude-accent);
+  background: var(--claude-inset);
+  font-size: 11px;
+}
+
+.claude-idea-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.claude-idea .claude-icon {
+  width: 24px;
+  height: 23px;
+  flex-shrink: 0;
+}
+
+.claude-turn-idea {
+  margin-top: 6px;
+  font-size: 11px;
+}
+
 .claude-composer textarea,
 .claude-settings input {
   width: 100%;
@@ -324,6 +345,17 @@
 
 .claude-composer textarea:disabled {
   opacity: 0.55;
+}
+
+.claude-panel:has(.claude-empty:not([hidden]) [data-action='connect']:not([hidden]))
+  .claude-composer:has(textarea:placeholder-shown):not(:has(.claude-idea:not([hidden]))) {
+  display: none;
+}
+
+.claude-panel:has(.claude-empty:not([hidden]) [data-action='connect']:not([hidden]))
+  .claude-composer:has(textarea:placeholder-shown)
+  > :not(.claude-idea) {
+  display: none;
 }
 
 .claude-mode {
@@ -417,16 +449,28 @@
   margin-left: auto;
 }
 
-@media (max-width: 1000px) {
-  .workspace:has(> .claude-panel:not([hidden])) {
-    position: relative;
+@container claude (height < 235px) {
+  .claude-heading {
+    min-height: 33px;
+    padding-inline: 10px;
   }
 
-  .claude-panel {
-    position: absolute;
-    inset: 0 0 0 auto;
-    z-index: 6;
-    width: min(360px, 55vw);
-    box-shadow: -12px 0 24px #0004;
+  .claude-conversation {
+    padding: 7px 10px;
+  }
+
+  .claude-empty {
+    gap: 5px;
+    margin-top: 0;
+  }
+
+  .claude-composer {
+    gap: 3px;
+    padding: 5px 9px 7px;
+  }
+
+  .claude-composer textarea {
+    max-height: 42px;
+    padding-block: 4px;
   }
 }

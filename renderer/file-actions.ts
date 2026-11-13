@@ -2,7 +2,12 @@ type Entry = { path: string; kind: string; name: string; file?: { submodule?: bo
 type Api = { fileAction: (action: string, path: string) => Promise<void> };
 type Mutate = (action: string, path: string, name?: string) => Promise<void>;
 
-export function createFileActions(api: Api, mutate: Mutate, onError: (message: string) => void) {
+export function createFileActions(
+  api: Api,
+  mutate: Mutate,
+  onError: (message: string) => void,
+  onAttach?: (path: string) => void,
+) {
   const menu = document.createElement('div');
   menu.className = 'file-context-menu';
   menu.setAttribute('role', 'menu');
@@ -93,6 +98,7 @@ export function createFileActions(api: Api, mutate: Mutate, onError: (message: s
       menu.replaceChildren();
       for (const [action, label] of [
         ['open', node.kind === 'directory' ? 'Expand folder' : 'Open file'],
+        ...(onAttach && node.kind === 'file' ? [['attach', 'Attach to an idea']] : []),
         ['rename', 'Rename…'],
         ['reveal', 'Reveal in Finder'],
         ['copy-path', 'Copy path'],
@@ -108,6 +114,7 @@ export function createFileActions(api: Api, mutate: Mutate, onError: (message: s
         button.addEventListener('click', () => {
           close(true);
           if (action === 'rename') rename(node);
+          else if (action === 'attach') onAttach?.(node.path);
           else
             void (
               action === 'trash' || action === 'open'

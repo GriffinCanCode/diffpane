@@ -48,6 +48,10 @@ Open **Changes** with ⌘⇧G to see the review queue and its progress. Select a
 
 Open **Notes** from the title bar or press ⌘⇧J by default. Right-click in the editor and choose **Add review note** to capture the current line or selection, including on the HEAD side of a comparison. Use the file header’s note button for a whole file, or choose **Make project note** for feedback without a file. Notes stay on this Mac across restarts. Select a note’s location to return to the captured lines. If they moved, Diffpane looks for a unique match and tells you when the original lines can’t be located. Choose **Copy handoff** to paste your open notes, file references, and captured excerpts into any agent chat.
 
+Open **Ideas** with ⌘⇧I to keep a searchable collection of Markdown notes and lists beside the File Explorer. Lists continue as you type. Use the toolbar to format text and **Preview** to see the rendered note. Drop a file on an idea to link it, or use **Link current** to capture the editor selection or the first visible lines. Select a link to return to its file or range. **Add to Claude** attaches the idea’s Markdown and file context to your next message. Ideas autosave to a local SQLite database and are shared by windows on the same Git worktree.
+
+Drag the dividers to resize Ideas, File Explorer, code, and Claude or Review Notes. With a divider focused, use the arrow keys to resize. Double-click a divider to reset its size. Diffpane remembers your layout.
+
 It includes search, a file picker, language tools, line counts, and previews for images, audio, video, and PDFs.
 
 ## Claude in Diffpane

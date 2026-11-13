@@ -23,6 +23,12 @@ electron_1.contextBridge.exposeInMainWorld('diffpane', {
     cancel: () => electron_1.ipcRenderer.invoke('claude-cancel'),
     onReset: callback => listen('claude-reset', callback),
   },
+  ideas: {
+    list: () => electron_1.ipcRenderer.invoke('ideas-list'),
+    upsert: idea => electron_1.ipcRenderer.invoke('ideas-upsert', idea),
+    delete: id => electron_1.ipcRenderer.invoke('ideas-delete', id),
+    onChange: callback => listen('ideas-change', callback),
+  },
   howmany: {
     export: () => electron_1.ipcRenderer.invoke('howmany-export'),
     analyze: force => electron_1.ipcRenderer.invoke('howmany-analyze', force),

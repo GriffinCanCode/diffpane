@@ -1,0 +1,204 @@
+.workspace {
+  --workspace-ideas: 0px;
+  --workspace-files: 270px;
+  --workspace-right: 368px;
+  --workspace-rightHeight: 250px;
+  --workspace-ideas-divider: 0px;
+  --workspace-files-divider: 0px;
+  --workspace-right-divider: 0px;
+  display: grid;
+  grid-template-columns:
+    [ideas] var(--workspace-ideas) [ideas-split] var(--workspace-ideas-divider)
+    [files] var(--workspace-files) [files-split] var(--workspace-files-divider)
+    [code] minmax(0, 1fr)
+    [right-split] var(--workspace-right-divider) [right] var(--workspace-right);
+  grid-template-rows: [code] minmax(0, 1fr);
+  transition:
+    grid-template-columns 170ms cubic-bezier(0.18, 0.78, 0.35, 1),
+    grid-template-rows 170ms cubic-bezier(0.18, 0.78, 0.35, 1);
+}
+
+.workspace > :is(#ideas-panel, #sidebar, .workbench, #claude-panel, #review-notes-panel) {
+  grid-row: code;
+  min-width: 0;
+  min-height: 0;
+}
+
+.workspace > #ideas-panel {
+  grid-column: ideas;
+}
+
+.workspace > #sidebar {
+  grid-column: files;
+}
+
+.workspace > .workbench {
+  grid-column: code;
+}
+
+.workspace > :is(#claude-panel, #review-notes-panel) {
+  grid-column: right;
+  position: static;
+  z-index: auto;
+  width: auto;
+  border-inline-start: 0;
+  box-shadow: none;
+  overflow: hidden;
+}
+
+.workspace.workspace-stacked {
+  grid-template-columns:
+    [ideas] var(--workspace-ideas) [ideas-split] var(--workspace-ideas-divider)
+    [files] var(--workspace-files) [files-split] var(--workspace-files-divider)
+    [code] minmax(0, 1fr);
+  grid-template-rows:
+    [code] minmax(0, 1fr) [right-split] var(--workspace-right-divider)
+    [right] var(--workspace-rightHeight);
+}
+
+.workspace-stacked > :is(#ideas-panel, #sidebar) {
+  grid-row: 1 / -1;
+}
+
+.workspace-stacked > :is(#claude-panel, #review-notes-panel) {
+  grid-column: code;
+  grid-row: right;
+}
+
+.workspace-splitter {
+  --splitter-accent: light-dark(#386c8a, #9abfe1);
+  --splitter-border: light-dark(#c7cfd6, #373b40);
+  --splitter-x: var(--splitter-pull, 0px);
+  --splitter-y: 0px;
+  display: grid;
+  grid-row: code;
+  place-items: center;
+  position: relative;
+  isolation: isolate;
+  z-index: 2;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+  outline: 0;
+}
+
+.workspace-splitter[data-column='ideas'] {
+  grid-column: ideas-split;
+}
+
+.workspace-splitter[data-column='files'] {
+  grid-column: files-split;
+}
+
+.workspace-splitter[data-column='right'] {
+  grid-column: right-split;
+}
+
+.workspace-stacked > .workspace-splitter:not([data-column='right']) {
+  grid-row: 1 / -1;
+}
+
+.workspace-stacked > .workspace-splitter[data-column='right'] {
+  --splitter-x: 0px;
+  --splitter-y: var(--splitter-pull, 0px);
+  grid-column: code;
+  grid-row: right-split;
+  cursor: row-resize;
+}
+
+.workspace-splitter::before {
+  position: absolute;
+  inset: 0 -2px;
+  content: '';
+}
+
+.workspace-splitter[aria-orientation='horizontal']::before {
+  inset: -2px 0;
+}
+
+.workspace-splitter::after {
+  position: absolute;
+  width: 1px;
+  height: 100%;
+  background: var(--splitter-border);
+  transform: translate(var(--splitter-x), var(--splitter-y));
+  transition:
+    background-color 130ms ease-out,
+    transform 290ms cubic-bezier(0.3, 1.65, 0.45, 1);
+  pointer-events: none;
+  content: '';
+}
+
+.workspace-splitter span {
+  z-index: 1;
+  width: 3px;
+  height: 25px;
+  border-radius: 4px;
+  background: color-mix(in oklab, var(--splitter-border), var(--splitter-accent) 33%);
+  opacity: 0;
+  transform: translate(var(--splitter-x), var(--splitter-y));
+  transition:
+    background-color 130ms ease-out,
+    opacity 130ms ease-out,
+    width 130ms ease-out,
+    height 130ms ease-out,
+    transform 290ms cubic-bezier(0.3, 1.65, 0.45, 1);
+  pointer-events: none;
+}
+
+.workspace-splitter[aria-orientation='horizontal']::after {
+  width: 100%;
+  height: 1px;
+}
+
+.workspace-splitter[aria-orientation='horizontal'] span {
+  width: 25px;
+  height: 3px;
+}
+
+.workspace-splitter:is(:hover, :focus-visible, .is-dragging)::after {
+  background: color-mix(in oklab, var(--splitter-border), var(--splitter-accent) 55%);
+}
+
+.workspace-splitter:is(:hover, :focus-visible, .is-dragging) span {
+  width: 5px;
+  height: 44px;
+  background: var(--splitter-accent);
+  opacity: 1;
+}
+
+.workspace-splitter[aria-orientation='horizontal']:is(:hover, :focus-visible, .is-dragging) span {
+  width: 44px;
+  height: 5px;
+}
+
+.workspace-splitter.is-dragging::after,
+.workspace-splitter.is-dragging span,
+[data-workspace-resizing] .workspace {
+  transition: none;
+}
+
+[data-workspace-resizing='column'],
+[data-workspace-resizing='column'] * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
+[data-workspace-resizing='row'],
+[data-workspace-resizing='row'] * {
+  cursor: row-resize !important;
+  user-select: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace,
+  .workspace-splitter::after,
+  .workspace-splitter span {
+    transition: none;
+  }
+
+  .workspace-splitter {
+    --splitter-x: 0px;
+    --splitter-y: 0px;
+  }
+}

@@ -11,6 +11,8 @@ import EditorWorker from 'monaco-editor/editor/editor.worker.js?worker';
 import './style.css';
 import { createFilePicker } from './files.ts';
 import { createReviewNotes } from './review-notes.ts';
+import { mountIdeaBuilder } from './ideas.ts';
+import { createWorkspaceLayout } from './workspace-layout.ts';
 import { captureReviewLines, locateReviewLines } from '../review-notes.ts';
 import { projectIcon } from './icons.ts';
 import { createNavigator } from './navigator.js';
@@ -43,6 +45,7 @@ const icons = {
   review:
     '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m2.5 5 1 1 2-2m-3 6 1 1 2-2M8 5h5.5M8 10h5.5" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   note: '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3.5 2.5h9a1 1 0 0 1 1 1v6L9.5 13.5h-6a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1Z" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round"/><path d="M9.5 13.5v-3a1 1 0 0 1 1-1h3M5 5.5h6M5 8h3" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"/></svg>',
+  idea: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.6 10.4c0-1.4-1.7-1.9-1.7-4a4.1 4.1 0 0 1 8.2 0c0 2.1-1.7 2.6-1.7 4m-4.8 0h4.8m-4 2.1h3.2m-2.5 1.8h1.8"/></svg>',
   settings:
     '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" aria-hidden="true"><path d="m6.5 1.5-.3 1.7-1.1.6-1.6-.6-1.5 2.6 1.3 1.1v1.2L2 9.2l1.5 2.6 1.6-.6 1.1.6.3 1.7h3l.3-1.7 1.1-.6 1.6.6L14 9.2l-1.3-1.1V6.9L14 5.8l-1.5-2.6-1.6.6-1.1-.6-.3-1.7z"/><circle cx="8" cy="7.5" r="2"/></svg>',
   claude:
@@ -61,18 +64,19 @@ app.innerHTML = `
     <div class="project"><span id="project-name">Diffpane</span><span id="project-path"></span></div>
     <span class="branch" hidden>${icons.branch}<span id="branch-name"></span></span>
     <div class="titlebar-actions">
+      <button type="button" id="ideas-toggle" class="titlebar-button" aria-label="Idea Builder" aria-controls="ideas-panel" aria-expanded="false" aria-keyshortcuts="Meta+Shift+I Control+Shift+I" title="Idea Builder · ⌘⇧I" hidden>${icons.idea}<span>Ideas</span></button>
       <button type="button" id="review-toggle" class="titlebar-button review-toggle" aria-label="Review changes" aria-controls="change-review" aria-pressed="false" aria-keyshortcuts="Meta+Shift+G Control+Shift+G" title="Review changes · ⌘⇧G" hidden>${icons.review}<span>Changes</span><span class="review-count" aria-hidden="true"></span></button>
       <button type="button" id="review-notes-toggle" class="titlebar-button" aria-label="Review notes" aria-controls="review-notes-panel" aria-expanded="false" aria-keyshortcuts="Meta+Shift+J Control+Shift+J" title="Review notes · ⌘⇧J" hidden>${icons.note}<span>Notes</span><span class="review-notes-count" aria-hidden="true" hidden></span></button>
-      <button type="button" id="claude-toggle" aria-controls="claude-panel" aria-expanded="false" aria-keyshortcuts="Meta+Shift+L Control+Shift+L" title="Claude · ⌘⇧L" hidden>${icons.claude}<span>Claude</span></button>
+      <button type="button" id="claude-toggle" aria-label="Claude" aria-controls="claude-panel" aria-expanded="false" aria-keyshortcuts="Meta+Shift+L Control+Shift+L" title="Claude · ⌘⇧L" hidden>${icons.claude}<span>Claude</span></button>
       <button type="button" id="settings-toggle" class="titlebar-button" aria-label="Settings" aria-haspopup="dialog" aria-controls="app-settings" title="Settings · ⌘," aria-keyshortcuts="Meta+, Control+,">${icons.settings}</button>
     </div>
   </header>
   <div class="workspace" id="workspace">
+    <aside id="ideas-panel" hidden></aside>
     <div id="sidebar" hidden>
       <aside id="navigator" hidden></aside>
       <aside id="change-review" hidden></aside>
     </div>
-    <div id="navigator-resize" role="separator" aria-label="Sidebar width" aria-orientation="vertical" tabindex="0" hidden></div>
     <section class="workbench">
   <div class="message" id="message" role="status" hidden></div>
   <main class="start-screen" id="start-screen" aria-labelledby="start-title" aria-busy="true">
@@ -89,13 +93,14 @@ app.innerHTML = `
 const ui = Object.fromEntries(
   [
     'workspace',
+    'ideas-panel',
+    'ideas-toggle',
     'sidebar',
     'change-review',
     'review-toggle',
     'review-notes-toggle',
     'review-notes-panel',
     'navigator',
-    'navigator-resize',
     'claude-panel',
     'claude-toggle',
     'settings-toggle',
@@ -119,6 +124,7 @@ const ui = Object.fromEntries(
   ].map(id => [id.replaceAll('-', '_'), document.getElementById(id)]),
 );
 const api = window.diffpane;
+const workspaceLayout = createWorkspaceLayout(ui.workspace);
 const cards = new Map();
 let snapshot = null;
 let openedFile = null;
@@ -130,11 +136,11 @@ let reviewVisible = false;
 let reviewScope = 'focus';
 const savedViews = new Map();
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
-const overlayNotes = matchMedia('(max-width: 1000px)');
 let recentVersion = 0;
 let recentSignature = '';
 let applyingAssistantPath = null;
 let applyingAssistantEdit = null;
+const ideaVisibilityKey = 'diffpane.ideas.visible';
 
 let activeScheme;
 const appearance = createAppearanceSettings((preferences, scheme) => {
@@ -285,7 +291,8 @@ window.addEventListener('focus', () => {
 
 function syncSaveState() {
   api.setSaveState(
-    Boolean(applyingAssistantEdit) || [...cards.values()].some(card => card.autosave?.pending),
+    Boolean(applyingAssistantEdit || ideas?.pending) ||
+      [...cards.values()].some(card => card.autosave?.pending),
   );
   syncReviewState();
 }
@@ -354,6 +361,7 @@ async function mutateFile(action, pathname, name) {
       cards.clear();
       openedFile = null;
       assistant?.setContext(Boolean(snapshot), null);
+      ideas?.refreshContext();
       if (action === 'rename')
         await openFile({ path: destination + previous.slice(pathname.length) });
       else {
@@ -375,6 +383,7 @@ const navigator = createNavigator(ui.navigator, api, openFile, {
   onReady: startBackgroundAnalysis,
   iconFor: projectIcon,
   onMutate: mutateFile,
+  onAttach: api.ideas ? path => attachIdeaLink({ path }) : undefined,
   languageFor: languageForPath,
   onPick: () => openFilePicker(),
   onFolder: () => api.openFolder(),
@@ -468,7 +477,64 @@ ui.review_notes_panel
   .querySelector('[data-review-action="save"]')
   ?.setAttribute('aria-keyshortcuts', 'Meta+Enter Control+Enter');
 
-async function openFile(file, { compare = false, anchor = null } = {}) {
+const ideas =
+  api?.ideas &&
+  mountIdeaBuilder(ui.ideas_panel, {
+    getWorkspace: () => snapshot?.root,
+    load: api.ideas.list,
+    save: api.ideas.upsert,
+    remove: api.ideas.delete,
+    onPendingChange: syncSaveState,
+    onClose: () => setIdeasVisible(false, true),
+    hasCurrentLink: () => Boolean(openedFile),
+    getCurrentLink: () => {
+      const card = cards.get(openedFile?.path);
+      return card ? captureIdeaLink(card) : null;
+    },
+    openLink: async link => {
+      const renamed = snapshot?.files.find(
+        file => (file.index === 'R' || file.worktree === 'R') && file.originalPath === link.path,
+      );
+      const anchor = {
+        ...link,
+        line: link.line ?? null,
+        endLine: link.endLine ?? link.line ?? null,
+        excerpt: link.excerpt ?? '',
+      };
+      const path = renamed?.path ?? link.path;
+      const root = snapshot.root.replaceAll('\\', '/').replace(/\/$/u, '');
+      const scope = (snapshot.scope ?? snapshot.root).replaceAll('\\', '/').replace(/\/$/u, '');
+      if (root !== scope && !`${root}/${path}`.startsWith(`${scope}/`))
+        throw new Error('Open the repository root to view this linked file.');
+      if (!(await openFile({ path }, { anchor, ideaLink: true })))
+        throw new Error('The linked file could not be opened.');
+    },
+    draftInChat: assistant ? idea => assistant.attachIdea(idea) : undefined,
+    openMarkdownFile: target => void openMarkdownTarget(target),
+    openExternal: api.openExternal,
+    media: api.media,
+    colorize: colorizeMarkdown,
+  });
+ui.ideas_toggle.addEventListener('click', () => setIdeasVisible(ui.ideas_panel.hidden, true));
+
+function setIdeasVisible(visible, focus = false, remember = true) {
+  if (!ideas || !snapshot || closingRequested) return;
+  ui.ideas_panel.hidden = !visible;
+  ui.ideas_toggle.setAttribute('aria-expanded', String(visible));
+  if (remember) localStorage.setItem(ideaVisibilityKey, String(visible));
+  if (focus) {
+    if (visible) ideas.focus();
+    else ui.ideas_toggle.focus();
+  }
+}
+
+function attachIdeaLink(link) {
+  if (!ideas || !snapshot || closingRequested) return;
+  setIdeasVisible(true);
+  ideas.attach(link);
+}
+
+async function openFile(file, { compare = false, anchor = null, ideaLink = false } = {}) {
   if (closingRequested || closed) return false;
   const version = ++navigationVersion;
   const current = cards.get(openedFile?.path);
@@ -484,6 +550,7 @@ async function openFile(file, { compare = false, anchor = null } = {}) {
   if (openedFile?.path === file.path && current) {
     navigator.select(file.path);
     current.pendingReviewAnchor = anchor;
+    current.anchorFromIdea = ideaLink;
     current.reviewNotice.hidden = true;
     if (anchor) {
       current.modeVersion = (current.modeVersion ?? 0) + 1;
@@ -527,6 +594,7 @@ async function openFile(file, { compare = false, anchor = null } = {}) {
   assistant?.setContext(Boolean(snapshot), file.path);
   const card = createCard(snapshot?.files.find(value => value.path === file.path) ?? file);
   card.pendingReviewAnchor = anchor;
+  card.anchorFromIdea = ideaLink;
   if (anchor) {
     card.comparing = anchor.side === 'head';
     card.markdownSource = card.comparing || anchor.line !== null;
@@ -535,6 +603,7 @@ async function openFile(file, { compare = false, anchor = null } = {}) {
   cards.set(file.path, card);
   card.active = true;
   ui.feed.replaceChildren(card.element);
+  ideas?.refreshContext();
   ui.empty_state.hidden = true;
   document.getElementById('save-state').textContent = 'Autosave on';
   navigator.select(file.path);
@@ -630,6 +699,24 @@ function showMarkdownOutline(card, list) {
   );
 }
 
+function colorizeMarkdown(code, language) {
+  const aliases = {
+    js: 'javascript',
+    ts: 'typescript',
+    sh: 'shell',
+    bash: 'shell',
+    yml: 'yaml',
+    py: 'python',
+  };
+  return monaco.editor.colorize(code, aliases[language] ?? language, {});
+}
+
+async function openMarkdownTarget(target) {
+  await openFile({ path: target.path });
+  const next = cards.get(target.path);
+  if (next) next.markdownAnchor = target.anchor;
+}
+
 function toggleNavigator() {
   if (!snapshot) return;
   setSidebarVisible(ui.sidebar.hidden);
@@ -645,7 +732,6 @@ function toggleReview() {
 
 function setSidebarVisible(visible) {
   ui.sidebar.hidden = !visible;
-  ui.navigator_resize.hidden = !visible;
   const showFiles = visible && !reviewVisible;
   if (showFiles !== !ui.navigator.hidden) navigator.toggle();
   const showReview = visible && reviewVisible;
@@ -656,38 +742,6 @@ function setSidebarVisible(visible) {
     ? 'Select a changed file from the review queue.'
     : 'Select a file in the explorer, or press ⌘P.';
 }
-let resizePointer = null;
-const resizeNavigator = width => {
-  const limit = Math.min(440, ui.workspace.clientWidth - 360);
-  const next = Math.max(180, Math.min(limit, width));
-  ui.workspace.style.setProperty('--navigator-width', `${next}px`);
-  ui.navigator_resize.setAttribute('aria-valuenow', String(Math.round(next)));
-};
-ui.navigator_resize.addEventListener('pointerdown', event => {
-  if (event.button !== 0 || resizePointer !== null) return;
-  ui.navigator_resize.setPointerCapture(event.pointerId);
-  resizePointer = event.pointerId;
-  document.body.classList.add('resizing-navigator');
-});
-ui.navigator_resize.addEventListener('pointermove', event => {
-  if (event.pointerId === resizePointer)
-    resizeNavigator(event.clientX - ui.workspace.getBoundingClientRect().left);
-});
-const stopResizing = event => {
-  if (event.pointerId !== resizePointer) return;
-  resizePointer = null;
-  document.body.classList.remove('resizing-navigator');
-};
-ui.navigator_resize.addEventListener('pointerup', stopResizing);
-ui.navigator_resize.addEventListener('pointercancel', stopResizing);
-ui.navigator_resize.addEventListener('lostpointercapture', stopResizing);
-ui.navigator_resize.addEventListener('keydown', event => {
-  if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
-  event.preventDefault();
-  resizeNavigator(
-    ui.sidebar.getBoundingClientRect().width + (event.key === 'ArrowLeft' ? -16 : 16),
-  );
-});
 
 function createCard(file) {
   const element = document.createElement('section');
@@ -741,6 +795,15 @@ function createCard(file) {
   element.querySelector('.file-directory').textContent = file.path.slice(0, slash + 1);
   element.querySelector('.file-name').textContent = file.path.slice(slash + 1);
   element.querySelector('.file-path').title = file.path;
+  if (ideas) {
+    const ideaButton = documentNode('button', 'change-button file-idea-link', '');
+    ideaButton.type = 'button';
+    ideaButton.title = 'Attach selection or visible lines to an idea';
+    ideaButton.setAttribute('aria-label', 'Attach current view to an idea');
+    ideaButton.innerHTML = icons.idea;
+    ideaButton.addEventListener('click', () => attachIdeaLink(captureIdeaLink(card)));
+    element.querySelector('.diff-toggle').after(ideaButton);
+  }
   element.querySelector('[aria-label="Next change in file"]').addEventListener('click', () => {
     if (!card.editor || card.changes.length === 0) return;
     card.changeIndex = (card.changeIndex + 1) % card.changes.length;
@@ -821,6 +884,11 @@ function applySnapshot(next) {
     setSidebarVisible(true);
     ui.review_toggle.hidden = false;
     reviewNotes?.setContext(true);
+    if (ideas) {
+      ui.ideas_toggle.hidden = false;
+      setIdeasVisible(localStorage.getItem(ideaVisibilityKey) !== 'false', false, false);
+      void ideas.load();
+    }
     document.querySelector('.branch').hidden = false;
     document.querySelector('.statusbar-end').hidden = false;
   }
@@ -897,7 +965,8 @@ async function loadDocument(card) {
       card.host.classList.add('has-error');
       if (card.pendingReviewAnchor) {
         card.pendingReviewAnchor = null;
-        reviewNotes?.notify('The saved note’s file could not be opened.');
+        if (card.anchorFromIdea) ideas?.notify('The linked file could not be opened.');
+        else reviewNotes?.notify('The saved note’s file could not be opened.');
       }
     }
   } finally {
@@ -1049,22 +1118,8 @@ function renderDocument(card, document) {
       },
       media: api.media,
       openExternal: api.openExternal,
-      onOpenFile: async target => {
-        await openFile({ path: target.path });
-        const next = cards.get(target.path);
-        if (next) next.markdownAnchor = target.anchor;
-      },
-      colorize: (code, language) => {
-        const aliases = {
-          js: 'javascript',
-          ts: 'typescript',
-          sh: 'shell',
-          bash: 'shell',
-          yml: 'yaml',
-          py: 'python',
-        };
-        return monaco.editor.colorize(code, aliases[language] ?? language, {});
-      },
+      onOpenFile: openMarkdownTarget,
+      colorize: colorizeMarkdown,
     });
     card.markdownAnchor = null;
     card.markdownText = text;
@@ -1196,6 +1251,25 @@ function selectionLines(selection) {
   return { line, endLine };
 }
 
+function captureIdeaLink(card, side = card.ideaSide ?? 'working') {
+  const editor = side === 'head' ? card.diffEditor?.getOriginalEditor() : card.editor;
+  const model = editor?.getModel();
+  const path = card.file.path;
+  if (!model) return { path };
+  const selection = editor.getSelection();
+  let lines;
+  if (selection && !selection.isEmpty()) lines = selectionLines(selection);
+  else {
+    // In a focused diff, a viewport can contain several noncontiguous ranges.
+    const [visible] = editor.getVisibleRanges();
+    if (!visible) return { path, side };
+    const line = visible.startLineNumber;
+    lines = { line, endLine: Math.min(visible.endLineNumber, line + 23) };
+  }
+  const { line, endLine } = lines;
+  return { path, side, ...lines, ...captureReviewLines(model, line, endLine) };
+}
+
 function captureReviewAnchor(card, side, includeLines = true) {
   const original = side === 'head';
   const editor = original ? card.diffEditor?.getOriginalEditor() : card.editor;
@@ -1228,8 +1302,6 @@ function revealReviewAnchor(card) {
   const anchor = card.pendingReviewAnchor;
   if (!anchor || !card.document || card.dirty) return;
   card.pendingReviewAnchor = null;
-  const overlay = overlayNotes.matches && !ui.review_notes_panel.hidden;
-  if (overlay) reviewNotes.close();
   if (anchor.line === null) return;
   const editor = anchor.side === 'head' ? card.diffEditor?.getOriginalEditor() : card.editor;
   const model = editor?.getModel();
@@ -1255,11 +1327,11 @@ function revealReviewAnchor(card) {
     }
   }
   editor.revealLineInCenter(location.line, monaco.editor.ScrollType.Immediate);
-  if (overlay && !globalThis.document.querySelector('dialog[open]')) editor.focus();
 }
 
 function showReviewLocation(card, message) {
-  if (ui.review_notes_panel.hidden) {
+  if (card.anchorFromIdea && !ui.ideas_panel.hidden) ideas?.notify(message);
+  else if (card.anchorFromIdea || ui.review_notes_panel.hidden) {
     card.reviewNotice.hidden = false;
     card.reviewNotice.textContent = message;
   } else reviewNotes?.notify(message);
@@ -1329,7 +1401,7 @@ function comparisonAriaLabels(card) {
 }
 
 function setCardEditor(card, state) {
-  for (const action of card.noteActions ?? []) action.dispose();
+  for (const action of card.contextActions ?? []) action.dispose();
   card.languageCleanup?.();
   card.languageCleanup = null;
   if (card.diffEditor) {
@@ -1379,26 +1451,49 @@ function setCardEditor(card, state) {
     card.functionDecorations = card.editor.createDecorationsCollection();
   } else card.editor = monaco.editor.create(card.host, editorOptions(card));
   card.noteSide = 'working';
-  if (reviewNotes) {
-    card.noteActions = [];
-    const bindNote = (editor, side) => {
-      card.noteActions.push(
+  card.ideaSide = 'working';
+  if (reviewNotes || ideas) {
+    card.contextActions = [];
+    const bindContext = (editor, side) => {
+      card.contextActions.push(
         editor.onDidFocusEditorText(() => {
           card.noteSide = side;
-        }),
-        editor.addAction({
-          id: `diffpane-add-review-note-${side}`,
-          label: 'Add review note',
-          contextMenuGroupId: 'navigation',
-          contextMenuOrder: 20,
-          run: () => {
-            if (!closingRequested) reviewNotes.openComposer(captureReviewAnchor(card, side));
-          },
+          card.ideaSide = side;
         }),
       );
+      if (reviewNotes)
+        card.contextActions.push(
+          editor.addAction({
+            id: `diffpane-add-review-note-${side}`,
+            label: 'Add review note',
+            contextMenuGroupId: 'navigation',
+            contextMenuOrder: 20,
+            run: () => {
+              if (!closingRequested) reviewNotes.openComposer(captureReviewAnchor(card, side));
+            },
+          }),
+        );
+      if (ideas) {
+        const surface = editor.getDomNode();
+        const selectSide = () => {
+          card.ideaSide = side;
+        };
+        surface?.addEventListener('wheel', selectSide, { passive: true });
+        card.contextActions.push(
+          { dispose: () => surface?.removeEventListener('wheel', selectSide) },
+          editor.onMouseDown(selectSide),
+          editor.addAction({
+            id: `diffpane-attach-idea-${side}`,
+            label: 'Attach selection or view to an idea',
+            contextMenuGroupId: 'navigation',
+            contextMenuOrder: 21,
+            run: () => attachIdeaLink(captureIdeaLink(card, side)),
+          }),
+        );
+      }
     };
-    bindNote(card.editor, 'working');
-    if (card.diffEditor) bindNote(card.diffEditor.getOriginalEditor(), 'head');
+    bindContext(card.editor, 'working');
+    if (card.diffEditor) bindContext(card.diffEditor.getOriginalEditor(), 'head');
   }
   card.decorationCollection = card.editor.createDecorationsCollection();
   card.languageCleanup = languageFeatures.attach(card.editor, card.model, card.file.path, {
@@ -1498,9 +1593,10 @@ function deactivate(card) {
 
 function releaseEditor(card) {
   if (!card.editor) return;
-  for (const action of card.noteActions ?? []) action.dispose();
-  card.noteActions = [];
+  for (const action of card.contextActions ?? []) action.dispose();
+  card.contextActions = [];
   card.noteSide = 'working';
+  card.ideaSide = 'working';
   card.contentCleanup?.dispose();
   card.contentCleanup = null;
   card.autosave = null;
@@ -1581,6 +1677,11 @@ document.addEventListener('keydown', event => {
     if (!event.repeat) assistant.toggle();
     return;
   }
+  if (event.shiftKey && !event.altKey && event.key.toLowerCase() === 'i' && ideas && snapshot) {
+    event.preventDefault();
+    if (!event.repeat) ui.ideas_toggle.click();
+    return;
+  }
   if (event.key.toLowerCase() === 'b') {
     event.preventDefault();
     toggleNavigator();
@@ -1601,6 +1702,10 @@ document.addEventListener('keydown', event => {
   }
   if (event.key.toLowerCase() === 's') {
     event.preventDefault();
+    if (ideas && ui.ideas_panel.contains(event.target)) {
+      void ideas.flush().catch(() => {});
+      return;
+    }
     void cards
       .get(openedFile?.path)
       ?.autosave?.flush()
@@ -1632,18 +1737,21 @@ if (!api) showError('The desktop connection is unavailable. Reopen diffpane from
 else {
   const resumeEditing = () => {
     closingRequested = false;
+    ideas?.setReadOnly(false);
     for (const card of cards.values()) applyEditorReadOnly(card);
     syncReviewState();
   };
   const unsubscribeResume = api.onResumeEditing(resumeEditing);
   const unsubscribeFlush = api.onFlushSaves(async () => {
     closingRequested = true;
+    ideas?.setReadOnly(true);
     for (const card of cards.values()) applyEditorReadOnly(card);
     syncReviewState();
     try {
       await Promise.all([
         ...[...cards.values()].map(card => card.autosave?.flush()),
         applyingAssistantEdit?.catch(() => {}),
+        ideas?.flush(),
       ]);
       syncSaveState();
       api.savesFlushed(true);
@@ -1652,6 +1760,7 @@ else {
       api.savesFlushed(false);
     }
   });
+  const unsubscribeIdeas = api.ideas?.onChange(change => ideas?.applyChange(change));
   api.rendererReady();
   const unsubscribePaths = subscribeLivePaths(api, paths => {
     const card = cards.get(openedFile?.path);
@@ -1694,6 +1803,9 @@ else {
       howmany.dispose();
       assistant?.dispose();
       reviewNotes?.dispose();
+      workspaceLayout.dispose();
+      unsubscribeIdeas?.();
+      ideas?.reset();
       if (snapshotFrame !== null) cancelAnimationFrame(snapshotFrame);
       if (documentFrame !== null) cancelAnimationFrame(documentFrame);
       navigator.dispose();

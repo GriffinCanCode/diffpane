@@ -1,5 +1,6 @@
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
+import { formatIdeaContext } from './idea-context.ts';
 import './assistant.css';
 
 const keyUrl = 'https://platform.claude.com/settings/keys';
@@ -58,6 +59,7 @@ export function createAssistant(
     <p class="claude-notice" role="status" hidden></p>
     <form class="claude-composer">
       <p class="claude-context" hidden></p>
+      <div class="claude-idea" hidden><span class="claude-idea-label"></span><button type="button" class="claude-icon" data-action="remove-idea" aria-label="Remove attached idea" title="Remove attached idea">${closeIcon}</button></div>
       <textarea aria-label="Message Claude" rows="3" maxlength="8000" placeholder="Ask about this codebase"></textarea>
       <div class="claude-composer-actions">
         <div class="claude-mode" role="group" aria-label="Request mode">
@@ -81,7 +83,7 @@ export function createAssistant(
       <label for="claude-api-key">API key</label>
       <input id="claude-api-key" type="password" autocomplete="off" spellcheck="false" maxlength="2048" placeholder="sk-ant-…" />
       <p class="claude-settings-hint">Use a workspace-scoped Claude API key. <a href="${keyUrl}">Get an API key</a></p>
-      <p class="claude-settings-hint">DiffPane encrypts the key using your system’s credential protection. Your prompts and relevant project files are sent to Claude when you send a message.</p>
+      <p class="claude-settings-hint">DiffPane encrypts the key using your system’s credential protection. When you send a message, Claude receives your prompt, any attached idea, and the project context it needs.</p>
       <p class="claude-settings-notice" role="status" hidden></p>
       <div class="claude-settings-actions">
         <button type="submit" class="claude-button claude-primary">Save API key</button>
@@ -99,6 +101,8 @@ export function createAssistant(
   const emptyText = empty.querySelector('p');
   const working = select('.claude-working');
   const context = select('.claude-context');
+  const ideaContext = select('.claude-idea');
+  const ideaLabel = select('.claude-idea-label');
   const notice = select('.claude-notice');
   const composer = select('.claude-composer');
   const promptInput = composer.querySelector('textarea');
@@ -121,26 +125,32 @@ export function createAssistant(
   let busy = '';
   let canceled = false;
   let pending = null;
+  let attachedIdea = null;
   let connectionGeneration = 0;
 
   function render() {
     const connected = connection?.configured === true;
+    const checkingConnection = !connection && checking;
     const hasTurns = turns.childElementCount > 0;
     const canChat = workspace && connected && !busy && !changingKey && !pending;
     empty.hidden = hasTurns;
-    emptyText.textContent =
-      !connection && checking
-        ? 'Checking Claude connection…'
-        : !connected
-          ? 'Connect Claude with an API key to get started.'
-          : !workspace
-            ? 'Open a file or folder to ask Claude about a project.'
-            : 'Ask about this project or switch to Edit to propose a small change.';
+    emptyText.toggleAttribute('data-loading-status', checkingConnection);
+    emptyText.textContent = checkingConnection
+      ? 'Checking Claude connection…'
+      : !connected
+        ? 'Connect Claude with an API key to get started.'
+        : !workspace
+          ? 'Open a file or folder to ask Claude about a project.'
+          : 'Ask about this project or switch to Edit to propose a small change.';
     action('connect').hidden = connected || checking;
     action('reset').disabled = (!hasTurns && !promptInput.value) || Boolean(busy) || changingKey;
     context.hidden = !path;
     context.textContent = path ? `Open file · ${path}` : '';
     context.title = path ?? '';
+    ideaContext.hidden = !attachedIdea;
+    ideaLabel.textContent = attachedIdea ? `Idea · ${attachedIdea.title}` : '';
+    ideaLabel.title = ideaLabel.textContent;
+    action('remove-idea').disabled = Boolean(busy) || changingKey;
     promptInput.disabled = !canChat;
     promptInput.placeholder =
       mode === 'edit' ? 'Describe a small change' : 'Ask about this codebase';
@@ -153,6 +163,7 @@ export function createAssistant(
     stop.hidden = busy !== 'send';
     stop.disabled = canceled;
     working.hidden = busy !== 'send';
+    working.toggleAttribute('data-loading-status', !working.hidden);
     working.textContent = canceled ? 'Stopping…' : 'Claude is working…';
     if (pending)
       for (const button of pending.controls.querySelectorAll('button'))
@@ -162,6 +173,7 @@ export function createAssistant(
     saveKey.textContent = connected ? 'Replace API key' : 'Save API key';
     removeKey.hidden = !connected;
     removeKey.disabled = checking || changingKey || Boolean(busy);
+    settingsStatus.toggleAttribute('data-loading-status', changingKey || checking);
     settingsStatus.textContent = changingKey
       ? 'Updating API key…'
       : checking
@@ -179,7 +191,7 @@ export function createAssistant(
     conversation.scrollTop = conversation.scrollHeight;
   }
 
-  function addTurn(author, text) {
+  function addTurn(author, text, idea) {
     const turn = node('article', 'claude-turn');
     turn.dataset.author = author;
     const label = node('h3', 'claude-author', author);
@@ -218,6 +230,7 @@ export function createAssistant(
       });
     } else body.textContent = text;
     turn.append(label, body);
+    if (idea) turn.append(node('p', 'claude-context claude-turn-idea', `Idea · ${idea.title}`));
     turns.append(turn);
     return turn;
   }
@@ -314,9 +327,10 @@ export function createAssistant(
     void checkConnection();
   }
 
-  function clearConversation() {
+  function clearConversation(keepIdea = false) {
     pending = null;
     promptInput.value = '';
+    if (!keepIdea) attachedIdea = null;
     turns.replaceChildren();
     showNotice(notice, '');
   }
@@ -324,7 +338,7 @@ export function createAssistant(
   const unsubscribeReset = claude.onReset(status => {
     connectionGeneration++;
     connection = status;
-    clearConversation();
+    clearConversation(true);
     render();
   });
 
@@ -350,12 +364,18 @@ export function createAssistant(
     event.preventDefault();
     if (send.disabled || busy) return;
     const prompt = promptInput.value.trim();
-    const request = { prompt, path: path ?? undefined, proposeEdits: mode === 'edit' };
+    const idea = attachedIdea;
+    const request = {
+      prompt,
+      path: path ?? undefined,
+      proposeEdits: mode === 'edit',
+      ideaContext: idea?.context,
+    };
     const generation = connectionGeneration;
     busy = 'send';
     canceled = false;
     showNotice(notice, '');
-    const turn = addTurn('You', prompt);
+    const turn = addTurn('You', prompt, idea);
     promptInput.value = '';
     render();
     scrollToLatest();
@@ -369,6 +389,7 @@ export function createAssistant(
       }
       const response = await claude.send(request);
       if (generation !== connectionGeneration) return;
+      attachedIdea = null;
       if (response.text) addTurn('Claude', response.text);
       if (response.proposal) showProposal(response.proposal);
     } catch (error) {
@@ -390,6 +411,11 @@ export function createAssistant(
 
   toggle.addEventListener('click', () => togglePanel());
   action('close').addEventListener('click', () => togglePanel(false));
+  action('remove-idea').addEventListener('click', () => {
+    attachedIdea = null;
+    render();
+    (promptInput.disabled ? action('settings') : promptInput).focus();
+  });
   for (const name of ['settings', 'connect']) action(name).addEventListener('click', openSettings);
   action('reset').addEventListener('click', async () => {
     busy = 'reset';
@@ -449,6 +475,16 @@ export function createAssistant(
   render();
   toggle.hidden = false;
   return {
+    attachIdea(idea) {
+      if (busy || changingKey) throw new Error('Wait for Claude to finish, then add the idea.');
+      attachedIdea = {
+        title: idea.title.trim() || 'Untitled idea',
+        context: formatIdeaContext(idea),
+      };
+      showNotice(notice, '');
+      render();
+      togglePanel(true);
+    },
     setContext(hasWorkspace, activePath) {
       if (workspace === hasWorkspace && path === activePath) return;
       workspace = hasWorkspace;

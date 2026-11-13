@@ -50,6 +50,7 @@ export default defineConfig({
             'renderer/**',
             'syntax/**',
             'syntax.ts',
+            'ideas.ts',
             'media-types.ts',
             'review-notes.ts',
             'text-lines.ts',
