@@ -8,7 +8,9 @@ import {
 import { requestClaude } from './claude-api.mjs'
 import { claudeVisiblePath } from './claude-workspace.mjs'
 
-const system = `You are Claude, a coding and planning partner inside Diffpane. Help the user understand the open Git workspace, reason through their changes, and turn ideas into concrete next steps. Answer the question they asked. Lead with the answer or finding, then give relevant evidence and a short next step when useful.
+const system = `You are The Creature. You live in the user's code and help them figure things out. Call yourself "the creature" when referring to yourself, as in "Creature found where this breaks." Speak like a friendly caveman: short sentences, plain words, and occasional dropped articles. Keep technical terms, code, and file references precise. Diffpane adds "I am the creature." at the end of every completed reply. Leave that sign-off to Diffpane.
+
+Help the user understand the open Git workspace, reason through their changes, and turn ideas into concrete next steps. Answer the question they asked. Lead with the answer or finding, then give relevant evidence and a short next step when useful.
 
 The editor and Idea Workspace references in a message are pointers, not content. If the user refers to this file, selection, or idea, inspect the reference first. Read the smallest relevant range. Cite code with clickable Markdown links such as [src/file.ts:12](src/file.ts#L12) or [src/file.ts:12–20](src/file.ts#L12-L20). For HEAD use [src/file.ts:12 (HEAD)](src/file.ts?side=head#L12). Use exact repository-relative paths and URL-encode spaces. For general questions, answer directly without looking through files. Use list_files and list_ideas to locate specific material rather than reading everything.
 
@@ -352,11 +354,11 @@ export class ClaudeSession {
    * @param {(activity: ClaudeActivity) => void} [onActivity]
    */
   async send(input, getKey, workspace, onActivity) {
-    if (this.#controller || this.#applying) throw new Error('Claude is still working.')
+    if (this.#controller || this.#applying) throw new Error('The Creature is still working.')
     if (this.#proposal) throw new Error('Apply or discard the proposal first.')
     const prompt = isRecord(input) && typeof input.prompt === 'string' ? input.prompt.trim() : ''
     if (!prompt || prompt.length > 8000) throw new Error('Enter a message of up to 8,000 characters.')
-    if (!isRecord(input)) throw new Error('Invalid Claude message.')
+    if (!isRecord(input)) throw new Error('Invalid message.')
     const { ideaContext, ideaId, requestId } = input
     if (
       ideaContext !== undefined &&
@@ -531,7 +533,7 @@ export class ClaudeSession {
         if (text && !streamed) emit({ type: 'text', text, step })
         if (reply.stopReason !== 'tool_use') {
           const proposed = reply.stopReason === 'end_turn' ? proposal : undefined
-          const fallback = proposed ? 'Review the proposal below.' : 'Claude returned no answer.'
+          const fallback = proposed ? 'Creature has a change for you to look at.' : 'Creature has no answer this time.'
           return finish(text || fallback, step, proposed)
         }
         const { calls } = reply
@@ -572,14 +574,14 @@ export class ClaudeSession {
       }
       return finish(
         proposal
-          ? 'Review the proposal below.'
-          : 'Claude reached the workspace inspection limit. Try narrowing your question or naming a file or idea.',
+          ? 'Creature has a change for you to look at.'
+          : 'Creature looked through as much as it could. Try a smaller question or name a file or idea.',
         maxSteps,
         proposal,
       )
     } catch (error) {
-      if (controller.signal.aborted) throw new Error('Claude request canceled.', { cause: error })
-      if (timeout.aborted) throw new Error('Claude took too long to respond. Try again.', { cause: error })
+      if (controller.signal.aborted) throw new Error('Request canceled.', { cause: error })
+      if (timeout.aborted) throw new Error('The Creature took too long to respond. Try again.', { cause: error })
       throw error
     } finally {
       if (this.#controller === controller) this.#controller = undefined

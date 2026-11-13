@@ -7,7 +7,7 @@ doc_radar:
 
 # Ideas notebook
 
-The workspace mounts this notebook and handles project links and Claude attachments. The panel maintains the active idea and saves notebook edits through the preload bridge.
+The workspace mounts this notebook and handles project links and ideas given to the Creature. The panel maintains the active idea and saves notebook edits through the preload bridge.
 
 - [`ideas.ts`](ideas.ts) — Owns idea selection, search, drafts, autosave, and attachments.
 - [`idea-editor.ts`](idea-editor.ts) — Mounts CodeMirror and wires notebook editing actions.

@@ -84,8 +84,8 @@ export class ClaudeCredentials {
       return result
     } catch (error) {
       if (error instanceof Error && 'code' in error && error.code === 'ENOENT')
-        throw new Error('Add an API key in Claude settings first.', { cause: error })
-      throw new Error('Could not unlock the saved Claude key. Replace it in Claude settings.', { cause: error })
+        throw new Error('Add an API key in Creature settings first.', { cause: error })
+      throw new Error('Could not unlock the saved Claude key. Replace it in Creature settings.', { cause: error })
     } finally {
       await handle?.close().catch(() => {})
     }

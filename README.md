@@ -35,21 +35,21 @@ Open **Search** with ⌘⇧F to find text across the project. Choose **Changed f
 
 Open **Notes** from the title bar or press ⌘⇧J by default. Right-click in the editor and choose **Add review note** to capture the current line or selection, including on the HEAD side of a comparison. Use the file header’s note button for a whole file, or choose **Make project note** for feedback without a file. Notes stay on this Mac across restarts. Select a note’s location to return to the captured lines. If they moved, Diffpane looks for a unique match and tells you when the original lines can’t be located. Choose **Copy handoff** to paste your open notes, file references, and captured excerpts into any agent chat.
 
-Open **Ideas** with ⌘⇧I to see a searchable project notebook. Markdown formats as you type, and lists continue when you press Enter. Use **Format text** to apply common styles, or ⌘-click a link in the note to open it. Choose **Dock beside code** to keep an idea visible while you work. Drop a project file onto an idea or choose **Link current file or selection** to attach code. **Add to Claude** makes the idea available on your next message. Ideas autosave locally and are shared by windows on the same Git worktree.
+Open **Ideas** with ⌘⇧I to see a searchable project notebook. Markdown formats as you type, and lists continue when you press Enter. Use **Format text** to apply common styles, or ⌘-click a link in the note to open it. Choose **Dock beside code** to keep an idea visible while you work. Drop a project file onto an idea or choose **Link current file or selection** to attach code. Choose **Give to the Creature** to attach the idea to your next message. Ideas autosave locally and are shared by windows on the same Git worktree.
 
-Drag the dividers to resize Ideas, File Explorer, code, and Claude or Review Notes. With a divider focused, use the arrow keys to resize. Double-click a divider to reset its size. Diffpane remembers your layout.
+Drag the dividers to resize Ideas, File Explorer, code, and the Creature or Review Notes. With a divider focused, use the arrow keys to resize. Double-click a divider to reset its size. Diffpane remembers your layout.
 
 Ideas, review notes, recent paths, keyboard shortcuts, and appearance and layout settings are saved locally in an encrypted database. On macOS, Keychain protects the encryption key. Existing settings and notes are imported automatically on upgrade.
 
 It also includes a file picker, language tools, line counts, and previews for images, audio, video, and PDFs.
 
-## Claude in Diffpane
+## The Creature
 
-Open **Claude** and select **Claude settings**. Paste a workspace-scoped Claude API key and save it. Diffpane verifies the key before saving it and uses macOS Keychain-backed encryption for the local copy. You can remove the key from the same settings. [Create a Claude API key](https://platform.claude.com/settings/keys)
+The Creature lives in your code and helps you figure things out. Open **The Creature** and select **Creature settings**. Paste a workspace-scoped Claude API key and save it. Diffpane verifies the key before saving it and uses macOS Keychain-backed encryption for the local copy. You can remove the key from the same settings. [Create a Claude API key](https://platform.claude.com/settings/keys)
 
-Use **Ask** to talk through code or find and read ideas. The composer shows the open file and the selected or visible lines Claude can read. Click the file chip to remove that context from your message. Replies stream as Claude works. Expand an activity row to see what it inspected, or follow a file reference to jump to the relevant lines.
+Use **Ask** to talk through code or find and read ideas. The composer shows the open file and the selected or visible lines the Creature can read. Click the file chip to remove that context from your message. Expand an activity row to see what the Creature inspected, or follow a file reference to jump to the relevant lines.
 
-In **Edit** mode, Claude can propose a small file edit, create an idea, or revise an existing idea. Preview the change in chat and choose whether to apply or discard it. If the source changed after Claude read it, request a fresh proposal.
+In **Edit** mode, the Creature can propose a small file edit, create an idea, or revise an existing idea. Preview the change in the conversation and choose whether to apply or discard it. If the source changed after the Creature read it, request a fresh proposal.
 
 Diffpane calls Claude Haiku directly. Your prompts, context references, and the file or idea excerpts Claude requests go to Anthropic and use your API workspace. Chat history lasts for the window session.
 

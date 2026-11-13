@@ -4,7 +4,7 @@ const API_VERSION = '2026-10-21'
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 
 const API_ERRORS = new Map([
-  [401, 'Claude rejected the API key. Check it in Claude settings.'],
+  [401, 'Claude rejected the API key. Check it in Creature settings.'],
   [402, 'Claude reported a billing issue. Check billing in the Claude Console.'],
   [403, 'This API key cannot access Claude Haiku. Check its workspace permissions.'],
   [404, 'Claude Haiku is unavailable for this API key.'],
@@ -26,7 +26,7 @@ function isRecord(value) {
 
 /** @param {AbortSignal | undefined} signal @param {AbortSignal} timeout @param {string} fallback */
 function requestFailure(signal, timeout, fallback) {
-  if (signal?.aborted) return new DOMException('Claude request canceled.', 'AbortError')
+  if (signal?.aborted) return new DOMException('Request canceled.', 'AbortError')
   if (timeout.aborted) return new Error('Claude took too long to respond. Try again.')
   return new Error(fallback)
 }

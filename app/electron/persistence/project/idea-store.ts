@@ -170,7 +170,7 @@ export class IdeaStore {
         previous.title === expected.title &&
         previous.body === expected.body
       if (expected ? !matches : previous !== undefined) {
-        throw new Error('This idea changed after Claude read it. Discard the proposal and request a new one.')
+        throw new Error('This idea changed after The Creature read it. Discard the proposal and request a new one.')
       }
       const saved = previous
         ? readIdea({ ...previous, title: idea.title, body: idea.body, updatedAt: idea.updatedAt })

@@ -36,6 +36,7 @@ import { createNavigator } from '../../explorer/tree/navigator.js'
 import { createHowMany } from '../../panels/analysis/howmany.js'
 import { codeAppearance, createAppearanceSettings, diffAppearance } from '../../panels/appearance/appearance.ts'
 import { createAssistant } from '../../panels/assistant/assistant.js'
+import { creatureGlyph } from '../../panels/assistant/creature-glyph.ts'
 import { mountIdeaBuilder } from '../../panels/ideas/ideas.ts'
 import { createSettings } from '../../panels/settings/settings.js'
 import '../../editor/documents/document-preview.css'
@@ -148,8 +149,6 @@ const icons = {
   settings:
     '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" aria-hidden="true"><path d="m6.5 1.5-.3 1.7-1.1.6-1.6-.6-1.5 2.6 1.3 1.1v1.2L2 9.2l1.5 2.6 1.6-.6 1.1.6.3 1.7h3l.3-1.7 1.1-.6 1.6.6L14 9.2l-1.3-1.1V6.9L14 5.8l-1.5-2.6-1.6.6-1.1-.6-.3-1.7z"/><circle cx="8" cy="7.5" r="2"/></svg>',
   idea: '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="2.5" width="11.5" height="13" rx="2"/><path d="M7 2.5v13M2 6h3m-3 6h3m4.5-5h3m-3 3h2"/></svg>',
-  claude:
-    '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M5 3.2h6A2.8 2.8 0 0 1 13.8 6v2.6A2.8 2.8 0 0 1 11 11.4H7l-3.2 2v-2.3a2.8 2.8 0 0 1-1.6-2.5V6A2.8 2.8 0 0 1 5 3.2Z" stroke="currentColor" stroke-linejoin="round"/><path d="M5.5 7.3h5" stroke="currentColor" stroke-linecap="round"/></svg>',
   file: '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M9.5 1.8H4a1 1 0 0 0-1 1v10.4a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V5.3l-3.5-3.5Z" stroke="currentColor" stroke-width="1.15"/><path d="M9 2v4h4" stroke="currentColor" stroke-width="1.15"/></svg>',
   folder:
     '<svg viewBox="0 0 48 48" fill="none" aria-hidden="true"><path d="M5 12a4 4 0 0 1 4-4h10l5 5h15a4 4 0 0 1 4 4v19a4 4 0 0 1-4 4H9a4 4 0 0 1-4-4V12Z" fill="currentColor" opacity=".22"/><path d="M5 19a4 4 0 0 1 4-4h30a4 4 0 0 1 4 4v17a4 4 0 0 1-4 4H9a4 4 0 0 1-4-4V19Z" fill="currentColor" opacity=".72"/><path d="M9 15h30a4 4 0 0 1 4 4v1H5v-1a4 4 0 0 1 4-4Z" fill="white" opacity=".12"/><path d="M10 33h12" stroke="white" stroke-opacity=".3" stroke-width="1.5" stroke-linecap="round"/></svg>',
@@ -168,7 +167,7 @@ app.innerHTML = `
       <button type="button" id="content-search-toggle" class="titlebar-button" aria-label="Search in project" aria-haspopup="dialog" aria-controls="content-search" hidden>${icons.search}<span>Search</span></button>
       <button type="button" id="review-toggle" class="titlebar-button" aria-label="Review changes" aria-controls="change-review" aria-pressed="false" data-pending="false" hidden>${icons.review}<span>Changes</span></button>
       <button type="button" id="review-notes-toggle" class="titlebar-button" aria-label="Review notes" aria-controls="review-notes-panel" aria-expanded="false" hidden>${icons.note}<span>Notes</span><span class="review-notes-count" aria-hidden="true" hidden></span></button>
-      <button type="button" id="claude-toggle" class="titlebar-button" aria-label="Claude" aria-controls="claude-panel" aria-expanded="false" hidden>${icons.claude}<span>Claude</span></button>
+      <button type="button" id="claude-toggle" class="titlebar-button" aria-label="The Creature" aria-controls="claude-panel" aria-expanded="false" hidden>${creatureGlyph}<span>The Creature</span></button>
       <button type="button" id="settings-toggle" class="titlebar-button" aria-label="Settings" aria-haspopup="dialog" aria-controls="app-settings" hidden>${icons.settings}</button>
     </div>
   </header>
@@ -2513,7 +2512,7 @@ function applyShortcutOverrides(overrides) {
     [ui.contentSearchToggle, 'searchProject', 'Search in project'],
     [ui.reviewToggle, 'reviewChanges', 'Review changes'],
     [ui.reviewNotesToggle, 'reviewNotes', 'Review notes'],
-    [ui.claudeToggle, 'toggleClaude', 'Claude'],
+    [ui.claudeToggle, 'toggleClaude', 'The Creature'],
     [ui.ideasToggle, 'toggleIdeas', 'Ideas'],
     [ui.navigator.querySelector('button[data-action="open-file"]'), 'searchFiles', 'Search files'],
     [ui.reviewNotesPanel.querySelector('button[data-review-action="save"]'), 'saveReviewNote', 'Save note'],

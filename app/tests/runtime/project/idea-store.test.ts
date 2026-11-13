@@ -142,7 +142,7 @@ test('legacy Idea Builder records migrate once with title, Markdown, and links i
   assert.deepEqual(await open().store.list('/project'), [])
 })
 
-test('Claude proposals preserve links and reject stale updates and duplicate drafts', async t => {
+test('The Creature’s proposals preserve links and reject stale updates and duplicate drafts', async t => {
   const { open } = await fixture(t)
   const { store: first } = open()
   const { store: second } = open()
@@ -153,10 +153,10 @@ test('Claude proposals preserve links and reject stale updates and duplicate dra
     ideas: [{ id: original.id, title: original.title }],
     truncated: false,
   })
-  const proposal = { ...original, body: 'Claude draft', links: [], updatedAt: 30 }
-  await assert.rejects(second.applyDraft('/project', proposal), /changed after Claude read it/u)
+  const proposal = { ...original, body: 'Draft proposal', links: [], updatedAt: 30 }
+  await assert.rejects(second.applyDraft('/project', proposal), /changed after The Creature read it/u)
   const saved = { ...proposal, links: original.links }
   assert.deepEqual(await second.applyDraft('/project', proposal, original), saved)
-  await assert.rejects(first.applyDraft('/project', proposal, original), /changed after Claude read it/u)
+  await assert.rejects(first.applyDraft('/project', proposal, original), /changed after The Creature read it/u)
   assert.deepEqual(await first.get('/project', original.id), saved)
 })

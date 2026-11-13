@@ -37,7 +37,7 @@ export const shortcuts = {
     scope: 'native',
   },
   toggleClaude: {
-    label: 'Toggle Claude panel',
+    label: 'Toggle the Creature panel',
     group: 'Window',
     defaultBinding: 'Primary+Shift+L',
     scope: 'window',

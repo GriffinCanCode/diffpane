@@ -3,6 +3,7 @@ import { attemptAsync } from '../../../shared/recovery/app-errors.ts'
 import { reportError, runTask } from '../../shell/recovery/errors.ts'
 import { requireElement } from '../../shell/workspace/dom.js'
 import { createEditProposal, createToolActivity, renderAssistantMarkdown } from './assistant-content.js'
+import { creatureGlyph } from './creature-glyph.ts'
 import './assistant.css'
 
 /**
@@ -17,8 +18,8 @@ import './assistant.css'
 /** @typedef {{id: string, turn: HTMLElement, reply: HTMLElement, sections: HTMLElement, working: HTMLElement, paragraphs: Map<number, ReplyText>, tools: Map<string, ReturnType<typeof createToolActivity>>, toolGroup?: ReturnType<typeof createToolActivity>, started: boolean, stopping: boolean}} SendState */
 
 const KEY_URL = 'https://platform.claude.com/settings/keys'
+const CREATURE_SIGN_OFF = 'I am the creature.'
 const ICONS = {
-  mark: '<path d="M8 1.75v12.5M1.75 8h12.5M3.6 3.6l8.8 8.8m0-8.8-8.8 8.8"/>',
   new: '<path d="M8 3.25v9.5m-4.75-4.75h9.5"/>',
   settings: '<path d="M2.75 4h10.5m-10.5 4h10.5m-10.5 4h10.5M5.25 2.5v3m5.5 1v3m-5.5 1v3"/>',
   close: '<path d="m4 4 8 8m0-8-8 8"/>',
@@ -85,11 +86,11 @@ export function createAssistant(
   container.setAttribute('aria-labelledby', 'claude-title')
   container.innerHTML = `
     <header class="claude-heading">
-      <h2 id="claude-title"><span class="claude-brand">${icon('mark')}</span>Claude</h2>
+      <h2 id="claude-title"><span class="claude-brand">${creatureGlyph}</span>The Creature</h2>
       <div class="claude-tools">
         <button type="button" class="claude-icon" data-action="reset" aria-label="New conversation" title="New conversation">${icon('new')}</button>
-        <button type="button" class="claude-icon" data-action="settings" aria-label="Claude settings" title="Claude settings" aria-haspopup="dialog">${icon('settings')}</button>
-        <button type="button" class="claude-icon" data-action="close" aria-label="Close Claude" title="Close Claude">${icon('close')}</button>
+        <button type="button" class="claude-icon" data-action="settings" aria-label="Creature settings" title="Creature settings" aria-haspopup="dialog">${icon('settings')}</button>
+        <button type="button" class="claude-icon" data-action="close" aria-label="Close the Creature panel" title="Close the Creature panel">${icon('close')}</button>
       </div>
     </header>
     <div class="claude-transcript">
@@ -97,7 +98,7 @@ export function createAssistant(
         <div class="claude-empty">
           <div class="claude-empty-scene" aria-hidden="true">
             <span class="claude-empty-file">${icon('file')}</span>
-            <span class="claude-empty-mark">${icon('mark')}</span>
+            <span class="claude-empty-mark">${creatureGlyph}</span>
           </div>
           <h3></h3>
           <p></p>
@@ -117,7 +118,7 @@ export function createAssistant(
           <div class="claude-context-chip claude-idea" hidden>${icon('idea')}<span></span><button type="button" class="claude-chip-remove" data-action="remove-idea" aria-label="Remove attached idea" title="Remove attached idea">${icon('close')}</button></div>
         </div>
         <div class="claude-input">
-          <textarea aria-label="Message Claude" rows="2" maxlength="8000" placeholder="Message Claude"></textarea>
+          <textarea aria-label="Message the Creature" rows="2" maxlength="8000" placeholder="What should I look into?"></textarea>
           <div class="claude-composer-actions">
             <div class="claude-mode" role="group" aria-label="Request mode">
               <button type="button" data-mode="ask" aria-pressed="true" title="Read files and ideas">Ask</button>
@@ -134,8 +135,8 @@ export function createAssistant(
   settings.setAttribute('aria-labelledby', 'claude-settings-title')
   settings.innerHTML = `
     <header class="claude-heading">
-      <h2 id="claude-settings-title"><span class="claude-brand">${icon('mark')}</span>Claude settings</h2>
-      <button type="button" class="claude-icon" aria-label="Close Claude settings">${icon('close')}</button>
+      <h2 id="claude-settings-title"><span class="claude-brand">${creatureGlyph}</span>Creature settings</h2>
+      <button type="button" class="claude-icon" aria-label="Close Creature settings">${icon('close')}</button>
     </header>
     <form>
       <p class="claude-settings-status" role="status"></p>
@@ -253,21 +254,23 @@ export function createAssistant(
     empty.hidden = hasTurns
     empty.toggleAttribute('data-checking', checkingConnection)
     emptyTitle.textContent = checkingConnection
-      ? 'Connecting to Claude…'
+      ? 'Checking connection…'
       : !connected
-        ? 'Connect Claude'
+        ? 'Meet the Creature'
         : !workspace
           ? 'Open a project to start'
           : context === 'idea'
-            ? 'Work through an idea'
-            : 'What are you working on?'
+            ? 'Let’s work through this idea'
+            : 'What are we figuring out?'
     emptyText.textContent = checkingConnection
       ? ''
       : !connected
-        ? 'Use your Claude API key to chat about your files and ideas.'
+        ? 'I live in your code. Set up a Claude API key so we can talk about it.'
         : !workspace
-          ? 'Claude can read files and ideas in your open project.'
-          : ''
+          ? 'Open a project so I can look around.'
+          : context === 'idea'
+            ? ''
+            : 'I live in your code and help you figure things out.'
     emptyText.hidden = !emptyText.textContent
     action('connect').hidden = connected || checking
     renderStarters(canDraft && !hasTurns ? context : '')
@@ -293,8 +296,8 @@ export function createAssistant(
       : mode === 'edit'
         ? 'Describe a change'
         : attachedIdea
-          ? 'Ask about this idea'
-          : 'Message Claude'
+          ? 'What should I look for in this idea?'
+          : 'What should I look into?'
     for (const button of modes) {
       button.disabled = !canDraft || locked
       button.setAttribute('aria-pressed', String(button.dataset.mode === mode))
@@ -384,9 +387,9 @@ export function createAssistant(
     turns.append(turn)
 
     const reply = node('article', 'claude-turn')
-    reply.dataset.author = 'Claude'
+    reply.dataset.author = 'The Creature'
     const title = node('h3', 'claude-author')
-    title.innerHTML = `<span class="claude-brand">${icon('mark')}</span>Claude`
+    title.innerHTML = `<span class="claude-brand">${creatureGlyph}</span>The Creature`
     const sections = node('div', 'claude-reply-sections')
     const working = node('div', 'claude-working', 'Thinking…')
     working.setAttribute('data-loading-status', '')
@@ -456,8 +459,8 @@ export function createAssistant(
   /** @param {Proposal} proposal @param {HTMLElement} sections */
   function showProposal(proposal, sections) {
     const { card, controls } = createEditProposal(proposal, {
-      onApply: () => runTask('Apply Claude proposal', () => resolveProposal(true)),
-      onDiscard: () => runTask('Discard Claude proposal', () => resolveProposal(false)),
+      onApply: () => runTask('Apply proposal', () => resolveProposal(true)),
+      onDiscard: () => runTask('Discard proposal', () => resolveProposal(false)),
       onOpenFile: openFile,
       openExternal,
       colorize,
@@ -477,7 +480,7 @@ export function createAssistant(
     render()
     try {
       const result = await attemptAsync(() => (apply ? applyEdit(proposal) : claude.discard(proposal.id)), {
-        operation: apply ? 'Apply Claude proposal' : 'Discard Claude proposal',
+        operation: apply ? 'Apply proposal' : 'Discard proposal',
       })
       if (generation !== connectionGeneration) return
       if (!result.ok) {
@@ -529,7 +532,7 @@ export function createAssistant(
     render()
     try {
       const result = await attemptAsync(() => claude.status(), {
-        operation: 'Check Claude connection',
+        operation: 'Check Creature connection',
       })
       if (generation !== connectionGeneration) return
       if (result.ok) connection = result.value
@@ -546,12 +549,12 @@ export function createAssistant(
     container.hidden = !open
     toggle.setAttribute('aria-expanded', String(open))
     if (open) {
-      runTask('Open Claude panel', () => onOpen?.())
+      runTask('Open the Creature panel', () => onOpen?.())
       render()
       resizeDraft()
       updateScroll()
       focusDraft()
-      runTask('Check Claude connection', checkConnection)
+      runTask('Check Creature connection', checkConnection)
     } else if (restoreFocus) toggle.focus()
   }
 
@@ -561,7 +564,7 @@ export function createAssistant(
     showNotice(settingsNotice)
     settings.showModal()
     if (!keyInput.disabled) keyInput.focus()
-    runTask('Check Claude connection', checkConnection)
+    runTask('Check Creature connection', checkConnection)
   }
 
   function clearConversation(keepIdea = false) {
@@ -643,7 +646,7 @@ export function createAssistant(
     activeSend = state
     busy = 'send'
     showNotice(notice)
-    announcement.textContent = 'Claude is responding.'
+    announcement.textContent = 'The Creature is thinking.'
     promptInput.value = ''
     render()
     resizeDraft()
@@ -656,7 +659,7 @@ export function createAssistant(
           state.started = true
           return claude.send(request)
         },
-        { operation: 'Send message to Claude' },
+        { operation: 'Send message' },
       )
       if (generation !== connectionGeneration) return
       state.working.hidden = true
@@ -664,12 +667,14 @@ export function createAssistant(
       if (result.ok && result.value) {
         const response = result.value
         const step = response.step
-        if (response.text && state.paragraphs.get(step)?.text !== response.text) {
-          addReplyText(state, step, response.text, false)
+        const text = response.text.replace(/(?:^|\s+)I am the creature\.$/u, '')
+        if ((text || state.paragraphs.has(step)) && state.paragraphs.get(step)?.text !== text) {
+          addReplyText(state, step, text, false)
         }
         if (response.proposal) showProposal(response.proposal, state.sections)
+        state.sections.append(node('div', 'claude-turn-content', CREATURE_SIGN_OFF))
         attachedIdea = null
-        announcement.textContent = response.proposal ? 'Claude’s proposal is ready to review.' : 'Claude replied.'
+        announcement.textContent = response.proposal ? 'Proposal ready to review.' : 'The Creature replied.'
       } else {
         const status = state.stopping ? 'Response stopped.' : 'Response interrupted.'
         announcement.textContent = status
@@ -703,7 +708,7 @@ export function createAssistant(
     busy = 'reset'
     render()
     try {
-      const result = await attemptAsync(() => claude.reset(), { operation: 'Reset Claude conversation' })
+      const result = await attemptAsync(() => claude.reset(), { operation: 'Reset conversation' })
       if (listeners.signal.aborted) return
       if (result.ok) clearConversation()
       else showFailure(notice, result.error)
@@ -723,7 +728,7 @@ export function createAssistant(
     render()
     updateScroll()
     if (!state.started) return
-    const result = await attemptAsync(() => claude.cancel(), { operation: 'Stop Claude response' })
+    const result = await attemptAsync(() => claude.cancel(), { operation: 'Stop response' })
     if (!result.ok && activeSend === state) {
       state.stopping = false
       state.working.textContent = 'Thinking…'
@@ -776,12 +781,8 @@ export function createAssistant(
     listenerOptions,
   )
   for (const name of ['settings', 'connect']) action(name).addEventListener('click', openSettings, listenerOptions)
-  action('reset').addEventListener(
-    'click',
-    () => runTask('Reset Claude conversation', resetConversation),
-    listenerOptions,
-  )
-  stop.addEventListener('click', () => runTask('Stop Claude response', stopResponse), listenerOptions)
+  action('reset').addEventListener('click', () => runTask('Reset conversation', resetConversation), listenerOptions)
+  stop.addEventListener('click', () => runTask('Stop response', stopResponse), listenerOptions)
   container.addEventListener(
     'keydown',
     event => {
@@ -807,7 +808,7 @@ export function createAssistant(
     'submit',
     event => {
       event.preventDefault()
-      runTask('Send message to Claude', sendMessage)
+      runTask('Send message', sendMessage)
     },
     listenerOptions,
   )
@@ -900,7 +901,7 @@ export function createAssistant(
       if (activeSend) {
         for (const paragraph of activeSend.paragraphs.values()) window.clearTimeout(paragraph.frame)
       }
-      if (activeSend?.started) runTask('Stop Claude response', () => claude.cancel(), { silent: true })
+      if (activeSend?.started) runTask('Stop response', () => claude.cancel(), { silent: true })
       activeSend = null
       settings.remove()
     },

@@ -14,6 +14,7 @@ import type { Result } from '../../../shared/recovery/app-errors.ts'
 import { markdownTarget } from '../../editor/markdown/markdown-paths.ts'
 import { reportError, runTask } from '../../shell/recovery/errors.ts'
 import { requireElement } from '../../shell/workspace/dom.js'
+import { creatureGlyph } from '../assistant/creature-glyph.ts'
 import { mountIdeaEditor } from './idea-editor.ts'
 import type { MarkdownReplacement } from './idea-editor.ts'
 import './ideas.css'
@@ -30,7 +31,6 @@ const GLYPHS = {
   search: '<circle cx="7.5" cy="7.5" r="4.5"/><path d="m11 11 3.5 3.5"/>',
   file: '<path d="M5 2.5h5l3 3v10H5zM10 2.5v3h3M7 9h4m-4 3h4"/>',
   link: '<path d="m7 11 4-4M7.5 12l-1 1a2.5 2.5 0 1 1-3.5-3.5l2.5-2.5A2.5 2.5 0 0 1 9 7m0 4a2.5 2.5 0 0 0 3.5 0L15 8.5A2.5 2.5 0 1 0 11.5 5l-1 1"/>',
-  chat: '<path d="M9 2.5v13m-6.5-6.5h13M4.4 4.4l9.2 9.2m0-9.2-9.2 9.2"/>',
   trash: '<path d="M3.5 5h11m-10 0 .7 10h7.6l.7-10M7 5V3h4v2M7.5 8v4m3-4v4"/>',
   heading: '<path d="M5 4v10m8-10v10M5 9h8"/>',
   bold: '<path d="M5.5 9h4a2.5 2.5 0 1 1 0 5h-4V4h3.5a2.5 2.5 0 0 1 0 5" stroke-width="1.8"/>',
@@ -73,11 +73,11 @@ function node<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, 
   return element
 }
 
-function button(label: string, glyph?: keyof typeof GLYPHS, showText = false) {
+function button(label: string, glyph?: keyof typeof GLYPHS | 'creature', showText = false) {
   const control = node('button', 'idea-button')
   control.type = 'button'
   control.title = label
-  if (glyph) control.innerHTML = icon(glyph)
+  if (glyph) control.innerHTML = glyph === 'creature' ? creatureGlyph : icon(glyph)
   if (!glyph || showText) control.append(node('span', '', label))
   else control.setAttribute('aria-label', label)
   return control
@@ -352,7 +352,7 @@ export function mountIdeaBuilder(host: HTMLElement, options: IdeaBuilderOptions)
   const dock = button('Dock beside code', 'dock')
   const expand = button('Open Ideas notebook', 'expand')
   const attachCurrent = button('Link current file or selection', 'link')
-  const chat = button('Add to Claude', 'chat')
+  const chat = button('Give to the Creature', 'creature')
   const remove = button('Delete idea', 'trash')
   const cancelDelete = button('Cancel')
   const confirmDelete = button('Delete')
@@ -995,7 +995,7 @@ export function mountIdeaBuilder(host: HTMLElement, options: IdeaBuilderOptions)
     'click',
     () => {
       const idea = current()
-      if (idea) runAction('Draft idea in Claude', () => options.draftInChat?.(idea))
+      if (idea) runAction('Give idea to the Creature', () => options.draftInChat?.(idea))
     },
     events,
   )

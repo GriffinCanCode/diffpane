@@ -867,7 +867,7 @@ async function receive({ id, method, args }) {
       }
     } else if (method === 'content-search-cancel') contentSearchController?.abort()
     else if (method === 'claude-list') {
-      const query = sessionString(args[0], 'Claude file search query')
+      const query = sessionString(args[0], 'file search query')
       const paths = []
       let length = 0
       let truncated = false

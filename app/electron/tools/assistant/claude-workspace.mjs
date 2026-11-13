@@ -9,7 +9,7 @@ export const MAX_CLAUDE_FILE_BYTES = 512 * 1024
 const PRIVATE_NAME =
   /^(?:\.env(?:\.|$)|\.git$|\.git-credentials$|\.netrc$|\.npmrc$|\.pypirc$|\.ssh$|id_(?:rsa|dsa|ecdsa|ed25519)(?:\.|$)|(?:credentials|secrets)\.json$)|\.(?:pem|key|p12|pfx|keystore)$/iu
 function unavailable() {
-  return new Error('Claude can access only regular project text files in scope.')
+  return new Error('The Creature can access only regular project text files in scope.')
 }
 
 /** @param {unknown} filename @returns {filename is string} */
@@ -64,7 +64,7 @@ export async function readClaudeBytes(handle, size) {
     if (!bytesRead) break
     offset += bytesRead
   }
-  if (offset !== size) throw new Error('The file changed while Claude was reading it.')
+  if (offset !== size) throw new Error('The file changed while the Creature was reading it.')
   return buffer.subarray(0, offset)
 }
 

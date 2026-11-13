@@ -68,8 +68,8 @@ test('reset releases the active turn without letting the old completion unlock i
   session.reset()
   const second = session.send({ prompt: 'Second' }, () => newKey.promise, emptyWorkspace)
   oldKey.resolve('old-key')
-  expect(await first).toMatchObject({ message: 'Claude request canceled.' })
-  await expect(session.send({ prompt: 'Third' }, key, emptyWorkspace)).rejects.toThrow('Claude is still working')
+  expect(await first).toMatchObject({ message: 'Request canceled.' })
+  await expect(session.send({ prompt: 'Third' }, key, emptyWorkspace)).rejects.toThrow('The Creature is still working')
   newKey.resolve('new-key')
 
   expect(await second).toMatchObject({ text: 'New reply' })
@@ -167,6 +167,9 @@ test('streams ordered activity and fetches attached workspace content only when 
   expect(activity[3]).toMatchObject({ requestId: 'first', path: 'src/main.ts', side: 'head', startLine: 2, endLine: 3 })
 
   const [initial = '', continuation = ''] = requests
+  expect(initial).toContain("You are The Creature. You live in the user's code and help them figure things out.")
+  expect(initial).toContain('Speak like a friendly caveman')
+  expect(initial).toContain('I am the creature.')
   expect(initial).toContain('src/main.ts')
   expect(initial).toContain(idea.id)
   expect(initial).not.toContain('Selected line α')

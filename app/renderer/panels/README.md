@@ -9,7 +9,7 @@ doc_radar:
 
 The workspace mounts these optional panels and supplies their Electron bridge, selection, and layout callbacks.
 
-- [Assistant](assistant/README.md) — Claude conversations, tool activity, and proposals.
+- [The Creature](assistant/README.md) — Conversations, tool activity, and proposals.
 - [Ideas](ideas/README.md) — Project notebook and Markdown editing.
 - [Analysis](analysis/README.md) — HowMany reports and diagnostics.
 - [Settings](settings/README.md) — Settings sections and shortcut capture.

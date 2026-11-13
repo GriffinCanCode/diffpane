@@ -119,7 +119,7 @@ export function createWorkspaceLayout(workspace: HTMLElement, preferences: UiPre
     if (column === 'ideas') return 'Ideas'
     if (column === 'files')
       return panes.files?.querySelector('#change-review:not([hidden])') ? 'Review queue' : 'File Explorer'
-    return rightPanel()?.id === 'review-notes-panel' ? 'Review Notes' : 'Claude'
+    return rightPanel()?.id === 'review-notes-panel' ? 'Review Notes' : 'The Creature'
   }
   const abort = new AbortController()
   const options = { signal: abort.signal }
