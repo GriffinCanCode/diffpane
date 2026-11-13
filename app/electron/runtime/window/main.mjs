@@ -36,8 +36,10 @@ import { ClaudeSession } from '../../tools/assistant/claude-session.mjs'
 import { mediaResponse } from '../../workspace/documents/media.ts'
 import { startDesktopMetrics } from '../diagnostics/desktop-metrics.ts'
 import { createDiagnosticLog } from '../diagnostics/diagnostic-log.ts'
+import { openPickerOptions, pickMacTarget } from './open-picker.ts'
 
-/** @import { IpcMainEvent, IpcMainInvokeEvent, OpenDialogOptions, SaveDialogOptions, WebContents } from 'electron' */
+/** @import { IpcMainEvent, IpcMainInvokeEvent, SaveDialogOptions, WebContents } from 'electron' */
+/** @import { OpenKind } from './open-picker.ts' */
 /** @import { AppError } from '../../../shared/recovery/app-errors.ts' */
 /** @import { IdeaChange } from '../../../shared/ideas/ideas.ts' */
 /** @import { ShortcutAction, ShortcutOverrides } from '../../../shared/preferences/shortcuts.ts' */
@@ -807,17 +809,32 @@ function refreshShortcuts() {
   return updateShortcuts(() => shortcutPreferences.get())
 }
 
-/** @param {BrowserWindow | null} window @param {'file' | 'folder'} kind */
+/** @type {AbortController | undefined} */
+let openPicker
+
+/** @param {BrowserWindow | null} window @param {OpenKind} kind */
 async function chooseTarget(window, kind) {
-  /** @type {OpenDialogOptions} */
-  const options = {
-    properties: [kind === 'file' ? 'openFile' : 'openDirectory'],
-    title: kind === 'file' ? 'Open a file' : 'Open a folder',
+  if (quitPhase !== 'running' || openPicker || window?.isDestroyed()) return false
+  const picker = new AbortController()
+  const abort = () => picker.abort()
+  openPicker = picker
+  window?.once('closed', abort)
+  try {
+    let target
+    if (process.platform === 'darwin') {
+      target = await trackOperation(shutdowns, pickMacTarget(kind, picker.signal))
+    } else {
+      const options = openPickerOptions(kind)
+      const result = await (window ? dialog.showOpenDialog(window, options) : dialog.showOpenDialog(options))
+      target = result.canceled ? null : result.filePaths[0]
+    }
+    if (!target || picker.signal.aborted || quitPhase !== 'running') return false
+    openTarget(target, window)
+    return true
+  } finally {
+    window?.off('closed', abort)
+    openPicker = undefined
   }
-  const result = await (window ? dialog.showOpenDialog(window, options) : dialog.showOpenDialog(options))
-  if (result.canceled || !result.filePaths[0] || quitPhase !== 'running') return false
-  openTarget(result.filePaths[0], window)
-  return true
 }
 
 // Finder can supply files before Electron has finished creating its first window.
@@ -1349,6 +1366,7 @@ app.on('before-quit', event => {
           return
         }
         quitPhase = 'draining'
+        openPicker?.abort()
         await Promise.allSettled(mutationOperations)
         const pending = [...sessions.values()].map(session => session.stop())
         await Promise.allSettled([...pending, ...shutdowns, ...storageOperations])

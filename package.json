@@ -4,7 +4,7 @@
   "private": true,
   "description": "A quiet, live view of your working tree",
   "type": "module",
-  "main": "app/electron/runtime/window/main.mjs",
+  "main": "app/electron/runtime/window/entry.mjs",
   "scripts": {
     "build:icons": "node app/tooling/icons/build-icons.ts",
     "build": "vp run bundle",
