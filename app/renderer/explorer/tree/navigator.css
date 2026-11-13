@@ -275,12 +275,28 @@
   text-align: right;
   color: var(--modified);
 }
-.navigator-row[data-kind='directory'] .navigator-badge {
-  color: var(--subtle);
-  font-size: var(--text-caption);
-}
 .navigator-badge:empty {
   display: none;
+}
+.navigator-row[data-kind='directory'][data-changed='true'] .navigator-badge {
+  display: grid;
+  place-items: center;
+  min-height: 1lh;
+  padding-left: 0;
+  color: var(--control-border);
+}
+.navigator-row[data-kind='directory'][data-changed='true'] .navigator-badge::before {
+  content: '';
+  box-sizing: border-box;
+  width: 6px;
+  height: 6px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  background: color-mix(in oklab, currentColor 30%, transparent) padding-box;
+}
+.navigator-row[data-kind='directory']:hover .navigator-badge,
+.navigator-tree:focus-visible .navigator-row[data-kind='directory'][data-active='true'] .navigator-badge {
+  color: var(--subtle);
 }
 .navigator-row[data-status='!'] .navigator-badge {
   color: var(--warning);

@@ -403,7 +403,7 @@ export function createNavigator(
       renderSearchText(requireElement(row, '.navigator-name', HTMLSpanElement), name, directory.length, match)
       renderSearchText(requireElement(row, '.navigator-directory', HTMLSpanElement), directory, 0, match)
       const badge = requireElement(row, '.navigator-badge', HTMLSpanElement)
-      badge.textContent = node.kind === 'directory' ? (node.changedCount ? '●' : '') : status
+      badge.textContent = status
       badge.title =
         node.kind === 'directory' && node.changedCount
           ? `${node.changedCount} changed ${node.changedCount === 1 ? 'file' : 'files'}`
