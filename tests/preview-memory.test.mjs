@@ -1,12 +1,12 @@
-import { test } from 'vite-plus/test';
-import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
+import { test } from 'vite-plus/test'
 
 test('cached bounded previews release the large decoded source buffers', () => {
   // Use an isolated GC-enabled process to measure retained external string storage.
   // Heap-only measurements miss the TextDecoder backing memory in this regression.
-  const reader = new URL('../electron/file-content.ts', import.meta.url).href;
-  const cache = new URL('../electron/document-cache.ts', import.meta.url).href;
+  const reader = new URL('../electron/file-content.ts', import.meta.url).href
+  const cache = new URL('../electron/document-cache.ts', import.meta.url).href
   const output = execFileSync(
     process.execPath,
     [
@@ -33,12 +33,20 @@ test('cached bounded previews release the large decoded source buffers', () => {
       `,
     ],
     { encoding: 'utf8', timeout: 15_000 },
-  );
-  const result = JSON.parse(output);
-  assert.ok(result.stats.entries >= 16, 'the regression must retain many bounded previews');
-  assert.ok(result.stats.bytes <= 16 * 1024 * 1024);
+  )
+  /** @type {unknown} */
+  const result = JSON.parse(output)
+  assert.ok(result && typeof result === 'object' && 'stats' in result && 'externalBytes' in result)
+  assert.ok(result.stats && typeof result.stats === 'object' && 'entries' in result.stats && 'bytes' in result.stats)
+  assert.equal(typeof result.stats.entries, 'number')
+  assert.equal(typeof result.stats.bytes, 'number')
+  assert.equal(typeof result.externalBytes, 'number')
+  assert.ok(typeof result.stats.entries === 'number' && typeof result.stats.bytes === 'number')
+  assert.ok(typeof result.externalBytes === 'number')
+  assert.ok(result.stats.entries >= 16, 'the regression must retain many bounded previews')
+  assert.ok(result.stats.bytes <= 16 * 1024 * 1024)
   assert.ok(
     result.externalBytes < 8 * 1024 * 1024,
     `small previews pinned large decoded inputs: ${JSON.stringify(result)}`,
-  );
-});
+  )
+})

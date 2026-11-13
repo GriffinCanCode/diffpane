@@ -1,10 +1,10 @@
-import { accessSync, constants, statSync } from 'node:fs';
-import { homedir } from 'node:os';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { accessSync, constants, statSync } from 'node:fs'
+import { homedir } from 'node:os'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const application = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const pythonSettings = {
+const APPLICATION = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const PYTHON_SETTINGS = {
   analysis: {
     diagnosticMode: 'openFilesOnly',
     autoImportCompletions: false,
@@ -15,23 +15,23 @@ const pythonSettings = {
       genericTypes: true,
     },
   },
-};
+}
 
-type ServerSpec = {
-  name: string;
-  manifests: readonly string[];
-  commands: readonly string[];
-  args: readonly string[];
-  modules?: readonly string[];
-  managed?: readonly string[];
-  settings: object;
-};
+interface ServerSpec {
+  name: string
+  manifests: readonly string[]
+  commands: readonly string[]
+  args: readonly string[]
+  modules?: readonly string[]
+  managed?: readonly string[]
+  settings: Record<string, unknown>
+}
 
-export type DiscoveredServer = ServerSpec & {
-  language: string;
-  command: string | null;
-  env: NodeJS.ProcessEnv;
-};
+export interface DiscoveredServer extends ServerSpec {
+  language: string
+  command: string | null
+  env: NodeJS.ProcessEnv
+}
 
 export const SERVER_SPECS: Record<string, ServerSpec> = {
   python: {
@@ -40,7 +40,7 @@ export const SERVER_SPECS: Record<string, ServerSpec> = {
     commands: ['basedpyright-langserver', 'pyright-langserver'],
     args: ['--stdio'],
     modules: ['basedpyright/dist/pyright-langserver.js', 'pyright/dist/pyright-langserver.js'],
-    settings: { basedpyright: pythonSettings, python: pythonSettings },
+    settings: { basedpyright: PYTHON_SETTINGS, python: PYTHON_SETTINGS },
   },
   rust: {
     name: 'rust-analyzer',
@@ -113,28 +113,27 @@ export const SERVER_SPECS: Record<string, ServerSpec> = {
       ]),
     ),
   },
-};
+}
 
 function exists(file: string, executable = false) {
   try {
-    accessSync(file, executable ? constants.X_OK : constants.R_OK);
-    return statSync(file).isFile();
+    accessSync(file, executable ? constants.X_OK : constants.R_OK)
+    return statSync(file).isFile()
   } catch {
-    return false;
+    return false
   }
 }
 
 export function discoverServers({
   env = process.env,
-  toolsDir = env.DIFFPANE_LANGUAGE_DIR ??
-    path.join(homedir(), 'Library/Application Support/Diffpane/languages'),
-  moduleRoot = path.join(application, 'node_modules'),
+  toolsDir = env.DIFFPANE_LANGUAGE_DIR ?? path.join(homedir(), 'Library/Application Support/Diffpane/languages'),
+  moduleRoot = path.join(APPLICATION, 'node_modules'),
   node = process.execPath,
 }: {
-  env?: NodeJS.ProcessEnv;
-  toolsDir?: string;
-  moduleRoot?: string;
-  node?: string;
+  env?: NodeJS.ProcessEnv
+  toolsDir?: string
+  moduleRoot?: string
+  node?: string
 } = {}): Record<string, DiscoveredServer> {
   // GUI launches need the standard tool locations even when macOS supplies a minimal PATH.
   const searchPath = [
@@ -148,24 +147,20 @@ export function discoverServers({
       '/usr/bin',
       '/bin',
     ]),
-  ];
-  const processEnv: NodeJS.ProcessEnv = { ...env, PATH: searchPath.join(path.delimiter) };
+  ]
+  const processEnv: NodeJS.ProcessEnv = { ...env, PATH: searchPath.join(path.delimiter) }
   // Forked analyzers need real filesystem entries, including TypeScript's worker and server scripts.
-  let physicalModules = moduleRoot;
-  for (
-    let directory = moduleRoot;
-    path.dirname(directory) !== directory;
-    directory = path.dirname(directory)
-  ) {
+  let physicalModules = moduleRoot
+  for (let directory = moduleRoot; path.dirname(directory) !== directory; directory = path.dirname(directory)) {
     if (path.basename(directory).endsWith('.asar')) {
-      physicalModules = path.join(`${directory}.unpacked`, path.relative(directory, moduleRoot));
-      break;
+      physicalModules = path.join(`${directory}.unpacked`, path.relative(directory, moduleRoot))
+      break
     }
   }
   return Object.fromEntries(
-    Object.entries(SERVER_SPECS).map(([language, spec]) => {
+    Object.entries(SERVER_SPECS).map(([language, spec]): [string, DiscoveredServer] => {
       for (const module of spec.modules ?? []) {
-        const entry = path.join(physicalModules, module);
+        const entry = path.join(physicalModules, module)
         if (exists(entry))
           return [
             language,
@@ -176,25 +171,20 @@ export function discoverServers({
               args: [entry, ...spec.args],
               env: { ...processEnv, ELECTRON_RUN_AS_NODE: '1' },
             },
-          ];
+          ]
       }
       const candidates = [
         ...(spec.managed ?? []).map(file => path.join(toolsDir, file)),
-        ...spec.commands.flatMap(command =>
-          searchPath.map(directory => path.join(directory, command)),
-        ),
-      ];
-      const command = candidates.find(file => exists(file, true));
+        ...spec.commands.flatMap(command => searchPath.map(directory => path.join(directory, command))),
+      ]
+      const command = candidates.find(file => exists(file, true))
       const limits =
         language === 'elixir'
           ? { ERL_FLAGS: processEnv.ERL_FLAGS ?? '+S 2:2 +SDcpu 1 +SDio 1' }
           : language === 'go'
             ? { GOMAXPROCS: processEnv.GOMAXPROCS ?? '2' }
-            : {};
-      return [
-        language,
-        { ...spec, language, command: command ?? null, env: { ...processEnv, ...limits } },
-      ];
+            : {}
+      return [language, { ...spec, language, command: command ?? null, env: { ...processEnv, ...limits } }]
     }),
-  );
+  )
 }

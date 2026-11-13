@@ -1,13 +1,7 @@
 [data-loading-status]::before,
 .placeholder-line {
-  background: linear-gradient(
-      90deg,
-      transparent 42%,
-      var(--loading-highlight, currentColor) 50%,
-      transparent 58%
-    )
-    100% 50% / 240% 100% no-repeat
-    var(--loading-track, color-mix(in srgb, currentColor 28%, transparent));
+  background: linear-gradient(90deg, transparent 42%, var(--loading-highlight, currentColor) 50%, transparent 58%) 100%
+    50% / 240% 100% no-repeat var(--loading-track, color-mix(in srgb, currentColor 28%, transparent));
 }
 
 [data-loading-status]::before {

@@ -1,0 +1,1 @@
+Recover from startup, file, and search failures with a consistent retry screen. Failed text saves keep edits available to retry or copy. Reconnect to a failed workspace worker without reloading the editor.

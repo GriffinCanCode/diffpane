@@ -16,7 +16,7 @@ doc_radar:
     - file: renderer/icons.ts
       contains: ['material-icon-theme']
     - file: renderer/howmany.js
-      contains: ['report.source.code_lines', 'breakdown.rows', 'Standalone documentation']
+      contains: ['source.code_lines', 'breakdown.rows', 'Standalone documentation']
 ---
 
 # Viewer
@@ -33,9 +33,11 @@ The explorer projects metadata into a virtualized folder tree. Git-ignored files
 
 Right-click a file or folder to open, rename, reveal it in Finder, copy its absolute or relative path, or move it to Trash. F2 renames the focused entry; Shift+F10 opens its menu. Renames reject existing names and keep an open descendant selected under its new path. File operations flush pending edits before changing the disk.
 
-Changes (⌘⇧G) replaces the file tree with a live review queue. Its title-bar badge counts pending files, and its progress bar tracks reviewed versions. Opening a changed file compares HEAD with the working file and jumps to its first change. Focus changes collapses long unchanged regions and keeps nearby lines visible. The comparison controls move between edits or restore the full file without leaving review. At narrow widths, removed and added lines share one column. The queue’s Previous and Next controls move between files. Mark reviewed & next records the version on screen and advances. On the last pending file, Mark reviewed completes the queue. Reviewed files can be returned to Pending, and edits to a reviewed version return it automatically. The Files button switches back to the explorer.
+Changes (⌘⇧G) replaces the file tree with a live review queue. The title-bar button gains a green tint and a minus/plus icon when changes are pending. The queue’s progress bar tracks reviewed versions. Opening a changed file compares HEAD with the working file and jumps to its first change. Focus changes collapses long unchanged regions and keeps nearby lines visible. The comparison controls move between edits or restore the full file without leaving review. At narrow widths, removed and added lines share one column. The queue’s Previous and Next controls move between files. Mark reviewed & next records the version on screen and advances. On the last pending file, Mark reviewed completes the queue. Reviewed files can be returned to Pending, and edits to a reviewed version return it automatically. The Files button switches back to the explorer.
 
 ⌘P or the explorer’s Search files action opens a dedicated search window for the current project. We rank filenames before directories, accept path abbreviations and multiple terms, and highlight each match. Arrow keys and Page Up/Down move through virtualized results; Enter opens the selected file or reveals the selected folder. Clear, Close, Escape, and retry controls keep search usable without a mouse or after a failed inventory read.
+
+The title bar’s Search action or ⌘⇧F searches working text in tracked and nonignored untracked files. Changed files limits the search to files in Git status. Results show the first match on each line, group matches by file, and refresh after live changes. Choose a result to select the text in the editor, including in Markdown source. Search skips media, binary files, and text that exceeds the editor’s preview limits. Each search returns up to 250 matching lines and indicates when it reaches a scan limit.
 
 The TypeScript document-preview module renders images, audio, video, PDF documents, bounded large text, and hexadecimal inspection. Comparison mode shows original and current previews; Hex selection persists across updates. Unsupported media falls back to bytes. Switching files or views releases Blob URLs, playback, and editor models.
 
@@ -56,3 +58,7 @@ Closing the file picker releases its duplicate inventory, result rows, scheduled
 The split-pane glyph in the file header toggles a whole-file comparison: read-only HEAD on the left and the editable working file on the right. Only changed functions receive a subtle block tint; unchanged functions stay neutral, and neither version uses inline character differences. Current language-server symbols supply function boundaries when available, with lexical boundaries before a server responds. Leaving comparison mode releases the original model.
 
 Text edits save immediately through a serialized queue that coalesces changes during each write. Incoming document reads cannot replace pending edits or a newer model version. File switches, source/preview changes, and window close flush pending saves; failures retain the editable buffer and ⌘S retries. Programmatic disk updates do not trigger another save.
+
+Startup failures offer a reload. File and search failures show a retry in the affected view. Save failures keep the buffer available to retry or copy. Workspace reconnection starts a new worker while the renderer keeps its open editor. Recovery screens support keyboard navigation, light and dark appearance, and reduced motion.
+
+Use `attempt` and `attemptAsync` from `app-errors.ts` at operations that can fail and need a recovery decision. Handle their `Result` in the caller that owns recovery. Renderer event handlers can use `guard` for synchronous work and `runTask` for asynchronous work. Use `reportError` with `silent: true` when a feature already shows its own error.

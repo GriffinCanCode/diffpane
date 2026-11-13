@@ -1,7 +1,7 @@
-const API = 'https://api.anthropic.com/v1';
-const MODEL = 'claude-haiku-5-5';
-const API_VERSION = '2026-10-21';
-const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
+const API = 'https://api.anthropic.com/v1'
+const MODEL = 'claude-haiku-5-5'
+const API_VERSION = '2026-10-21'
+const MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 
 const API_ERRORS = new Map([
   [401, 'Claude rejected the API key. Check it in Claude settings.'],
@@ -11,7 +11,7 @@ const API_ERRORS = new Map([
   [413, 'This conversation is too large. Start a new chat and try again.'],
   [429, 'Claude reached a rate or spend limit. Check limits in the Claude Console.'],
   [504, 'Claude took too long to respond. Try again.'],
-]);
+])
 
 /** @typedef {{ type: 'text', text: string }} ClaudeTextBlock */
 /** @typedef {{ type: 'tool_use', id: string, name: string, input: Record<string, unknown> }} ClaudeToolUse */
@@ -21,14 +21,14 @@ const API_ERRORS = new Map([
 
 /** @param {unknown} value @returns {value is Record<string, unknown>} */
 function isRecord(value) {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
 
 /** @param {AbortSignal | undefined} signal @param {AbortSignal} timeout @param {string} fallback */
 function requestFailure(signal, timeout, fallback) {
-  if (signal?.aborted) return new DOMException('Claude request canceled.', 'AbortError');
-  if (timeout.aborted) return new Error('Claude took too long to respond. Try again.');
-  return new Error(fallback);
+  if (signal?.aborted) return new DOMException('Claude request canceled.', 'AbortError')
+  if (timeout.aborted) return new Error('Claude took too long to respond. Try again.')
+  return new Error(fallback)
 }
 
 /**
@@ -44,33 +44,31 @@ async function request(endpoint, key, options, signal, timeout, streaming = fals
     authorization: `Bearer ${key}`,
     'anthropic-version': API_VERSION,
     accept: streaming ? 'text/event-stream' : 'application/json',
-  });
-  if (options.body) headers.set('content-type', 'application/json');
+  })
+  if (options.body) headers.set('content-type', 'application/json')
 
-  let response;
+  let response
   try {
     response = await fetch(`${API}${endpoint}`, {
       ...options,
       headers,
       redirect: 'error',
       signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
-    });
+    })
   } catch {
-    throw requestFailure(signal, timeout, 'Could not connect to Claude. Check your connection.');
+    throw requestFailure(signal, timeout, 'Could not connect to Claude. Check your connection.')
   }
   if (!response.ok) {
-    await response.body?.cancel().catch(() => {});
-    const message = API_ERRORS.get(response.status);
-    if (message) throw new Error(message);
-    if (response.status >= 500) throw new Error('Claude is temporarily unavailable. Try again.');
+    await response.body?.cancel().catch(() => {})
+    const message = API_ERRORS.get(response.status)
+    if (message) throw new Error(message)
+    if (response.status >= 500) throw new Error('Claude is temporarily unavailable. Try again.')
     if (response.status === 400 && options.method === 'GET') {
-      throw new Error(
-        'Claude could not verify this key. Use a key scoped to one Claude workspace.',
-      );
+      throw new Error('Claude could not verify this key. Use a key scoped to one Claude workspace.')
     }
-    throw new Error(`Claude rejected the request (HTTP ${response.status}).`);
+    throw new Error(`Claude rejected the request (HTTP ${response.status}).`)
   }
-  return response;
+  return response
 }
 
 /**
@@ -80,41 +78,41 @@ async function request(endpoint, key, options, signal, timeout, streaming = fals
  * @returns {Promise<unknown>}
  */
 async function responseJson(response, signal, timeout) {
-  const reader = response.body?.getReader();
-  if (!reader) throw invalidStream();
-  const decoder = new TextDecoder();
-  let size = 0;
-  let text = '';
+  const reader = response.body?.getReader()
+  if (!reader) throw invalidStream()
+  const decoder = new TextDecoder()
+  let size = 0
+  let text = ''
   try {
     for (;;) {
       // oxlint-disable-next-line no-await-in-loop -- The reader consumes response chunks in order.
-      const { done, value } = await reader.read();
-      if (done) break;
-      size += value.byteLength;
-      if (size > MAX_RESPONSE_BYTES) throw invalidStream();
-      text += decoder.decode(value, { stream: true });
+      const { done, value } = await reader.read()
+      if (done) break
+      size += value.byteLength
+      if (size > MAX_RESPONSE_BYTES) throw invalidStream()
+      text += decoder.decode(value, { stream: true })
     }
-    return JSON.parse(text + decoder.decode());
+    return JSON.parse(text + decoder.decode())
   } catch {
-    throw requestFailure(signal, timeout, 'Claude returned an invalid response.');
+    throw requestFailure(signal, timeout, 'Claude returned an invalid response.')
   } finally {
-    await reader.cancel().catch(() => {});
-    reader.releaseLock();
+    await reader.cancel().catch(() => {})
+    reader.releaseLock()
   }
 }
 
 /** @param {string} key @param {AbortSignal} [signal] */
 export async function verifyClaudeKey(key, signal) {
-  const timeout = AbortSignal.timeout(15_000);
-  const response = await request(`/models/${MODEL}`, key, { method: 'GET' }, signal, timeout);
-  const result = await responseJson(response, signal, timeout);
+  const timeout = AbortSignal.timeout(15_000)
+  const response = await request(`/models/${MODEL}`, key, { method: 'GET' }, signal, timeout)
+  const result = await responseJson(response, signal, timeout)
   if (!isRecord(result) || result.type !== 'model' || typeof result.id !== 'string') {
-    throw new Error('Claude returned an invalid response while verifying the key.');
+    throw new Error('Claude returned an invalid response while verifying the key.')
   }
 }
 
 function invalidStream() {
-  return new Error('Claude returned an incomplete or invalid response.');
+  return new Error('Claude returned an incomplete or invalid response.')
 }
 
 /**
@@ -124,79 +122,73 @@ function invalidStream() {
  * @returns {AsyncGenerator<unknown, void, undefined>}
  */
 async function* responseEvents(response, signal, timeout) {
-  const reader = response.body?.getReader();
-  if (!reader) throw invalidStream();
-  const decoder = new TextDecoder();
-  let buffer = '';
-  let received = 0;
+  const reader = response.body?.getReader()
+  if (!reader) throw invalidStream()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let received = 0
   /** @type {string[]} */
-  let data = [];
+  let data = []
   try {
     while (true) {
       // oxlint-disable-next-line no-await-in-loop -- The reader consumes response chunks in order.
       const { done, value } = await reader.read().catch(() => {
-        throw requestFailure(signal, timeout, 'Claude’s response was interrupted. Try again.');
-      });
-      if (done) break;
-      received += value.byteLength;
-      if (received > MAX_RESPONSE_BYTES) throw invalidStream();
-      buffer += decoder.decode(value, { stream: true });
-      let newline = buffer.indexOf('\n');
+        throw requestFailure(signal, timeout, 'Claude’s response was interrupted. Try again.')
+      })
+      if (done) break
+      received += value.byteLength
+      if (received > MAX_RESPONSE_BYTES) throw invalidStream()
+      buffer += decoder.decode(value, { stream: true })
+      let newline = buffer.indexOf('\n')
       while (newline >= 0) {
-        const line = buffer.slice(0, newline).replace(/\r$/u, '');
-        buffer = buffer.slice(newline + 1);
+        const line = buffer.slice(0, newline).replace(/\r$/u, '')
+        buffer = buffer.slice(newline + 1)
         if (!line && data.length) {
           /** @type {unknown} */
-          let event;
+          let event
           try {
-            event = JSON.parse(data.join('\n'));
+            event = JSON.parse(data.join('\n'))
           } catch {
-            throw invalidStream();
+            throw invalidStream()
           }
-          data = [];
-          yield event;
+          data = []
+          yield event
         } else if (line.startsWith('data:')) {
-          data.push(line.slice(5).replace(/^ /u, ''));
+          data.push(line.slice(5).replace(/^ /u, ''))
         }
-        newline = buffer.indexOf('\n');
+        newline = buffer.indexOf('\n')
       }
     }
   } finally {
-    await reader.cancel().catch(() => {});
-    reader.releaseLock();
+    await reader.cancel().catch(() => {})
+    reader.releaseLock()
   }
 }
 
 /** @param {unknown} value */
 function readMessage(value) {
-  if (!isRecord(value) || !Array.isArray(value.content) || typeof value.stop_reason !== 'string')
-    throw invalidStream();
+  if (!isRecord(value) || !Array.isArray(value.content) || typeof value.stop_reason !== 'string') throw invalidStream()
   /** @type {ClaudeTextBlock[]} */
-  const text = [];
+  const text = []
   /** @type {ClaudeToolUse[]} */
-  const calls = [];
+  const calls = []
   /** @type {Record<string, unknown>[]} */
-  const content = [];
+  const content = []
   /** @type {unknown[]} */
-  const blocks = value.content;
+  const blocks = value.content
   for (const block of blocks) {
-    if (!isRecord(block) || typeof block.type !== 'string') throw invalidStream();
+    if (!isRecord(block) || typeof block.type !== 'string') throw invalidStream()
     if (block.type === 'text') {
-      if (typeof block.text !== 'string') throw invalidStream();
-      text.push({ type: 'text', text: block.text });
+      if (typeof block.text !== 'string') throw invalidStream()
+      text.push({ type: 'text', text: block.text })
     } else if (block.type === 'tool_use') {
-      if (
-        typeof block.id !== 'string' ||
-        !block.id ||
-        typeof block.name !== 'string' ||
-        !isRecord(block.input)
-      )
-        throw invalidStream();
-      calls.push({ type: 'tool_use', id: block.id, name: block.name, input: block.input });
+      if (typeof block.id !== 'string' || !block.id || typeof block.name !== 'string' || !isRecord(block.input))
+        throw invalidStream()
+      calls.push({ type: 'tool_use', id: block.id, name: block.name, input: block.input })
     }
-    content.push(block);
+    content.push(block)
   }
-  return { content, text, calls, stopReason: value.stop_reason };
+  return { content, text, calls, stopReason: value.stop_reason }
 }
 
 /**
@@ -207,78 +199,73 @@ function readMessage(value) {
  */
 async function responseMessage(response, onText, signal, timeout) {
   /** @type {Record<string, unknown>[]} */
-  const content = [];
+  const content = []
   /** @type {Map<number, string>} */
-  const openBlocks = new Map();
+  const openBlocks = new Map()
   /** @type {string | undefined} */
-  let stopReason;
-  let hasText = false;
+  let stopReason
+  let hasText = false
   for await (const event of responseEvents(response, signal, timeout)) {
-    if (!isRecord(event) || typeof event.type !== 'string') throw invalidStream();
+    if (!isRecord(event) || typeof event.type !== 'string') throw invalidStream()
     if (event.type === 'error') {
-      const overload = isRecord(event.error) && event.error.type === 'overloaded_error';
+      const overload = isRecord(event.error) && event.error.type === 'overloaded_error'
       throw new Error(
-        overload
-          ? 'Claude is temporarily overloaded. Try again.'
-          : 'Claude interrupted the response. Try again.',
-      );
+        overload ? 'Claude is temporarily overloaded. Try again.' : 'Claude interrupted the response. Try again.',
+      )
     }
     if (event.type === 'content_block_start') {
-      const { index, content_block: block } = event;
-      if (index !== content.length || !isRecord(block) || typeof block.type !== 'string')
-        throw invalidStream();
-      content.push(block);
-      openBlocks.set(index, '');
+      const { index, content_block: block } = event
+      if (index !== content.length || !isRecord(block) || typeof block.type !== 'string') throw invalidStream()
+      content.push(block)
+      openBlocks.set(index, '')
       if (block.type === 'text') {
-        if (typeof block.text !== 'string') throw invalidStream();
-        if (hasText) onText('\n\n');
-        hasText = true;
-        if (block.text) onText(block.text);
+        if (typeof block.text !== 'string') throw invalidStream()
+        if (hasText) onText('\n\n')
+        hasText = true
+        if (block.text) onText(block.text)
       }
     } else if (event.type === 'content_block_delta') {
-      const { index, delta } = event;
-      if (typeof index !== 'number' || !Number.isSafeInteger(index) || !isRecord(delta))
-        throw invalidStream();
-      const block = content[index];
-      const input = openBlocks.get(index);
-      if (input === undefined || !block) throw invalidStream();
+      const { index, delta } = event
+      if (typeof index !== 'number' || !Number.isSafeInteger(index) || !isRecord(delta)) throw invalidStream()
+      const block = content[index]
+      const input = openBlocks.get(index)
+      if (input === undefined || !block) throw invalidStream()
       if (block.type === 'text' && delta.type === 'text_delta') {
-        if (typeof block.text !== 'string' || typeof delta.text !== 'string') throw invalidStream();
-        block.text += delta.text;
-        onText(delta.text);
+        if (typeof block.text !== 'string' || typeof delta.text !== 'string') throw invalidStream()
+        block.text += delta.text
+        onText(delta.text)
       } else if (block.type === 'tool_use' && delta.type === 'input_json_delta') {
-        if (typeof delta.partial_json !== 'string') throw invalidStream();
-        openBlocks.set(index, input + delta.partial_json);
+        if (typeof delta.partial_json !== 'string') throw invalidStream()
+        openBlocks.set(index, input + delta.partial_json)
       }
     } else if (event.type === 'content_block_stop') {
-      if (typeof event.index !== 'number' || !Number.isSafeInteger(event.index))
-        throw invalidStream();
-      const block = content[event.index];
-      const input = openBlocks.get(event.index);
-      if (!block || input === undefined) throw invalidStream();
+      if (typeof event.index !== 'number' || !Number.isSafeInteger(event.index)) throw invalidStream()
+      const block = content[event.index]
+      const input = openBlocks.get(event.index)
+      if (!block || input === undefined) throw invalidStream()
       if (block.type === 'tool_use' && input) {
         try {
           /** @type {unknown} */
-          const parsed = JSON.parse(input);
-          if (!isRecord(parsed)) throw invalidStream();
-          block.input = parsed;
+          const parsed = JSON.parse(input)
+          if (!isRecord(parsed)) throw invalidStream()
+          block.input = parsed
         } catch {
-          throw invalidStream();
+          throw invalidStream()
         }
       }
-      openBlocks.delete(event.index);
+      openBlocks.delete(event.index)
     } else if (event.type === 'message_delta') {
-      if (!isRecord(event.delta)) throw invalidStream();
+      if (!isRecord(event.delta)) throw invalidStream()
       if (event.delta.stop_reason !== undefined && event.delta.stop_reason !== null) {
-        if (typeof event.delta.stop_reason !== 'string') throw invalidStream();
-        stopReason = event.delta.stop_reason;
+        if (typeof event.delta.stop_reason !== 'string') throw invalidStream()
+        stopReason = event.delta.stop_reason
       }
     } else if (event.type === 'message_stop') {
-      if (openBlocks.size || typeof stopReason !== 'string') throw invalidStream();
-      return readMessage({ content, stop_reason: stopReason });
+      if (openBlocks.size || typeof stopReason !== 'string') throw invalidStream()
+      return readMessage({ content, stop_reason: stopReason })
     }
   }
-  throw invalidStream();
+  throw invalidStream()
 }
 
 /**
@@ -288,7 +275,7 @@ async function responseMessage(response, onText, signal, timeout) {
  * @param {(text: string) => void} onText
  */
 export async function requestClaude(key, { system, messages, tools }, signal, onText) {
-  const timeout = AbortSignal.timeout(45_000);
+  const timeout = AbortSignal.timeout(45_000)
   const response = await request(
     '/messages',
     key,
@@ -307,9 +294,9 @@ export async function requestClaude(key, { system, messages, tools }, signal, on
     signal,
     timeout,
     true,
-  );
+  )
   if (response.headers.get('content-type')?.includes('text/event-stream')) {
-    return responseMessage(response, onText, signal, timeout);
+    return responseMessage(response, onText, signal, timeout)
   }
-  return readMessage(await responseJson(response, signal, timeout));
+  return readMessage(await responseJson(response, signal, timeout))
 }

@@ -5,9 +5,9 @@
  * @param {abstract new (...args: never[]) => T} elementType
  */
 export function requireElement(parent, selector, elementType) {
-  const element = parent.querySelector(selector);
+  const element = parent.querySelector(selector)
   if (!(element instanceof elementType)) {
-    throw new Error(`Missing ${elementType.name} for ${selector}.`);
+    throw new Error(`Missing ${elementType.name} for ${selector}.`)
   }
-  return element;
+  return element
 }

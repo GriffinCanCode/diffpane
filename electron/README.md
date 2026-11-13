@@ -8,14 +8,14 @@ doc_radar:
     - file: electron/language.mjs
       contains: ['LanguageRuntime', 'textDocument/didOpen', 'textDocument/didClose']
     - file: electron/howmany.mjs
-      contains: ['validCounts', 'report.source', 'report.breakdown?.rows']
+      contains: ['validCounts', 'hasSourceReport', 'breakdown.rows']
 ---
 
 # Desktop, Git, and languages
 
 Window management stays in the main process; Git and language-server work runs in a worker. The preload exposes document reads, status, refresh, native file and folder pickers, and a bounded language-service API. Launching without a target, or choosing New Window, opens a welcome window without starting a worker. Opening a target replaces that welcome window; an existing workspace stays open in its own window. The terminal launcher still supplies the current directory explicitly, and Finder file opens use the selected path.
 
-Ideas, review notes, recent paths, appearance, pane layout, and Ideas docking are stored in `state/local.sqlite` under the app's user-data directory. SQLite commits are transactional across app instances and use write-ahead logging with full synchronization. Records are compressed with Zstandard when that reduces their size, then encrypted with AES-256-GCM. Keyed indexes keep workspace paths and record IDs out of plaintext. The database holds the data key wrapped by Electron's OS-backed secure storage. Claude credentials use the OS-backed credential store separately.
+Ideas, review notes, recent paths, shortcuts, appearance, pane layout, and Ideas docking are stored in `state/local.sqlite` under the app's user-data directory. SQLite commits are transactional across app instances and use write-ahead logging with full synchronization. Records are compressed with Zstandard when that reduces their size, then encrypted with AES-256-GCM. Keyed indexes keep workspace paths and record IDs out of plaintext. The database holds the data key wrapped by Electron's OS-backed secure storage. Claude credentials use the OS-backed credential store separately.
 
 Legacy database and JSON records are imported in a transaction before their source files are removed. Old renderer preferences are imported when their original renderer storage is available. Unreadable source data is retained for recovery. Review checkpoints, Claude conversations, and caches stay in memory. Project file edits continue to save directly to the working tree.
 
@@ -24,6 +24,8 @@ The welcome screen remembers up to eight successful file or folder targets. An i
 File and folder operations validate scope, resolved parent directories, and Git metadata boundaries. Renames accept one basename and reject name collisions; deleting moves the entry to the system Trash. Changes refresh the inventory and invalidate cached documents.
 
 Text saves use a scoped IPC call and validate regular files, parent confinement, payload limits, and the expected disk contents before writing. Saves retain source encoding and permissions, flush the file descriptor, invalidate the document cache, and notify watchers and language services directly. The renderer reports pending edits and readiness so clean windows can close or quit even when startup or the backend fails. Pending edits require a successful save flush before closing or quitting; failed saves and unavailable renderers retain the window. Flush requests time out after five seconds and resume editing instead of leaving a close request pending forever.
+
+IPC failures carry a message, code, operation, and recoverability flag through the preload. Reconnecting restarts the workspace worker in the same window and keeps snapshot revisions moving forward. A crashed renderer offers native reload and close actions, with a warning when the window had unsaved changes.
 
 Working images, audio, and videos use a private `diffpane-media` protocol scoped to each window's file inventory. Responses stream from regular file descriptors and support byte ranges for video seeking, independently of the text preview size limit. Requests reject external symlinks and paths outside the repository; closing the window revokes its media URLs.
 

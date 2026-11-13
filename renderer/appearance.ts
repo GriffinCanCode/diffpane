@@ -1,31 +1,42 @@
 import {
-  defaultAppearance as defaults,
-  maxFontSize,
-  minFontSize,
-} from '../electron/ui-preferences.ts';
-import type { Appearance } from '../electron/ui-preferences.ts';
-import type { UiPreferenceController } from './ui-preferences.ts';
-import './appearance.css';
-const fonts = {
+  defaultAppearance as DEFAULTS,
+  maxFontSize as MAX_FONT_SIZE,
+  minFontSize as MIN_FONT_SIZE,
+} from '../electron/ui-preferences.ts'
+import type { Appearance } from '../electron/ui-preferences.ts'
+import { requireElement } from './dom.js'
+import type { UiPreferenceController } from './ui-preferences.ts'
+import './appearance.css'
+
+const FONTS = {
   system: '"SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
   menlo: 'Menlo, Consolas, monospace',
   monaco: 'Monaco, "Lucida Console", monospace',
   courier: '"Courier New", Courier, monospace',
-};
+}
 
-type ColorScheme = 'light' | 'dark';
+type ColorScheme = 'light' | 'dark'
+
+function isAppearanceField(value: string): value is keyof Appearance {
+  return (
+    value === 'theme' ||
+    value === 'layout' ||
+    value === 'font' ||
+    value === 'fontSize' ||
+    value === 'wordWrap' ||
+    value === 'lineNumbers'
+  )
+}
 
 export function codeAppearance(settings: Appearance, review = false) {
   return {
-    fontFamily: fonts[settings.font],
+    fontFamily: FONTS[settings.font],
     fontSize: settings.fontSize,
     lineHeight: Math.round((settings.fontSize * 22) / 14),
     wordWrap:
-      settings.wordWrap === 'on' || (settings.wordWrap === 'automatic' && review)
-        ? ('on' as const)
-        : ('off' as const),
+      settings.wordWrap === 'on' || (settings.wordWrap === 'automatic' && review) ? ('on' as const) : ('off' as const),
     lineNumbers: settings.lineNumbers ? ('on' as const) : ('off' as const),
-  };
+  }
 }
 
 export function diffAppearance(settings: Appearance, review: boolean) {
@@ -36,33 +47,27 @@ export function diffAppearance(settings: Appearance, review: boolean) {
     renderSideBySideInlineBreakpoint: 560,
     diffWordWrap: 'inherit' as const,
     renderIndicators: true,
-  };
+  }
 }
 
-const svg = (path: string) =>
-  `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${path}</svg>`;
+function svg(path: string) {
+  return `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${path}</svg>`
+}
 
-const minusIcon = svg('<path d="M5.5 10h9"/>');
-const plusIcon = svg('<path d="M5.5 10h9M10 5.5v9"/>');
-const layoutChoices = [
+const MINUS_ICON = svg('<path d="M5.5 10h9"/>')
+const PLUS_ICON = svg('<path d="M5.5 10h9M10 5.5v9"/>')
+const LAYOUT_CHOICES = [
   [
     'automatic',
     'Automatic',
     svg('<rect x="2.5" y="4" width="15" height="12" rx="2"/><path d="M10 7v1m0 1.5v1m0 1.5v1"/>'),
   ],
-  [
-    'split',
-    'Side by side',
-    svg('<rect x="2.5" y="4" width="15" height="12" rx="2"/><path d="M10 4v12"/>'),
-  ],
-  [
-    'inline',
-    'Inline',
-    svg('<rect x="2.5" y="4" width="15" height="12" rx="2"/><path d="M5.5 8h6m-6 4h9"/>'),
-  ],
-];
+  ['split', 'Side by side', svg('<rect x="2.5" y="4" width="15" height="12" rx="2"/><path d="M10 4v12"/>')],
+  ['inline', 'Inline', svg('<rect x="2.5" y="4" width="15" height="12" rx="2"/><path d="M5.5 8h6m-6 4h9"/>')],
+]
 
-const themeArtwork = (scheme: string) => `
+function themeArtwork(scheme: string) {
+  return `
       <span class="appearance-theme-artwork" data-scheme="${scheme}">
         <span class="appearance-mini-window">
           <span class="appearance-mini-title"><i></i><i></i><i></i></span>
@@ -70,29 +75,32 @@ const themeArtwork = (scheme: string) => `
           <span class="appearance-mini-editor"><i></i><i></i><i></i><i></i></span>
         </span>
       </span>
-`;
+`
+}
 
-const themeCard = (value: string, label: string) => `
+function themeCard(value: string, label: string) {
+  return `
   <label class="appearance-theme-choice">
     <input type="radio" name="theme" value="${value}">
     <span class="appearance-theme-card">
       <span class="appearance-theme-art" aria-hidden="true">
-        ${value === 'system' ? themeArtwork('light') + themeArtwork('dark') : themeArtwork(value)}
+        ${value === 'system' ? `${themeArtwork('light')}${themeArtwork('dark')}` : themeArtwork(value)}
       </span>
       <span class="appearance-theme-caption">${label}<span class="appearance-radio-indicator" aria-hidden="true"></span></span>
     </span>
-  </label>`;
+  </label>`
+}
 
 export function createAppearanceSettings(
   preferences: UiPreferenceController,
   onApply: (value: Appearance, scheme: ColorScheme) => void,
 ) {
-  const system = matchMedia('(prefers-color-scheme: dark)');
-  let value = preferences.get('appearance');
-  const page = document.createElement('section');
-  page.className = 'appearance-main';
-  page.id = 'settings-appearance';
-  page.setAttribute('aria-labelledby', 'appearance-heading');
+  const system = matchMedia('(prefers-color-scheme: dark)')
+  let value = preferences.get('appearance')
+  const page = document.createElement('section')
+  page.className = 'appearance-main'
+  page.id = 'settings-appearance'
+  page.setAttribute('aria-labelledby', 'appearance-heading')
   page.innerHTML = `
         <header class="appearance-header">
           <div>
@@ -111,13 +119,11 @@ export function createAppearanceSettings(
             <legend>Diff layout</legend>
             <p id="appearance-layout-help">Automatic switches text comparisons to inline in narrow panes.</p>
             <div class="appearance-layout-options">
-              ${layoutChoices
-                .map(
-                  ([name, label, icon]) => `
+              ${LAYOUT_CHOICES.map(
+                ([name, label, icon]) => `
                 <label><input type="radio" name="layout" value="${name}"><span>${icon}${label}</span></label>
               `,
-                )
-                .join('')}
+              ).join('')}
             </div>
           </fieldset>
           <section class="appearance-editor" aria-labelledby="appearance-editor-title">
@@ -133,9 +139,9 @@ export function createAppearanceSettings(
                 </select>
                 <label for="appearance-font-size">Font size</label>
                 <div class="appearance-stepper">
-                  <button type="button" data-step="-1" aria-label="Decrease font size">${minusIcon}</button>
-                  <input type="number" id="appearance-font-size" name="fontSize" min="${minFontSize}" max="${maxFontSize}" step="1">
-                  <button type="button" data-step="1" aria-label="Increase font size">${plusIcon}</button>
+                  <button type="button" data-step="-1" aria-label="Decrease font size">${MINUS_ICON}</button>
+                  <input type="number" id="appearance-font-size" name="fontSize" min="${MIN_FONT_SIZE}" max="${MAX_FONT_SIZE}" step="1">
+                  <button type="button" data-step="1" aria-label="Increase font size">${PLUS_ICON}</button>
                 </div>
                 <label for="appearance-word-wrap">Word wrap</label>
                 <select name="wordWrap" id="appearance-word-wrap" aria-describedby="appearance-wrap-help">
@@ -161,101 +167,96 @@ export function createAppearanceSettings(
         </form>
         <footer class="appearance-footer">
           <button type="button" class="appearance-reset">Reset to defaults</button>
+          <p class="appearance-save-error" role="status" hidden></p>
           <button type="button" class="appearance-done">Done</button>
-        </footer>`;
-  const form = page.querySelector('form')!;
-  const reset = page.querySelector<HTMLButtonElement>('.appearance-reset')!;
-  const done = page.querySelector<HTMLButtonElement>('.appearance-done')!;
-  const size = form.querySelector<HTMLInputElement>('[name="fontSize"]')!;
-  const decrease = form.querySelector<HTMLButtonElement>('[data-step="-1"]')!;
-  const increase = form.querySelector<HTMLButtonElement>('[data-step="1"]')!;
-  const preview = form.querySelector<HTMLElement>('.appearance-preview')!;
+        </footer>`
+  const form = requireElement(page, 'form', HTMLFormElement)
+  const reset = requireElement(page, '.appearance-reset', HTMLButtonElement)
+  const done = requireElement(page, '.appearance-done', HTMLButtonElement)
+  const size = requireElement(form, '[name="fontSize"]', HTMLInputElement)
+  const decrease = requireElement(form, '[data-step="-1"]', HTMLButtonElement)
+  const increase = requireElement(form, '[data-step="1"]', HTMLButtonElement)
+  const preview = requireElement(form, '.appearance-preview', HTMLElement)
+  const saveError = requireElement(page, '.appearance-save-error', HTMLElement)
 
   function paint() {
-    for (const input of form.querySelectorAll<HTMLInputElement | HTMLSelectElement>(
-      'input, select',
-    )) {
-      const setting = value[input.name as keyof Appearance];
+    for (const input of form.querySelectorAll<HTMLInputElement | HTMLSelectElement>('input, select')) {
+      if (!isAppearanceField(input.name)) continue
+      const setting = value[input.name]
       if (input instanceof HTMLInputElement && input.type === 'radio') {
-        input.checked = input.value === setting;
+        input.checked = input.value === setting
       } else if (input instanceof HTMLInputElement && input.type === 'checkbox') {
-        input.checked = setting === true;
+        input.checked = setting === true
       } else {
-        input.value = String(setting);
+        input.value = String(setting)
       }
     }
-    decrease.disabled = value.fontSize <= minFontSize;
-    increase.disabled = value.fontSize >= maxFontSize;
-    reset.disabled = Object.keys(defaults).every(key => {
-      const field = key as keyof Appearance;
-      return value[field] === defaults[field];
-    });
-    preview.dataset.wrap = value.wordWrap;
-    preview.dataset.lineNumbers = String(value.lineNumbers);
+    decrease.disabled = value.fontSize <= MIN_FONT_SIZE
+    increase.disabled = value.fontSize >= MAX_FONT_SIZE
+    reset.disabled = Object.keys(DEFAULTS).every(field => isAppearanceField(field) && value[field] === DEFAULTS[field])
+    preview.dataset.wrap = value.wordWrap
+    preview.dataset.lineNumbers = String(value.lineNumbers)
   }
 
   function apply() {
-    const scheme = value.theme === 'system' ? (system.matches ? 'dark' : 'light') : value.theme;
-    const root = document.documentElement;
-    const code = codeAppearance(value);
-    root.dataset.theme = scheme;
-    root.style.setProperty('--editor-font', code.fontFamily);
-    root.style.setProperty('--editor-font-size', `${code.fontSize}px`);
-    root.style.setProperty('--editor-line-height', `${code.lineHeight}px`);
-    onApply(value, scheme);
+    const scheme = value.theme === 'system' ? (system.matches ? 'dark' : 'light') : value.theme
+    const root = document.documentElement
+    const code = codeAppearance(value)
+    root.dataset.theme = scheme
+    root.style.setProperty('--editor-font', code.fontFamily)
+    root.style.setProperty('--editor-font-size', `${code.fontSize}px`)
+    root.style.setProperty('--editor-line-height', `${code.lineHeight}px`)
+    onApply(value, scheme)
   }
 
-  const update = (patch: Partial<Appearance>) => preferences.set('appearance', patch);
+  const update = (patch: Partial<Appearance>) => preferences.set('appearance', patch)
   const unsubscribe = preferences.onChange('appearance', next => {
-    if (
-      Object.keys(defaults).every(
-        key => value[key as keyof Appearance] === next[key as keyof Appearance],
-      )
-    )
-      return;
-    value = next;
-    paint();
-    apply();
-  });
+    saveError.hidden = !preferences.hasSaveError('appearance')
+    saveError.textContent = 'Appearance changes couldn’t be saved.'
+    if (Object.keys(DEFAULTS).every(key => isAppearanceField(key) && value[key] === next[key])) return
+    value = next
+    paint()
+    apply()
+  })
 
   function syncSystem() {
-    if (value.theme === 'system') apply();
+    if (value.theme === 'system') apply()
   }
 
-  system.addEventListener('change', syncSystem);
-  form.addEventListener('submit', event => event.preventDefault());
+  system.addEventListener('change', syncSystem)
+  form.addEventListener('submit', event => event.preventDefault())
   form.addEventListener('change', event => {
-    const field = event.target;
+    const field = event.target
     if (field === size) {
       update({
         fontSize: Number.isFinite(size.valueAsNumber) ? size.valueAsNumber : value.fontSize,
-      });
-    } else if (field instanceof HTMLInputElement || field instanceof HTMLSelectElement) {
+      })
+    } else if (
+      (field instanceof HTMLInputElement || field instanceof HTMLSelectElement) &&
+      isAppearanceField(field.name)
+    ) {
       update({
-        [field.name]:
-          field instanceof HTMLInputElement && field.type === 'checkbox'
-            ? field.checked
-            : field.value,
-      });
+        [field.name]: field instanceof HTMLInputElement && field.type === 'checkbox' ? field.checked : field.value,
+      })
     }
-  });
-  decrease.addEventListener('click', () => update({ fontSize: value.fontSize - 1 }));
-  increase.addEventListener('click', () => update({ fontSize: value.fontSize + 1 }));
+  })
+  decrease.addEventListener('click', () => update({ fontSize: value.fontSize - 1 }))
+  increase.addEventListener('click', () => update({ fontSize: value.fontSize + 1 }))
   reset.addEventListener('click', () => {
-    update(defaults);
-    done.focus();
-  });
-  paint();
-  apply();
+    update(DEFAULTS)
+    done.focus()
+  })
+  paint()
+  apply()
   return {
     page,
     done,
     get value() {
-      return value;
+      return value
     },
     dispose() {
-      system.removeEventListener('change', syncSystem);
-      unsubscribe();
+      system.removeEventListener('change', syncSystem)
+      unsubscribe()
     },
-  };
+  }
 }

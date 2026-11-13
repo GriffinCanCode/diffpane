@@ -1,6 +1,6 @@
-import type { editor } from 'monaco-editor';
+import type { editor } from 'monaco-editor'
 
-export const syntaxColors = {
+export const SYNTAX_COLORS = {
   diffpane: {
     comment: '808080',
     keyword: '80CBC4',
@@ -17,22 +17,15 @@ export const syntaxColors = {
     symbol: '9B481C',
     variable: '34383D',
   },
-};
-
-export type EditorThemeName = keyof typeof syntaxColors;
-
-export function editorThemeName(scheme: 'light' | 'dark'): EditorThemeName {
-  return scheme === 'light' ? 'diffpane-light' : 'diffpane';
 }
 
-function rules({
-  comment,
-  keyword,
-  string,
-  number,
-  symbol,
-  variable,
-}: (typeof syntaxColors)[EditorThemeName]) {
+export type EditorThemeName = keyof typeof SYNTAX_COLORS
+
+export function editorThemeName(scheme: 'light' | 'dark'): EditorThemeName {
+  return scheme === 'light' ? 'diffpane-light' : 'diffpane'
+}
+
+function rules({ comment, keyword, string, number, symbol, variable }: (typeof SYNTAX_COLORS)[EditorThemeName]) {
   return [
     { token: 'comment', foreground: comment, fontStyle: 'italic' },
     { token: 'keyword', foreground: keyword },
@@ -50,10 +43,10 @@ function rules({
       token,
       foreground: number,
     })),
-  ];
+  ]
 }
 
-const transparent = {
+const TRANSPARENT = {
   'editorOverviewRuler.border': '#00000000',
   'scrollbar.shadow': '#00000000',
   'diffEditor.insertedTextBackground': '#00000000',
@@ -61,15 +54,15 @@ const transparent = {
   'diffEditor.insertedLineBackground': '#00000000',
   'diffEditor.removedLineBackground': '#00000000',
   'diffEditor.diagonalFill': '#00000000',
-};
+}
 
-export const editorThemes: Record<EditorThemeName, editor.IStandaloneThemeData> = {
+export const EDITOR_THEMES: Record<EditorThemeName, editor.IStandaloneThemeData> = {
   diffpane: {
     base: 'vs-dark',
     inherit: true,
-    rules: rules(syntaxColors.diffpane),
+    rules: rules(SYNTAX_COLORS.diffpane),
     colors: {
-      ...transparent,
+      ...TRANSPARENT,
       'editor.background': '#181818',
       'editor.foreground': '#d4d4d4',
       'editorLineNumber.foreground': '#5c6068',
@@ -94,9 +87,9 @@ export const editorThemes: Record<EditorThemeName, editor.IStandaloneThemeData> 
   'diffpane-light': {
     base: 'vs',
     inherit: true,
-    rules: rules(syntaxColors['diffpane-light']),
+    rules: rules(SYNTAX_COLORS['diffpane-light']),
     colors: {
-      ...transparent,
+      ...TRANSPARENT,
       'editor.background': '#ffffff',
       'editor.foreground': '#24272a',
       'editorLineNumber.foreground': '#68737b',
@@ -118,4 +111,4 @@ export const editorThemes: Record<EditorThemeName, editor.IStandaloneThemeData> 
       focusBorder: '#357d76',
     },
   },
-};
+}

@@ -1,1 +1,1 @@
-Store Ideas, review notes, recent paths, and UI preferences in a shared, encrypted SQLite database. Compress saved text and migrate existing records.
+Store Ideas, review notes, recent paths, shortcuts, and UI preferences in a shared, encrypted SQLite database. Compress saved text, migrate existing data, and save Ideas during continuous typing.

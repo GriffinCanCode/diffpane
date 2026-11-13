@@ -142,10 +142,7 @@
   box-shadow: 0 18px 80px light-dark(#26374744, #0008);
 }
 .howmany-dialog::backdrop {
-  background: #0008;
-}
-:root[data-theme='light'] .howmany-dialog::backdrop {
-  background: #26374755;
+  background: var(--backdrop);
 }
 .howmany-dialog > header {
   display: flex;

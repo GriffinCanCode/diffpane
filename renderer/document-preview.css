@@ -39,8 +39,79 @@
   flex-direction: column;
   overflow: hidden;
 }
-.preview-panes[data-compare='true'] .preview-pane + .preview-pane {
-  border-left: 1px solid var(--line);
+.document-preview[data-compare='true'] {
+  --preview-compare-meta: light-dark(#55616b, #bdb6af);
+
+  .preview-toolbar {
+    padding-block: 5px;
+    background: light-dark(#f3f5f6, #211f1d);
+    color: var(--preview-compare-meta);
+  }
+
+  .preview-byte-toggle {
+    min-height: 24px;
+    border-color: light-dark(#c5cdd4, #49433d);
+    background: light-dark(#edf1f3, #2b2825);
+  }
+
+  .preview-byte-toggle:hover {
+    background: light-dark(#e3eaee, #38332f);
+    color: var(--text);
+  }
+
+  .preview-byte-toggle[aria-pressed='true'] {
+    border-color: light-dark(#afcbbd, #53665b);
+    background: light-dark(#e1efe7, #28342e);
+    color: var(--comparison-working);
+  }
+
+  .preview-pane + .preview-pane {
+    border-inline-start: 1px solid var(--line);
+  }
+
+  .preview-pane[data-side='before'] {
+    .preview-heading {
+      background: var(--comparison-base-surface);
+    }
+  }
+
+  .preview-pane[data-side='after'] {
+    .preview-heading {
+      background: var(--comparison-working-surface);
+    }
+  }
+
+  .preview-heading {
+    min-height: 32px;
+    gap: 7px;
+    padding: 4px clamp(8px, 2cqi, 16px);
+  }
+
+  .comparison-version {
+    min-width: 0;
+  }
+
+  .preview-heading-label,
+  .preview-heading-details {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .preview-heading-details {
+    flex: 1 1 0;
+    color: var(--preview-compare-meta);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    text-align: end;
+  }
+
+  @container (max-width: 300px) {
+    .comparison-version::before {
+      display: none;
+    }
+  }
 }
 .preview-note {
   padding: 8px 16px;
@@ -63,6 +134,11 @@
   white-space: pre;
   color: light-dark(#303841, #d4d4d4);
   tab-size: 4;
+}
+.preview-text mark {
+  border-radius: 2px;
+  background: var(--match-background);
+  color: var(--match-text);
 }
 .preview-body audio {
   display: block;

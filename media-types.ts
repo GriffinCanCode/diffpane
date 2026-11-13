@@ -1,4 +1,4 @@
-const types: Record<string, string> = {
+const MEDIA_TYPES: Readonly<Record<string, string>> = {
   png: 'image/png',
   jpg: 'image/jpeg',
   jpeg: 'image/jpeg',
@@ -21,10 +21,12 @@ const types: Record<string, string> = {
   webm: 'video/webm',
   mov: 'video/quicktime',
   ogv: 'video/ogg',
-};
+}
 
 export function mediaType(filename: string) {
-  const name = filename.split('/').at(-1)!;
-  const extension = name.split('.').at(-1)!.toLowerCase();
-  return name.includes('.') && Object.hasOwn(types, extension) ? types[extension] : null;
+  const name = filename.slice(filename.lastIndexOf('/') + 1)
+  const dot = name.lastIndexOf('.')
+  if (dot === -1) return null
+  const extension = name.slice(dot + 1).toLowerCase()
+  return Object.hasOwn(MEDIA_TYPES, extension) ? (MEDIA_TYPES[extension] ?? null) : null
 }

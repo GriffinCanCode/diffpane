@@ -1,149 +1,163 @@
-export type NavigationFile = { path: string; [key: string]: unknown };
-export type NavigationNode = {
-  key: string;
-  path: string;
-  name: string;
-  kind: string;
-  parentKey: string | null;
-  children: NavigationNode[] | null;
-  changedCount: number;
-  file?: NavigationFile | null;
-  inventoryEpoch?: number;
-};
-export type NavigationTree = {
-  root: NavigationNode;
-  nodes: Map<string, NavigationNode>;
-  files: Map<string, NavigationNode>;
-  directories: Map<string, NavigationNode>;
-  searchFiles?: NavigationNode[];
-  inventoryEpoch?: number;
-};
-const compare = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' }).compare;
-const order = (a: NavigationNode, b: NavigationNode) =>
-  a.kind !== b.kind
+export interface NavigationFile {
+  path: string
+  directory?: boolean
+  index?: string
+  worktree?: string
+  conflicted?: boolean
+  submodule?: boolean
+  ignored?: boolean
+  originalPath?: string | null
+  reviewVersion?: number
+}
+export interface NavigationNode {
+  key: string
+  path: string
+  name: string
+  kind: string
+  parentKey: string | null
+  children: NavigationNode[] | null
+  changedCount: number
+  file?: NavigationFile | null
+  inventoryEpoch?: number
+  searchPath?: string
+}
+export interface NavigationTree {
+  root: NavigationNode
+  nodes: Map<string, NavigationNode>
+  files: Map<string, NavigationNode>
+  directories: Map<string, NavigationNode>
+  searchFiles?: NavigationNode[]
+  inventoryEpoch?: number
+}
+const COLLATOR = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
+function order(a: NavigationNode, b: NavigationNode) {
+  return a.kind !== b.kind
     ? a.kind === 'directory'
       ? -1
       : 1
-    : compare(a.name, b.name) || compare(a.path, b.path);
+    : COLLATOR.compare(a.name, b.name) || COLLATOR.compare(a.path, b.path)
+}
+
+function entry(tree: NavigationTree, file: NavigationFile) {
+  return (file.directory ? tree.directories : tree.files).get(file.path)
+}
 
 function insert(tree: NavigationTree, file: NavigationFile, touched: Set<NavigationNode>) {
-  let node = tree.files.get(file.path) ?? tree.directories.get(file.path);
-  const kind = file.directory ? 'directory' : 'file';
-  if (node && node.kind === kind) {
-    node.file = file;
-    return node;
+  const existing = entry(tree, file)
+  if (existing) {
+    existing.file = file
+    return existing
   }
-  if (node) remove(tree, file.path, touched);
-  const basePath = tree.root.path;
+  const basePath = tree.root.path
   if (file.path === basePath && file.directory) {
-    tree.root.file = file;
-    tree.directories.set(file.path, tree.root);
-    return tree.root;
+    tree.root.file = file
+    tree.directories.set(file.path, tree.root)
+    return tree.root
   }
-  const prefix = basePath ? `${basePath}/` : '';
-  if (prefix && !file.path.startsWith(prefix)) return null;
-  const relative = file.path.slice(prefix.length);
-  if (!relative) return null;
-  const parts = relative.split('/');
-  let parent = tree.root;
-  let pathname = basePath;
-  for (let index = 0; index < parts.length; index++) {
-    pathname = pathname ? `${pathname}/${parts[index]}` : parts[index];
-    const directory = index < parts.length - 1 || file.directory === true;
-    const key = `${directory ? 'dir' : 'file'}:${pathname}`;
-    let child = tree.nodes.get(key);
+  const prefix = basePath ? `${basePath}/` : ''
+  if (prefix && !file.path.startsWith(prefix)) return null
+  const relative = file.path.slice(prefix.length)
+  if (!relative) return null
+  const parts = relative.split('/')
+  let parent = tree.root
+  let pathname = basePath
+  for (const [index, part] of parts.entries()) {
+    pathname = pathname ? `${pathname}/${part}` : part
+    const directory = index < parts.length - 1 || file.directory === true
+    const key = `${directory ? 'dir' : 'file'}:${pathname}`
+    let child = tree.nodes.get(key)
     if (!child) {
       child = {
         key,
         path: pathname,
-        name: parts[index],
+        name: part,
         kind: directory ? 'directory' : 'file',
         parentKey: parent.key,
         children: directory ? [] : null,
         changedCount: 0,
         file: directory ? null : file,
-      };
-      tree.nodes.set(key, child);
-      parent.children!.push(child);
-      touched.add(parent);
-      if (!directory) tree.files.set(pathname, child);
+      }
+      if (!parent.children) throw new Error(`Expected a navigation directory at ${parent.path}`)
+      tree.nodes.set(key, child)
+      parent.children.push(child)
+      touched.add(parent)
+      if (!directory) tree.files.set(pathname, child)
     }
-    parent = child;
+    parent = child
   }
-  node = parent;
-  node.file = file;
-  if (file.directory) tree.directories.set(file.path, node);
-  tree.searchFiles = undefined;
-  return node;
+  parent.file = file
+  if (file.directory) tree.directories.set(file.path, parent)
+  tree.searchFiles = undefined
+  return parent
 }
 
-function remove(tree: NavigationTree, pathname: string, touched: Set<NavigationNode>) {
-  const node = tree.files.get(pathname) ?? tree.directories.get(pathname);
-  if (!node) return;
-  tree.directories.delete(pathname);
+function remove(tree: NavigationTree, node: NavigationNode, touched: Set<NavigationNode>) {
   if (node.kind === 'file') {
-    tree.files.delete(pathname);
-    tree.nodes.delete(node.key);
+    tree.files.delete(node.path)
+    tree.nodes.delete(node.key)
   } else {
-    node.file = null;
-    touched.add(node);
+    tree.directories.delete(node.path)
+    node.file = null
+    touched.add(node)
   }
-  const parent = tree.nodes.get(node.parentKey!);
-  if (parent) touched.add(parent);
-  tree.searchFiles = undefined;
+  const parent = node.parentKey === null ? undefined : tree.nodes.get(node.parentKey)
+  if (parent) touched.add(parent)
+  tree.searchFiles = undefined
 }
 
 function finish(tree: NavigationTree, touched: Set<NavigationNode>) {
   // Filter each child array once, including when an entire large folder moves.
-  for (const parent of touched)
-    parent.children = parent.children!.filter(child => tree.nodes.get(child.key) === child);
-  const empty = [...touched].filter(
-    node => node !== tree.root && !node.file && !node.children!.length,
-  );
-  while (empty.length) {
-    const node = empty.pop()!;
-    if (!tree.nodes.delete(node.key)) continue;
-    const parent = tree.nodes.get(node.parentKey!);
-    if (!parent) continue;
-    parent.children = parent.children!.filter(child => child !== node);
-    touched.add(parent);
-    if (parent !== tree.root && !parent.file && !parent.children.length) empty.push(parent);
+  for (const parent of touched) {
+    if (parent.children) parent.children = parent.children.filter(child => tree.nodes.get(child.key) === child)
   }
-  for (const node of touched) node.children!.sort(order);
-  return tree;
+  const empty = [...touched].filter(node => node !== tree.root && !node.file && node.children?.length === 0)
+  for (let node = empty.pop(); node; node = empty.pop()) {
+    if (!tree.nodes.delete(node.key)) continue
+    const parent = node.parentKey === null ? undefined : tree.nodes.get(node.parentKey)
+    if (!parent?.children) continue
+    parent.children = parent.children.filter(child => child !== node)
+    touched.add(parent)
+    if (parent !== tree.root && !parent.file && !parent.children.length) empty.push(parent)
+  }
+  for (const node of touched) node.children?.sort(order)
+  return tree
 }
 
 /** Retain unchanged nodes and sort only touched folders during large-repository churn. */
-export function reconcileNavigationTree(
-  tree: NavigationTree,
-  inventory: NavigationFile[],
-  basePath = '',
-) {
-  if (tree.root.path !== basePath) return null;
-  const epoch = (tree.inventoryEpoch ?? 0) + 1;
-  tree.inventoryEpoch = epoch;
-  const touched = new Set<NavigationNode>();
+export function reconcileNavigationTree(tree: NavigationTree, inventory: readonly NavigationFile[], basePath = '') {
+  if (tree.root.path !== basePath) return null
+  const epoch = (tree.inventoryEpoch ?? 0) + 1
+  tree.inventoryEpoch = epoch
+  const touched = new Set<NavigationNode>()
   for (const file of inventory) {
-    if ((tree.files.get(file.path) ?? tree.directories.get(file.path))?.inventoryEpoch === epoch)
-      continue;
-    const node = insert(tree, file, touched);
-    if (node) node.inventoryEpoch = epoch;
+    if (entry(tree, file)?.inventoryEpoch === epoch) continue
+    const node = insert(tree, file, touched)
+    if (node) node.inventoryEpoch = epoch
   }
-  for (const [pathname, node] of tree.files)
-    if (node.inventoryEpoch !== epoch) remove(tree, pathname, touched);
-  for (const [pathname, node] of tree.directories)
-    if (node.inventoryEpoch !== epoch) remove(tree, pathname, touched);
-  return finish(tree, touched);
+  for (const node of tree.files.values()) if (node.inventoryEpoch !== epoch) remove(tree, node, touched)
+  for (const node of tree.directories.values()) if (node.inventoryEpoch !== epoch) remove(tree, node, touched)
+  return finish(tree, touched)
 }
 
 /** IPC deltas touch only changed nodes; the rest of the catalog stays in place. */
 export function applyNavigationDelta(
   tree: NavigationTree,
-  files: NavigationFile[],
-  removed: string[],
+  files: readonly NavigationFile[],
+  removed: readonly string[],
 ) {
-  const touched = new Set<NavigationNode>();
-  for (const pathname of removed) remove(tree, pathname, touched);
-  for (const file of files) insert(tree, file, touched);
-  return finish(tree, touched);
+  const touched = new Set<NavigationNode>()
+  const removePath = (pathname: string) => {
+    const file = tree.files.get(pathname)
+    const directory = tree.directories.get(pathname)
+    if (file) remove(tree, file, touched)
+    if (directory) remove(tree, directory, touched)
+  }
+  for (const pathname of removed) removePath(pathname)
+  for (const file of files) {
+    // Each IPC delta carries a single inventory entry per path; a new kind replaces its marker.
+    const previous = (file.directory ? tree.files : tree.directories).get(file.path)
+    if (previous) remove(tree, previous, touched)
+    insert(tree, file, touched)
+  }
+  return finish(tree, touched)
 }

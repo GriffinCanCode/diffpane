@@ -4,14 +4,7 @@ doc_radar:
     - file: electron/main.mjs
       contains: ['contextIsolation: true', 'nodeIntegration: false', 'sandbox: true']
     - file: renderer/main.js
-      contains:
-        [
-          'createNavigator',
-          'createLanguageFeatures',
-          'saveViewState',
-          'editorReadOnly',
-          'diff-gutter-${kind}',
-        ]
+      contains: ['createNavigator', 'createLanguageFeatures', 'saveViewState', 'editorReadOnly', 'diff-gutter-${kind}']
     - file: renderer/navigator.js
       contains: ['ROW_HEIGHT', 'buildNavigationTree', 'navigator-root']
     - file: renderer/syntax.ts
@@ -21,15 +14,7 @@ doc_radar:
     - file: electron/language.mjs
       contains: ['LanguageRuntime', 'textDocument/didOpen']
     - file: electron/servers.ts
-      contains:
-        [
-          'basedpyright',
-          'rust-analyzer',
-          'ElixirLS',
-          'gopls',
-          'SourceKit-LSP',
-          'typescript-language-server',
-        ]
+      contains: ['basedpyright', 'rust-analyzer', 'ElixirLS', 'gopls', 'SourceKit-LSP', 'typescript-language-server']
 ---
 
 # diffpane
@@ -46,15 +31,17 @@ Open **Changes** with ⌘⇧G to see the review queue and its progress. Select a
 
 Choose **Capture checkpoint** in Changes before starting an agent pass or making your own edits. The queue compares tracked files and untracked files covered by Git status against that checkpoint, including edits that get committed during the review. Existing staged, unstaged, and untracked edits are part of the starting point. Use **Compare against** to switch between Git HEAD and the checkpoint. Each keeps its own review progress. **Replace checkpoint** starts a fresh review from the current working tree. A checkpoint lasts until you close the window and leaves your Git index and history untouched.
 
+Open **Search** with ⌘⇧F to find text across the project. Choose **Changed files** to search the working contents of files Git reports as changed, including new files. Results refresh as files change. Use ↑ and ↓ to move through matching lines, then press Enter to jump to the selected text. Selecting text in the editor first fills in the query.
+
 Open **Notes** from the title bar or press ⌘⇧J by default. Right-click in the editor and choose **Add review note** to capture the current line or selection, including on the HEAD side of a comparison. Use the file header’s note button for a whole file, or choose **Make project note** for feedback without a file. Notes stay on this Mac across restarts. Select a note’s location to return to the captured lines. If they moved, Diffpane looks for a unique match and tells you when the original lines can’t be located. Choose **Copy handoff** to paste your open notes, file references, and captured excerpts into any agent chat.
 
 Open **Ideas** with ⌘⇧I to see a searchable project notebook. Markdown formats as you type, and lists continue when you press Enter. Use **Format text** to apply common styles, or ⌘-click a link in the note to open it. Choose **Dock beside code** to keep an idea visible while you work. Drop a project file onto an idea or choose **Link current file or selection** to attach code. **Add to Claude** makes the idea available on your next message. Ideas autosave locally and are shared by windows on the same Git worktree.
 
 Drag the dividers to resize Ideas, File Explorer, code, and Claude or Review Notes. With a divider focused, use the arrow keys to resize. Double-click a divider to reset its size. Diffpane remembers your layout.
 
-Ideas, review notes, recent paths, appearance, pane layout, and Ideas docking are saved in an encrypted local database. On macOS, Keychain protects the encryption key. Existing records are imported automatically on upgrade.
+Ideas, review notes, recent paths, keyboard shortcuts, and appearance and layout settings are saved locally in an encrypted database. On macOS, Keychain protects the encryption key. Existing settings and notes are imported automatically on upgrade.
 
-It includes search, a file picker, language tools, line counts, and previews for images, audio, video, and PDFs.
+It also includes a file picker, language tools, line counts, and previews for images, audio, video, and PDFs.
 
 ## Claude in Diffpane
 
@@ -85,9 +72,9 @@ The app goes in `~/Applications`. The `dp` and `diffpane` commands go in `~/.loc
 
 The terminal command opens the current directory when it belongs to a Git working tree. Running it outside Git or opening Diffpane from Finder or the Dock shows the welcome screen. Choose Open Folder or Open File to browse a Git working tree, or reopen a recent file or folder.
 
-⌘N opens a new welcome window and ⌘O opens the folder picker. ⌘P finds files, ⌘F searches a file, and ⌘B shows or hides the explorer.
-
 Open **Settings → Appearance** from the title-bar gear or press ⌘, to choose the theme, text diff layout, and editor typography. Changes apply immediately and are saved for future windows.
+
+Open **Settings → Keyboard shortcuts** from the title-bar gear or the Diffpane menu to see the current and default bindings. Select a binding to change it, or restore the defaults at any time. By default, ⌘N opens a new window, ⌘O opens the folder picker, and ⌘P finds files in the project.
 
 ## Development
 

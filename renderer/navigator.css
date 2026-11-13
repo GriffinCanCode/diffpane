@@ -59,6 +59,18 @@
   width: 16px;
   height: 16px;
 }
+.navigator-action[data-loading-status] {
+  --loading-width: 14px;
+  --loading-height: 2px;
+  --loading-gap: 0;
+  position: relative;
+}
+.navigator-action[data-loading-status]::before {
+  position: absolute;
+  inset-inline: 0;
+  inset-block-end: 0;
+  margin-inline: auto;
+}
 .navigator-action:hover {
   color: light-dark(#303943, #ccc);
   background: light-dark(#e9eef1, #2a2d2e);
@@ -413,10 +425,7 @@
   color: light-dark(#303943, #ccc);
 }
 .rename-dialog::backdrop {
-  background: #0008;
-}
-:root[data-theme='light'] .rename-dialog::backdrop {
-  background: #26374755;
+  background: var(--backdrop);
 }
 .rename-dialog h2 {
   margin: 0 0 18px;

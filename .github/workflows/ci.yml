@@ -29,5 +29,6 @@ jobs:
           path: resources/howmany
           key: howmany-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('howmany-tool.json', 'setup-howmany.ts') }}
       - run: npm ci --prefer-offline
+      - run: git diff --exit-code -- electron/preload.cjs
       - run: npm run setup:howmany
       - run: npm run verify

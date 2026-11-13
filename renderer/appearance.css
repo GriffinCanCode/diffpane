@@ -63,7 +63,7 @@
   gap: 4px;
 }
 
-.appearance-sidebar nav .settings-current {
+.appearance-sidebar nav button {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -111,6 +111,12 @@
   justify-content: space-between;
   gap: 16px;
   padding-inline: 30px;
+}
+
+.appearance-save-error {
+  margin: 0 12px;
+  font-size: 11px;
+  color: var(--red);
 }
 
 .appearance-header {
