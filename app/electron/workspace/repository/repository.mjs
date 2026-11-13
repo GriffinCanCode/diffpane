@@ -11,11 +11,11 @@ import {
   claudeFilePath,
   claudeVisiblePath,
   MAX_CLAUDE_FILE_BYTES,
-  readClaudeBytes,
 } from '../../tools/assistant/claude-workspace.mjs'
 import { encodeText, fileContent, MAX_FILE_BYTES, readLimit, searchableText } from '../documents/file-content.ts'
 
 /** @import { BigIntStats } from 'node:fs' */
+/** @import { FileHandle } from 'node:fs/promises' */
 /** @import { FileContent } from '../documents/file-content.ts' */
 /** @import { WorkspaceFile } from '../../runtime/session/workspace-types.ts' */
 /** @typedef {Parameters<typeof fileContent>[0]} ContentBytes */
@@ -76,6 +76,54 @@ function checkpointReadChanged(filename) {
   return Object.assign(new Error(`${filename} changed while reading the checkpoint. Try again.`), {
     code: 'CHECKPOINT_READ_CHANGED',
   })
+}
+
+function saveConflict() {
+  return appError('The file changed on disk. Your edits are still open and have not overwritten it.', {
+    code: 'SAVE_CONFLICT',
+  })
+}
+
+/** @param {FileHandle} handle @param {number} size */
+async function readSaveBytes(handle, size) {
+  const bytes = Buffer.allocUnsafe(size + 1)
+  let offset = 0
+  while (offset < bytes.length) {
+    // oxlint-disable-next-line eslint/no-await-in-loop -- Read by position so retries can inspect the same descriptor.
+    const { bytesRead } = await handle.read(bytes, offset, bytes.length - offset, offset)
+    if (!bytesRead) break
+    offset += bytesRead
+  }
+  return bytes.subarray(0, offset)
+}
+
+/** @param {FileHandle} handle @param {Buffer} bytes @param {(offset: number) => void} [progress] */
+async function writeSaveBytes(handle, bytes, progress) {
+  let offset = 0
+  while (offset < bytes.length) {
+    // oxlint-disable-next-line eslint/no-await-in-loop -- The next write starts after the actual bytes written by this write.
+    const { bytesWritten } = await handle.write(bytes, offset, bytes.length - offset, offset)
+    if (!bytesWritten) throw new Error('The file write did not complete.')
+    offset += bytesWritten
+    progress?.(offset)
+  }
+  await handle.truncate(bytes.length)
+  await handle.sync()
+}
+
+/** @param {FileHandle} handle @param {Buffer} original @param {Buffer} bytes @param {number} written @param {() => Promise<string | undefined>} currentStamp */
+async function restoreSave(handle, original, bytes, written, currentStamp) {
+  const latest = await handle.stat({ bigint: true })
+  if (latest.size > MAX_FILE_BYTES) return false
+  const actual = await readSaveBytes(handle, Number(latest.size))
+  if (checkpointStamp(latest) !== (await currentStamp())) return false
+  if (actual.equals(original)) return true
+  // Restore the prior bytes only if the file still matches a state our
+  // completed writes produced. A replacement or external edit wins.
+  const partial = Buffer.concat([bytes.subarray(0, written), original.subarray(written)])
+  if (!actual.equals(partial) && !(written === bytes.length && actual.equals(bytes))) return false
+  await writeSaveBytes(handle, original)
+  return true
 }
 
 export class Repository {
@@ -876,7 +924,7 @@ export class Repository {
       !(await lstat(absolute)).isFile()
     )
       throw new Error('Only regular text files in this directory can be edited.')
-    return absolute
+    return resolved
   }
 
   /** @param {unknown} filename @param {unknown} text @param {unknown} expected */
@@ -900,36 +948,41 @@ export class Repository {
 
   /** @param {string} filename @param {string} text @param {string} expected @param {boolean} claude */
   async #save(filename, text, expected, claude) {
-    const absolute = await (claude ? claudeFilePath(this, filename) : this.#editPath(filename))
+    const resolve = () => (claude ? claudeFilePath(this, filename) : this.#editPath(filename))
+    const absolute = await resolve()
     const handle = await open(absolute, constants.O_RDWR | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0))
+    const currentStamp = async () => {
+      if ((await resolve().catch(() => undefined)) !== absolute) return undefined
+      const metadata = await lstat(absolute, { bigint: true }).catch(() => undefined)
+      if (!metadata?.isFile() || (claude && metadata.nlink !== 1n)) return undefined
+      return checkpointStamp(metadata)
+    }
     try {
-      const metadata = await (claude ? checkClaudeFile(handle, absolute) : handle.stat())
-      if (!metadata.isFile() || metadata.size > MAX_FILE_BYTES)
+      if (claude) await checkClaudeFile(handle, absolute)
+      const metadata = await handle.stat({ bigint: true })
+      if (!metadata.isFile() || metadata.size > (claude ? MAX_CLAUDE_FILE_BYTES : MAX_FILE_BYTES))
         throw new Error('This file cannot be edited as a complete text document.')
-      const original = claude ? await readClaudeBytes(handle, metadata.size) : await handle.readFile()
+      const original = await readSaveBytes(handle, Number(metadata.size))
+      if (BigInt(original.length) !== metadata.size) throw saveConflict()
       const current = fileContent(original, filename)
       if (current.kind !== 'text' || current.limited)
         throw new Error('This file cannot be edited as a complete text document.')
-      if (current.value !== expected)
-        throw appError('The file changed on disk. Your edits are still open and have not overwritten it.', {
-          code: 'SAVE_CONFLICT',
-        })
+      if (current.value !== expected) throw saveConflict()
       const bytes = encodeText(text, original)
       if (bytes.length > MAX_FILE_BYTES) throw new Error('The edited file exceeds the 2 MiB text limit.')
-      if (claude) {
-        const latest = await checkClaudeFile(handle, absolute)
-        if (latest.size !== metadata.size || latest.mtimeMs !== metadata.mtimeMs || latest.ctimeMs !== metadata.ctimeMs)
-          throw appError('The file changed on disk. Request a new edit.', { code: 'SAVE_CONFLICT' })
+      if (checkpointStamp(metadata) !== (await currentStamp())) throw saveConflict()
+      let written = 0
+      try {
+        await writeSaveBytes(handle, bytes, offset => (written = offset))
+      } catch (error) {
+        if (await restoreSave(handle, original, bytes, written, currentStamp).catch(() => false)) throw error
+        throw appError(
+          'The save failed, and Diffpane could not restore the original file. Your edits are still open.',
+          {
+            code: 'SAVE_RECOVERY_FAILED',
+          },
+        )
       }
-      let offset = 0
-      while (offset < bytes.length) {
-        // oxlint-disable-next-line eslint/no-await-in-loop -- The next write starts after the actual bytes written by this write.
-        const { bytesWritten } = await handle.write(bytes, offset, bytes.length - offset, offset)
-        if (!bytesWritten) throw new Error('The file write did not complete.')
-        offset += bytesWritten
-      }
-      await handle.truncate(bytes.length)
-      await handle.sync()
     } finally {
       await handle.close()
     }

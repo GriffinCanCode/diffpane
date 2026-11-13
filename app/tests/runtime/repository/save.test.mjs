@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdtemp, mkdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, open, readFile, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { test } from 'vite-plus/test'
+import { test, vi } from 'vite-plus/test'
 import { Repository } from '../../../electron/workspace/repository/repository.mjs'
 
 /** @param {import('vite-plus/test').TestContext} t */
@@ -57,6 +57,79 @@ test('concurrent saves check disk contents in order and a rejected save does not
   const next = repository.save('file.txt', 'next edit', 'first edit')
   await Promise.all([first, assert.rejects(stale, /changed on disk/), next])
   assert.equal(await readFile(filename, 'utf8'), 'next edit')
+})
+
+test.for([false, true])(
+  'a failed partial write preserves an external edit (%s) or restores the prior file',
+  async (externalEdit, t) => {
+    const { root, repository } = await fixture(t)
+    const filename = path.join(root, 'file.txt')
+    await writeFile(filename, 'original')
+    await using file = await open(filename)
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- The runtime prototype supplies FileHandle methods without a public constructor.
+    const prototype = /** @type {import('node:fs/promises').FileHandle} */ (Object.getPrototypeOf(file))
+    /** @type {(this: import('node:fs/promises').FileHandle, buffer: Buffer, offset: number, length: number, position: number) => Promise<{ bytesWritten: number, buffer: Buffer }>} */
+    // oxlint-disable-next-line typescript/unbound-method -- The fault injector calls this method with the save handle.
+    const write = prototype.write
+    let calls = 0
+    const injection = vi.spyOn(prototype, 'write')
+    // FileHandle.write has other overloads. Save uses only the positional Buffer overload.
+    /** @this {import('node:fs/promises').FileHandle} @param {Buffer} buffer @param {number} offset @param {number} length @param {number} position */
+    async function failWrite(buffer, offset, length, position) {
+      calls++
+      if (calls === 1) return write.call(this, buffer, offset, 2, position)
+      if (calls === 2) {
+        if (externalEdit) await writeFile(filename, 'external edit')
+        throw new Error('injected write failure')
+      }
+      return write.call(this, buffer, offset, length, position)
+    }
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- All writes through this prototype during the save use the positional Buffer overload.
+    injection.mockImplementation(/** @type {typeof prototype.write} */ (/** @type {unknown} */ (failWrite)))
+    try {
+      await assert.rejects(
+        repository.save('file.txt', 'edited contents', 'original'),
+        externalEdit ? { code: 'SAVE_RECOVERY_FAILED' } : /injected write failure/u,
+      )
+      assert.equal(await readFile(filename, 'utf8'), externalEdit ? 'external edit' : 'original')
+    } finally {
+      injection.mockRestore()
+    }
+    if (!externalEdit) {
+      await repository.save('file.txt', 'edited contents', 'original')
+      assert.equal(await readFile(filename, 'utf8'), 'edited contents')
+    }
+  },
+)
+
+test('a file replaced while a save reads it is reported as a conflict', async t => {
+  const { root, repository } = await fixture(t)
+  const filename = path.join(root, 'file.txt')
+  await writeFile(filename, 'original')
+  await using file = await open(filename)
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- The runtime prototype supplies FileHandle methods without a public constructor.
+  const prototype = /** @type {import('node:fs/promises').FileHandle} */ (Object.getPrototypeOf(file))
+  /** @type {(this: import('node:fs/promises').FileHandle, buffer: Buffer, offset: number, length: number, position: number) => Promise<{ bytesRead: number, buffer: Buffer }>} */
+  // oxlint-disable-next-line typescript/unbound-method -- The fault injector calls this method with the save handle.
+  const read = prototype.read
+  const injection = vi.spyOn(prototype, 'read')
+  // FileHandle.read has other overloads. Save uses only the positional Buffer overload.
+  /** @this {import('node:fs/promises').FileHandle} @param {Buffer} buffer @param {number} offset @param {number} length @param {number} position */
+  async function replaceWhileReading(buffer, offset, length, position) {
+    const result = await read.call(this, buffer, offset, length, position)
+    const replacement = path.join(root, 'replacement.txt')
+    await writeFile(replacement, 'external edit')
+    await rename(replacement, filename)
+    return result
+  }
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- The save reads with the positional Buffer overload.
+  injection.mockImplementationOnce(/** @type {typeof prototype.read} */ (/** @type {unknown} */ (replaceWhileReading)))
+  try {
+    await assert.rejects(repository.save('file.txt', 'edited contents', 'original'), { code: 'SAVE_CONFLICT' })
+    assert.equal(await readFile(filename, 'utf8'), 'external edit')
+  } finally {
+    injection.mockRestore()
+  }
 })
 
 test('saves reject symlinks, Git metadata, out-of-scope files and incomplete previews', async t => {
