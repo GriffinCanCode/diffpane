@@ -187,10 +187,13 @@ export function createUiPreferences(bridge?: UiPreferencesBridge) {
       return () => listeners.delete(listener)
     },
     async settled() {
+      await Promise.all([...failures.keys()].map(persist))
       while (operations.size) {
         // oxlint-disable-next-line eslint/no-await-in-loop -- A listener can enqueue another write while an earlier batch settles.
         await Promise.all(operations.values())
       }
+      const failure = failures.values().next().value
+      if (failure) throw failure
     },
     dispose() {
       disposed = true

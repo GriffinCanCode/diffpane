@@ -104,3 +104,33 @@ test('hydration and acknowledgements preserve newer edits and retire committed l
   assert.equal(preferences.get('appearance').font, 'courier')
   assert.equal(preferences.get('appearance').lineNumbers, false)
 })
+
+test('settling preferences reports failed writes and retries the queued patch', async t => {
+  vi.stubGlobal('localStorage', { getItem: () => null })
+  const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+  t.onTestFinished(() => {
+    vi.unstubAllGlobals()
+    logged.mockRestore()
+  })
+  let writable = false
+  const set: UiPreferencesBridge['set'] = async (key, value) => {
+    if (!writable) throw new Error('Storage temporarily unavailable')
+    return applyUiPreferencePatch(parseUiPreferencePatch(key, value))
+  }
+  const preferences = createUiPreferences({
+    get: () => Promise.resolve({}),
+    set,
+    onChange: () => () => {},
+  })
+  t.onTestFinished(() => preferences.dispose())
+
+  preferences.set('ideasVisible', true)
+  await assert.rejects(preferences.settled(), /Storage temporarily unavailable/u)
+  assert.equal(preferences.hasSaveError('ideasVisible'), true)
+  assert.equal(preferences.get('ideasVisible'), true)
+
+  writable = true
+  await preferences.settled()
+  assert.equal(preferences.hasSaveError('ideasVisible'), false)
+  assert.equal(preferences.get('ideasVisible'), true)
+})
