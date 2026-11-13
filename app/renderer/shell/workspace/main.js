@@ -2614,10 +2614,15 @@ Object.assign(window, {
   const unsubscribe = api.onChange(next => {
     if (closed) return
     if (!next) return
-    if (!pendingSnapshot || next.revision >= pendingSnapshot.revision) {
+    if (
+      !pendingSnapshot ||
+      next.revision > pendingSnapshot.revision ||
+      (next.revision === pendingSnapshot.revision && next.inventoryRevision >= pendingSnapshot.inventoryRevision)
+    ) {
       pendingSnapshot = next
-      snapshotPaths.add(next.changedPaths ?? ['*'])
     }
+    // Even an older snapshot can carry a path change missing from the newest snapshot.
+    snapshotPaths.add(next.changedPaths ?? ['*'])
     snapshotFrame ??= requestAnimationFrame(() => {
       const pending = pendingSnapshot
       pendingSnapshot = null
