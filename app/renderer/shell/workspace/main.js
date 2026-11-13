@@ -711,6 +711,7 @@ function syncReviewState() {
   let state = null
   if (card?.comparing && card.comparison === reviewComparison) {
     if (closingRequested) state = 'closing'
+    else if (applyingAssistantPath === card.file.path) state = 'saving'
     else if (card.autosave?.pending) state = card.saveError ? 'save-failed' : 'saving'
     else if (card.loading || card.dirty) state = 'loading'
     else if (card.documentFailed) state = 'failed'

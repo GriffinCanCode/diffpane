@@ -449,7 +449,8 @@ export function createChangeReview(container, { onOpen, onBack, onProgress, onCa
       entryIndex.set(file.path, entries.length)
       entries.push(file)
     }
-    if (activePath === null || !entryIndex.has(activePath))
+    const activeRemoved = activePath !== null && !entryIndex.has(activePath)
+    if (activePath === null || activeRemoved)
       activePath = currentPath !== null && entryIndex.has(currentPath) ? currentPath : (entries[0]?.path ?? null)
     rows.style.height = `${entries.length * ROW_HEIGHT}px`
     if (resetScroll) list.scrollTop = 0
@@ -469,6 +470,7 @@ export function createChangeReview(container, { onOpen, onBack, onProgress, onCa
     progressGroup.hidden = filterGroup.hidden = changes.size === 0
     empty.hidden = !isEmpty
     list.hidden = footer.hidden = isEmpty
+    if (activeRemoved && focused === list) revealActive()
     renderControls()
     renderRows()
     const focusHidden =
