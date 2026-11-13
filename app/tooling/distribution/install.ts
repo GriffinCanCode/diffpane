@@ -1,6 +1,6 @@
 import { execFileSync, spawn } from 'node:child_process'
 import { constants } from 'node:fs'
-import { cp, mkdir, mkdtemp, writeFile, rename, readFile, readlink, rm, symlink } from 'node:fs/promises'
+import { cp, lstat, mkdir, mkdtemp, writeFile, rename, readFile, readlink, rm, symlink } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { packager } from '@electron/packager'
@@ -21,6 +21,33 @@ if (process.argv.length > 2) throw new Error('Usage: npm run install:app')
 
 if (process.platform !== 'darwin')
   throw new Error('The terminal launcher installer currently targets macOS. Use npm start on other platforms.')
+
+const userDirectory = os.homedir()
+const applications = path.join(userDirectory, 'Applications')
+const destination = path.join(applications, 'Diffpane.app')
+const bin = path.join(userDirectory, '.local/bin')
+const shortLauncher = path.join(bin, 'dp')
+const longLauncher = path.join(bin, 'diffpane')
+async function existingLauncher(filename: string) {
+  try {
+    return await lstat(filename)
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return undefined
+    throw error
+  }
+}
+const [existingShortLauncher, existingLongLauncher] = await Promise.all([
+  existingLauncher(shortLauncher),
+  existingLauncher(longLauncher),
+])
+if (
+  existingShortLauncher &&
+  (!existingShortLauncher.isSymbolicLink() || (await readlink(shortLauncher)) !== 'diffpane')
+)
+  throw new Error(`Cannot install the dp shortcut because ${shortLauncher} is already in use.`)
+if (existingLongLauncher && !existingLongLauncher.isFile() && !existingLongLauncher.isSymbolicLink())
+  throw new Error(`Cannot install the launcher because ${longLauncher} is already in use.`)
+
 async function buildRenderer() {
   const child = spawn('npm', ['run', 'build'], { stdio: 'inherit' })
   await new Promise<void>((resolve, reject) => {
@@ -92,16 +119,15 @@ const [bundle] = await (async () => {
 if (!bundle) throw new Error('Electron Packager did not produce a macOS app.')
 const app = path.join(bundle, 'Diffpane.app')
 const launcher = (await readFile(new URL('./diffpane.sh', import.meta.url), 'utf8')).replace('@VERSION@', version)
-const userDirectory = os.homedir()
-const applications = path.join(userDirectory, 'Applications')
-const destination = path.join(applications, 'Diffpane.app')
-const bin = path.join(userDirectory, '.local/bin')
 await mkdir(applications, { recursive: true })
 await mkdir(bin, { recursive: true })
 const staging = await mkdtemp(path.join(applications, '.diffpane-'))
 const stagedApp = path.join(staging, 'Diffpane.app')
 const previous = path.join(staging, 'Diffpane-previous.app')
+let launcherStage: string | undefined
+let shortcutCreated = false
 let backup = false
+let appInstalled = false
 try {
   await cp(app, stagedApp, {
     recursive: true,
@@ -109,6 +135,15 @@ try {
     mode: constants.COPYFILE_FICLONE,
   })
   execFileSync('codesign', ['--force', '--deep', '--sign', '-', stagedApp], { stdio: 'inherit' })
+  launcherStage = await mkdtemp(path.join(bin, '.diffpane-'))
+  const stagedLauncher = path.join(launcherStage, 'diffpane')
+  await writeFile(stagedLauncher, launcher, { mode: 0o755 })
+  try {
+    await symlink('diffpane', shortLauncher)
+    shortcutCreated = true
+  } catch (error) {
+    if ((await readlink(shortLauncher).catch(() => null)) !== 'diffpane') throw error
+  }
   try {
     await rename(destination, previous)
     backup = true
@@ -117,14 +152,20 @@ try {
   }
   try {
     await rename(stagedApp, destination)
+    appInstalled = true
+    await rename(stagedLauncher, longLauncher)
   } catch (error) {
-    if (backup) {
-      try {
+    try {
+      if (appInstalled) await rename(destination, stagedApp)
+      if (backup) {
         await rename(previous, destination)
         backup = false
-      } catch (rollback) {
-        throw new AggregateError([error, rollback], `Previous app kept at ${previous}`, { cause: rollback })
       }
+    } catch (rollback) {
+      const message = backup
+        ? `Previous app kept at ${previous}`
+        : `Could not remove the partial install at ${destination}`
+      throw new AggregateError([error, rollback], message, { cause: rollback })
     }
     throw error
   }
@@ -136,15 +177,22 @@ try {
       console.info(`Previous app kept at ${previous}`)
     }
   }
-  await writeFile(path.join(bin, 'diffpane'), launcher, { mode: 0o755 })
-  const shortLauncher = path.join(bin, 'dp')
-  try {
-    await symlink('diffpane', shortLauncher)
-  } catch (error) {
-    if ((await readlink(shortLauncher).catch(() => null)) !== 'diffpane') throw error
+} catch (error) {
+  if (shortcutCreated && (await readlink(shortLauncher).catch(() => null)) === 'diffpane') {
+    try {
+      await rm(shortLauncher, { force: true })
+    } catch (rollback) {
+      throw new AggregateError([error, rollback], `Could not remove the partial shortcut at ${shortLauncher}`, {
+        cause: rollback,
+      })
+    }
   }
+  throw error
 } finally {
   // Preserve the old bundle if the rollback itself fails.
-  if (!backup) await rm(staging, { recursive: true, force: true })
+  await Promise.all([
+    backup ? undefined : rm(staging, { recursive: true, force: true }),
+    launcherStage ? rm(launcherStage, { recursive: true, force: true }) : undefined,
+  ])
 }
 console.info(`Installed ${destination}\nRun dp or diffpane to open Diffpane.`)
