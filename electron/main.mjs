@@ -8,10 +8,13 @@ import path from 'node:path';
 import { stat, writeFile } from 'node:fs/promises';
 import { mediaResponse } from './media.ts';
 import { RecentTargets } from './recent-targets.ts';
+import { ClaudeCredentials } from './claude-credentials.mjs';
+import { ClaudeSession } from './claude-session.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const sessions = new Map();
 const mediaSessions = new Map();
+const fileChanges = new Map();
 protocol.registerSchemesAsPrivileged([
   { scheme: 'diffpane-media', privileges: { standard: true, secure: true, stream: true } },
 ]);
@@ -20,6 +23,7 @@ let quitting = false;
 const shutdowns = new Set();
 const pendingOpenPaths = [];
 app.setName('Diffpane');
+const claudeCredentials = new ClaudeCredentials(path.join(app.getPath('userData'), 'claude-key'));
 const recentTargetsReady = app.whenReady().then(async () => {
   const history = new RecentTargets(path.join(app.getPath('userData'), 'recent-targets.json'));
   await history.ready;
@@ -36,6 +40,22 @@ function rememberTarget(target) {
   void update.finally(() => {
     if (recentUpdates === update) updatingRecents = false;
   });
+}
+
+async function changeFiles(session, files, change) {
+  const root = await session.root();
+  const keys = [...new Set(files.map(file => path.resolve(root, file)))];
+  const previous = keys.map(key => fileChanges.get(key));
+  const pending = (async () => {
+    await Promise.allSettled(previous);
+    return change();
+  })();
+  for (const key of keys) fileChanges.set(key, pending);
+  try {
+    return await pending;
+  } finally {
+    for (const key of keys) if (fileChanges.get(key) === pending) fileChanges.delete(key);
+  }
 }
 
 function createWindow(directory = null) {
@@ -92,9 +112,12 @@ function createWindow(directory = null) {
   });
   worker?.on('message', message => {
     if (message.event) {
-      if (message.event === 'change' && message.value?.root && !remembered) {
-        remembered = true;
-        rememberTarget(directory);
+      if (message.event === 'change' && message.value?.root) {
+        session.repositoryRoot = message.value.root;
+        if (!remembered) {
+          remembered = true;
+          rememberTarget(directory);
+        }
       }
       if (
         ['language-event', 'howmany-event'].includes(message.event) &&
@@ -120,9 +143,16 @@ function createWindow(directory = null) {
   const windowId = window.webContents.id;
   const session = {
     directory,
+    contents: window.webContents,
+    claude: new ClaudeSession(),
     mediaToken: randomUUID(),
     hasPendingSaves: false,
     rendererReady: false,
+    async root() {
+      if (!this.repositoryRoot) this.repositoryRoot = (await this.call('snapshot'))?.root;
+      if (!this.repositoryRoot) throw new Error('Open a file or folder first.');
+      return this.repositoryRoot;
+    },
     flush() {
       // Startup and empty windows have no editable buffers to flush. Their close
       // action must not depend on a worker or a renderer that failed to initialize.
@@ -169,6 +199,7 @@ function createWindow(directory = null) {
     },
     stop() {
       if (this.stopping) return this.stopping;
+      this.claude.reset();
       this.stopping = (async () => {
         if (!worker) return;
         let timer;
@@ -221,10 +252,12 @@ function createWindow(directory = null) {
   });
   window.webContents.on('did-start-navigation', (_event, _url, isInPlace, isMainFrame) => {
     if (!isMainFrame || isInPlace) return;
+    session.claude.reset();
     session.rendererReady = false;
     session.finishFlush?.(false);
   });
   window.webContents.on('render-process-gone', () => {
+    session.claude.reset();
     session.rendererReady = false;
     session.finishFlush?.(false);
   });
@@ -281,6 +314,57 @@ ipcMain.handle('media', async (event, filePath) => {
   };
 });
 
+const claudeHandlers = {
+  status: () => claudeCredentials.status(),
+  'save-key': async (_session, key) => {
+    const status = await claudeCredentials.save(key);
+    resetClaudeSessions(status);
+    return status;
+  },
+  'remove-key': async () => {
+    const status = await claudeCredentials.remove();
+    resetClaudeSessions(status);
+    return status;
+  },
+  send: (session, input) => {
+    if (!session.directory) throw new Error('Open a file or folder to ask about your project.');
+    return session.claude.send(input, () => claudeCredentials.key(), {
+      list: query =>
+        session.call('claude-list', [query]).catch(() => {
+          throw new Error('The project file list is unavailable.');
+        }),
+      read: filename =>
+        session.call('claude-read', [filename]).catch(() => {
+          throw new Error('This project text file could not be read.');
+        }),
+    });
+  },
+  apply: (session, id) =>
+    session.claude.apply(id, (filename, text, expected) =>
+      changeFiles(session, [filename], () =>
+        session.call('claude-save', [filename, text, expected]),
+      ),
+    ),
+  discard: (session, id) => session.claude.discard(id),
+  reset: session => session.claude.reset(),
+  cancel: session => session.claude.cancel(),
+};
+
+function resetClaudeSessions(status) {
+  for (const session of sessions.values()) {
+    session.claude.reset();
+    if (!session.contents.isDestroyed()) session.contents.send('claude-reset', status);
+  }
+}
+
+for (const [method, handler] of Object.entries(claudeHandlers)) {
+  ipcMain.handle(`claude-${method}`, (event, ...args) => {
+    const session = sessions.get(event.sender.id);
+    if (!session || event.senderFrame !== event.sender.mainFrame) throw new Error('Unknown window');
+    return handler(session, ...args);
+  });
+}
+
 for (const method of [
   'snapshot',
   'files',
@@ -302,6 +386,8 @@ for (const method of [
   ipcMain.handle(method, (event, ...args) => {
     const session = sessions.get(event.sender.id);
     if (!session) throw new Error('Unknown window');
+    if (method === 'save' && typeof args[0] === 'string')
+      return changeFiles(session, [args[0]], () => session.call(method, args));
     return session.call(method, args);
   });
 }
@@ -467,7 +553,7 @@ app.on('before-quit', event => {
         return;
       }
       const pending = [...sessions.values()].map(session => session.stop());
-      await Promise.allSettled([...pending, ...shutdowns, recentUpdates]);
+      await Promise.allSettled([...pending, ...shutdowns, ...fileChanges.values(), recentUpdates]);
       quitting = true;
       app.quit();
     } finally {

@@ -11,7 +11,7 @@ doc_radar:
           'createNavigator',
           'createLanguageFeatures',
           'saveViewState',
-          'readOnly: closingRequested || !card.document?.editable',
+          'editorReadOnly',
           'diff-gutter-${kind}',
         ]
     - file: renderer/navigator.js
@@ -44,7 +44,15 @@ Run your agent as usual, then run `diffpane` in your project folder. The file ex
 
 Git changes are marked beside the line numbers. You can open a side-by-side comparison against HEAD. Edit files yourself; edits save automatically.
 
-It includes search, a file picker, language tools, line counts, and previews for images, audio, video, and PDFs. Your agent runs separately. Diffpane reads and edits the files on disk.
+It includes search, a file picker, language tools, line counts, and previews for images, audio, video, and PDFs.
+
+## Claude in Diffpane
+
+Open **Claude** and select **Claude settings**. Paste a workspace-scoped Claude API key and save it. Diffpane verifies the key before saving it and uses macOS Keychain-backed encryption for the local copy. You can remove the key from the same settings. [Create a Claude API key](https://platform.claude.com/settings/keys)
+
+Use **Ask** to ask about the open project. Claude uses the current editor path as a starting point and can look up other project files. In **Edit** mode, Claude can propose a small replacement in an existing file. Review the proposed text and select **Apply edit** or **Discard**. If the file has changed on disk since the proposal, request a fresh edit.
+
+Diffpane calls Claude Haiku directly. Prompts and any project paths or file excerpts Claude requests go to Anthropic and use your API workspace. Chat history lasts for the window session.
 
 ## Install from Box
 

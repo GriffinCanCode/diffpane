@@ -5,6 +5,17 @@ const listen = (channel, callback) => {
   return () => electron_1.ipcRenderer.removeListener(channel, listener);
 };
 electron_1.contextBridge.exposeInMainWorld('diffpane', {
+  claude: {
+    status: () => electron_1.ipcRenderer.invoke('claude-status'),
+    saveKey: key => electron_1.ipcRenderer.invoke('claude-save-key', key),
+    removeKey: () => electron_1.ipcRenderer.invoke('claude-remove-key'),
+    send: input => electron_1.ipcRenderer.invoke('claude-send', input),
+    apply: id => electron_1.ipcRenderer.invoke('claude-apply', id),
+    discard: id => electron_1.ipcRenderer.invoke('claude-discard', id),
+    reset: () => electron_1.ipcRenderer.invoke('claude-reset'),
+    cancel: () => electron_1.ipcRenderer.invoke('claude-cancel'),
+    onReset: callback => listen('claude-reset', callback),
+  },
   howmany: {
     export: () => electron_1.ipcRenderer.invoke('howmany-export'),
     analyze: force => electron_1.ipcRenderer.invoke('howmany-analyze', force),

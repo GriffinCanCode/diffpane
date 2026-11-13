@@ -10,6 +10,7 @@ import { Repository } from './repository.mjs';
 import { LanguageRuntime } from './language.mjs';
 import { HowManyRuntime } from './howmany.mjs';
 import { operationPath, renameEntry } from './file-operations.ts';
+import { claudeVisiblePath, readClaudeFile } from './claude-workspace.mjs';
 import { mediaType } from '../media-types.ts';
 import { countLines } from '../text-lines.ts';
 
@@ -382,6 +383,14 @@ async function findFile(filePath) {
   return file?.directory ? undefined : (file ?? (await repository.ignoredFile(filePath)));
 }
 
+async function claudeFile(filePath) {
+  await files();
+  const file = catalogIndex.get(filePath);
+  if (!file || file.ignored || file.submodule || file.directory || !claudeVisiblePath(filePath))
+    throw new Error('Choose an available, nonignored project text file.');
+  return file;
+}
+
 async function document(filePath, comparison, priority = false) {
   if (typeof filePath !== 'string' || !['head', 'unstaged', 'staged'].includes(comparison))
     throw new Error('Invalid document request');
@@ -423,7 +432,32 @@ parentPort.on('message', async ({ id, method, args = [] }) => {
         await refresh();
       }
     } else if (method === 'files') value = (await files()).filter(file => !file.ignored);
-    else if (method === 'directory-expanded') {
+    else if (method === 'claude-list') {
+      const query = args[0];
+      const paths = [];
+      let length = 0;
+      let truncated = false;
+      for (const file of await files()) {
+        if (
+          file.ignored ||
+          file.submodule ||
+          file.directory ||
+          !claudeVisiblePath(file.path) ||
+          !file.path.toLowerCase().includes(query)
+        )
+          continue;
+        length += file.path.length;
+        if (length > 12_000 || paths.length === 150) {
+          truncated = true;
+          break;
+        }
+        paths.push(file.path);
+      }
+      value = { paths, truncated };
+    } else if (method === 'claude-read') {
+      await claudeFile(args[0]);
+      value = await readClaudeFile(repository, args[0]);
+    } else if (method === 'directory-expanded') {
       const change = directoryChanges.then(async () => {
         await files();
         const base = catalogRevision;
@@ -449,12 +483,13 @@ parentPort.on('message', async ({ id, method, args = [] }) => {
       await files();
       value = inventoryDelta.update(base, catalogRevision, catalogIndex);
     } else if (method === 'document') value = await document(args[0], args[1], true);
-    else if (method === 'save') {
+    else if (method === 'save' || method === 'claude-save') {
       const [filePath, text, expected] = args;
-      const file = await findFile(filePath);
+      const claude = method === 'claude-save';
+      const file = await (claude ? claudeFile(filePath) : findFile(filePath));
       if (!file || file.submodule)
         throw new Error('This file is no longer available in this directory.');
-      await repository.save(filePath, text, expected);
+      await repository.save(filePath, text, expected, claude);
       documents.invalidate([filePath]);
       const absolute = path.join(repository.root, filePath);
       changes.add(absolute);

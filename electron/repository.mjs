@@ -3,6 +3,7 @@ import { constants } from 'node:fs';
 import { lstat, open, readdir, readlink, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { encodeText, fileContent, MAX_FILE_BYTES, readLimit } from './file-content.ts';
+import { checkClaudeFile, claudeFilePath, readClaudeBytes } from './claude-workspace.mjs';
 import { mediaType } from '../media-types.ts';
 
 const MAX_STATUS_BYTES = 16 * 1024 * 1024;
@@ -12,6 +13,8 @@ const empty = () => Buffer.alloc(0);
 const unavailable = note => ({ before: '', after: '', note });
 
 export class Repository {
+  #saves = new Map();
+
   constructor(root, scope, gitDir, commonDir) {
     Object.assign(this, { root, scope, gitDir, commonDir });
     this.blobs = new Map();
@@ -431,19 +434,37 @@ export class Repository {
     return absolute;
   }
 
-  async save(filename, text, expected) {
+  async save(filename, text, expected, claude = false) {
     if (typeof text !== 'string' || typeof expected !== 'string' || text.length > MAX_FILE_BYTES)
       throw new Error('Invalid file save request.');
-    const absolute = await this.#editPath(filename);
+    validatePath(filename);
+    const key = path.resolve(this.root, filename);
+    const previous = this.#saves.get(key);
+    const saving = (async () => {
+      await previous?.catch(() => {});
+      await this.#save(filename, text, expected, claude);
+    })();
+    this.#saves.set(key, saving);
+    try {
+      await saving;
+    } finally {
+      if (this.#saves.get(key) === saving) this.#saves.delete(key);
+    }
+  }
+
+  async #save(filename, text, expected, claude) {
+    const absolute = await (claude ? claudeFilePath(this, filename) : this.#editPath(filename));
     const handle = await open(
       absolute,
       constants.O_RDWR | (constants.O_NOFOLLOW || 0) | (constants.O_NONBLOCK || 0),
     );
     try {
-      const metadata = await handle.stat();
+      const metadata = await (claude ? checkClaudeFile(handle, absolute) : handle.stat());
       if (!metadata.isFile() || metadata.size > MAX_FILE_BYTES)
         throw new Error('This file cannot be edited as a complete text document.');
-      const original = await handle.readFile();
+      const original = claude
+        ? await readClaudeBytes(handle, metadata.size)
+        : await handle.readFile();
       const current = fileContent(original, filename);
       if (current.kind !== 'text' || current.limited)
         throw new Error('This file cannot be edited as a complete text document.');
@@ -454,6 +475,15 @@ export class Repository {
       const bytes = encodeText(text, original);
       if (bytes.length > MAX_FILE_BYTES)
         throw new Error('The edited file exceeds the 2 MiB text limit.');
+      if (claude) {
+        const latest = await checkClaudeFile(handle, absolute);
+        if (
+          latest.size !== metadata.size ||
+          latest.mtimeMs !== metadata.mtimeMs ||
+          latest.ctimeMs !== metadata.ctimeMs
+        )
+          throw new Error('The file changed on disk. Request a new edit.');
+      }
       let offset = 0;
       while (offset < bytes.length) {
         const { bytesWritten } = await handle.write(bytes, offset, bytes.length - offset, offset);

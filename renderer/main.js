@@ -10,6 +10,7 @@ import './style.css';
 import { createFilePicker } from './files.ts';
 import { projectIcon } from './icons.ts';
 import { createNavigator } from './navigator.js';
+import { createAssistant } from './assistant.js';
 import { createLanguageFeatures } from './languages.js';
 import { createHowMany } from './howmany.js';
 import { changedFunctionRanges } from './function-ranges.ts';
@@ -83,6 +84,8 @@ const icons = {
   branch:
     '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="4" cy="3" r="1.7" stroke="currentColor"/><circle cx="4" cy="13" r="1.7" stroke="currentColor"/><circle cx="12" cy="3" r="1.7" stroke="currentColor"/><path d="M4 5v6m8-6v1a4 4 0 0 1-4 4H4" stroke="currentColor" stroke-width="1.2"/></svg>',
   down: '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 3v10m-4-4 4 4 4-4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  claude:
+    '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M5 3.2h6A2.8 2.8 0 0 1 13.8 6v2.6A2.8 2.8 0 0 1 11 11.4H7l-3.2 2v-2.3a2.8 2.8 0 0 1-1.6-2.5V6A2.8 2.8 0 0 1 5 3.2Z" stroke="currentColor" stroke-linejoin="round"/><path d="M5.5 7.3h5" stroke="currentColor" stroke-linecap="round"/></svg>',
   file: '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M9.5 1.8H4a1 1 0 0 0-1 1v10.4a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V5.3l-3.5-3.5Z" stroke="currentColor" stroke-width="1.15"/><path d="M9 2v4h4" stroke="currentColor" stroke-width="1.15"/></svg>',
   folder:
     '<svg viewBox="0 0 48 48" fill="none" aria-hidden="true"><path d="M5 12a4 4 0 0 1 4-4h10l5 5h15a4 4 0 0 1 4 4v19a4 4 0 0 1-4 4H9a4 4 0 0 1-4-4V12Z" fill="currentColor" opacity=".22"/><path d="M5 19a4 4 0 0 1 4-4h30a4 4 0 0 1 4 4v17a4 4 0 0 1-4 4H9a4 4 0 0 1-4-4V19Z" fill="currentColor" opacity=".72"/><path d="M9 15h30a4 4 0 0 1 4 4v1H5v-1a4 4 0 0 1 4-4Z" fill="white" opacity=".12"/><path d="M10 33h12" stroke="white" stroke-opacity=".3" stroke-width="1.5" stroke-linecap="round"/></svg>',
@@ -96,6 +99,7 @@ app.innerHTML = `
     <span class="title-divider"></span>
     <div class="project"><span id="project-name">Diffpane</span><span id="project-path"></span></div>
     <span class="branch" hidden>${icons.branch}<span id="branch-name"></span></span>
+    <button type="button" id="claude-toggle" aria-controls="claude-panel" aria-expanded="false" aria-keyshortcuts="Meta+Shift+L Control+Shift+L" title="Claude · ⌘⇧L" hidden>${icons.claude}<span>Claude</span></button>
   </header>
   <div class="workspace" id="workspace">
     <aside id="navigator" hidden></aside>
@@ -106,7 +110,9 @@ app.innerHTML = `
     <div class="start-content"><span class="start-mark">${icons.mark}</span><h1 id="start-title">Opening workspace…</h1><p id="start-description" role="status">Your files will appear here in a moment.</p><div class="start-actions" id="start-actions" hidden><button type="button" id="open-folder">Open Folder…</button><button type="button" id="open-file">Open File…</button></div><section class="recent-targets" id="recent-targets" aria-labelledby="recent-title" hidden><h2 id="recent-title">Recently opened</h2><ul class="recent-list" id="recent-list"></ul><p id="recent-status" role="status" hidden></p></section></div>
   </main>
   <main class="feed-scroll" id="feed-scroll" hidden><div class="feed" id="feed"></div><div class="empty-state" id="empty-state"><span class="empty-symbol">${icons.mark}</span><h2>Open a file</h2><p>Select a file in the explorer, or press ⌘P.</p></div></main>
-  </section></div>
+  </section>
+    <aside id="claude-panel" hidden></aside>
+  </div>
   <footer class="statusbar"><span id="status-text">Opening workspace…</span><span class="statusbar-end" hidden><span class="current-only">Current file contents</span><span class="status-dot"></span><span id="save-state" role="status">Autosave on</span></span></footer>
 `;
 
@@ -115,6 +121,8 @@ const ui = Object.fromEntries(
     'workspace',
     'navigator',
     'navigator-resize',
+    'claude-panel',
+    'claude-toggle',
     'project-name',
     'project-path',
     'branch-name',
@@ -147,6 +155,43 @@ const savedViews = new Map();
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 let recentVersion = 0;
 let recentSignature = '';
+let applyingAssistantPath = null;
+let applyingAssistantEdit = null;
+
+const assistant =
+  api?.claude &&
+  createAssistant(ui.claude_panel, ui.claude_toggle, api, {
+    prepareSend: async pathname => {
+      if (closingRequested || closed) throw new Error('This window is closing.');
+      await cards.get(pathname)?.autosave?.flush();
+    },
+    applyEdit: async ({ id, path }) => {
+      if (closingRequested || closed) throw new Error('This window is closing.');
+      applyingAssistantPath = path;
+      const card = cards.get(path);
+      const apply = async () => {
+        if (card) applyEditorReadOnly(card);
+        await card?.autosave?.flush();
+        await api.claude.apply(id);
+      };
+      applyingAssistantEdit = apply();
+      try {
+        syncSaveState();
+        await applyingAssistantEdit;
+        const current = cards.get(path);
+        if (current) {
+          current.dirty = true;
+          scheduleDocument();
+        }
+      } finally {
+        applyingAssistantEdit = null;
+        applyingAssistantPath = null;
+        const current = cards.get(path);
+        if (current) applyEditorReadOnly(current);
+        syncSaveState();
+      }
+    },
+  });
 
 function showStartScreen(failed = false) {
   ui.start_screen.hidden = false;
@@ -235,7 +280,9 @@ window.addEventListener('focus', () => {
 });
 
 function syncSaveState() {
-  api.setSaveState([...cards.values()].some(card => card.autosave?.pending));
+  api.setSaveState(
+    Boolean(applyingAssistantEdit) || [...cards.values()].some(card => card.autosave?.pending),
+  );
 }
 
 // Coalesce saves per card; a previous file's slow read must not block navigation.
@@ -270,6 +317,15 @@ function languageForPath(pathname) {
   searchLanguages.set(pathname, label);
   return label;
 }
+function editorReadOnly(card) {
+  return closingRequested || !card.document?.editable || applyingAssistantPath === card.file.path;
+}
+
+function applyEditorReadOnly(card) {
+  const readOnly = editorReadOnly(card);
+  card.editor?.updateOptions({ readOnly, domReadOnly: readOnly });
+}
+
 async function mutateFile(action, pathname, name) {
   const current = cards.get(openedFile?.path);
   const affected =
@@ -292,6 +348,7 @@ async function mutateFile(action, pathname, name) {
       }
       cards.clear();
       openedFile = null;
+      assistant?.setContext(Boolean(snapshot), null);
       if (action === 'rename')
         await openFile({ path: destination + previous.slice(pathname.length) });
       else {
@@ -305,7 +362,7 @@ async function mutateFile(action, pathname, name) {
     }
     if (action === 'rename' && !affected) navigator.select(destination);
   } finally {
-    if (current?.active && editor) editor.updateOptions({ readOnly: !current.document?.editable });
+    if (current?.active && editor) applyEditorReadOnly(current);
   }
 }
 const navigator = createNavigator(ui.navigator, api, openFile, {
@@ -371,6 +428,7 @@ async function openFile(file) {
   }
   cards.clear();
   openedFile = file;
+  assistant?.setContext(Boolean(snapshot), file.path);
   const card = createCard(snapshot?.files.find(value => value.path === file.path) ?? file);
   card.viewState = savedViews.get(file.path) ?? null;
   cards.set(file.path, card);
@@ -592,6 +650,7 @@ function applySnapshot(next) {
   const allDirty =
     !next.changedPaths || next.changedPaths.includes('*') || next.root !== snapshot?.root;
   snapshot = next;
+  assistant?.setContext(true, openedFile?.path ?? null);
   ui.start_screen.hidden = true;
   ui.feed_scroll.hidden = false;
   if (first) {
@@ -674,11 +733,12 @@ async function loadDocument(card) {
 }
 
 function editorOptions(card) {
+  const readOnly = editorReadOnly(card);
   return {
     model: card.model,
     theme: 'diffpane',
-    readOnly: closingRequested || !card.document?.editable,
-    domReadOnly: closingRequested || !card.document?.editable,
+    readOnly,
+    domReadOnly: readOnly,
     fontFamily: '"SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
     fontSize: 14,
     lineHeight: LINE_HEIGHT,
@@ -912,10 +972,7 @@ function renderDocument(card, document) {
   }
   card.text = text;
   card.autosave.accept(text);
-  card.editor.updateOptions({
-    readOnly: closingRequested || !document.editable,
-    domReadOnly: closingRequested || !document.editable,
-  });
+  applyEditorReadOnly(card);
   if (!document.editable)
     globalThis.document.getElementById('save-state').textContent = 'Read only';
   card.textBytes = text.length * 2 + (card.originalModel ? (document.before?.length ?? 0) * 2 : 0);
@@ -1176,11 +1233,17 @@ async function refresh() {
 
 document.addEventListener('keydown', event => {
   if (!(event.metaKey || event.ctrlKey)) return;
+  if (document.querySelector('#claude-settings')?.open) return;
   if (document.querySelector('#file-picker')?.open) {
     if (event.key.toLowerCase() === 'p') {
       event.preventDefault();
       void openFilePicker();
     }
+    return;
+  }
+  if (event.shiftKey && !event.altKey && event.key.toLowerCase() === 'l' && assistant) {
+    event.preventDefault();
+    if (!event.repeat) assistant.toggle();
     return;
   }
   if (event.key.toLowerCase() === 'b') {
@@ -1236,19 +1299,17 @@ if (!api) showError('The desktop connection is unavailable. Reopen diffpane from
 else {
   const resumeEditing = () => {
     closingRequested = false;
-    for (const card of cards.values())
-      card.editor?.updateOptions({
-        readOnly: !card.document?.editable,
-        domReadOnly: !card.document?.editable,
-      });
+    for (const card of cards.values()) applyEditorReadOnly(card);
   };
   const unsubscribeResume = api.onResumeEditing(resumeEditing);
   const unsubscribeFlush = api.onFlushSaves(async () => {
     closingRequested = true;
-    for (const card of cards.values())
-      card.editor?.updateOptions({ readOnly: true, domReadOnly: true });
+    for (const card of cards.values()) applyEditorReadOnly(card);
     try {
-      await Promise.all([...cards.values()].map(card => card.autosave?.flush()));
+      await Promise.all([
+        ...[...cards.values()].map(card => card.autosave?.flush()),
+        applyingAssistantEdit?.catch(() => {}),
+      ]);
       syncSaveState();
       api.savesFlushed(true);
     } catch {
@@ -1295,6 +1356,7 @@ else {
     () => {
       closed = true;
       howmany.dispose();
+      assistant?.dispose();
       if (snapshotFrame !== null) cancelAnimationFrame(snapshotFrame);
       if (documentFrame !== null) cancelAnimationFrame(documentFrame);
       navigator.dispose();

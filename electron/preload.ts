@@ -8,6 +8,18 @@ const listen = <T>(channel: string, callback: (value: T) => void): Unsubscribe =
 };
 
 contextBridge.exposeInMainWorld('diffpane', {
+  claude: {
+    status: () => ipcRenderer.invoke('claude-status'),
+    saveKey: (key: string) => ipcRenderer.invoke('claude-save-key', key),
+    removeKey: () => ipcRenderer.invoke('claude-remove-key'),
+    send: (input: { prompt: string; path?: string; proposeEdits: boolean }) =>
+      ipcRenderer.invoke('claude-send', input),
+    apply: (id: string) => ipcRenderer.invoke('claude-apply', id),
+    discard: (id: string) => ipcRenderer.invoke('claude-discard', id),
+    reset: () => ipcRenderer.invoke('claude-reset'),
+    cancel: () => ipcRenderer.invoke('claude-cancel'),
+    onReset: (callback: (status: unknown) => void) => listen('claude-reset', callback),
+  },
   howmany: {
     export: () => ipcRenderer.invoke('howmany-export'),
     analyze: (force?: boolean) => ipcRenderer.invoke('howmany-analyze', force),
