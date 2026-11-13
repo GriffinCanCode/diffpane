@@ -202,6 +202,7 @@ export function createLanguageFeatures(monaco, api, { onState = () => {} } = {})
   const paths = new Map();
   const attachments = new Set();
   const disposables = [];
+  const boxLanguages = new Map();
   const semanticChanged = signal();
   const hintsChanged = signal();
   const foldingChanged = signal();
@@ -214,6 +215,8 @@ export function createLanguageFeatures(monaco, api, { onState = () => {} } = {})
     hovers: 0,
   };
   let disposed = false;
+  let boxDiscovery;
+  let boxReady = !runtime?.status;
   let sequence = 0;
   const requestPrefix = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
 
@@ -392,7 +395,7 @@ export function createLanguageFeatures(monaco, api, { onState = () => {} } = {})
     return states.get(model.uri.toString());
   }
 
-  for (const language of LANGUAGES) {
+  function registerProviders(language) {
     const selector = { language, scheme: 'file' };
     disposables.push(
       monaco.languages.registerHoverProvider(selector, {
@@ -518,6 +521,29 @@ export function createLanguageFeatures(monaco, api, { onState = () => {} } = {})
       }),
     );
   }
+  for (const language of LANGUAGES) registerProviders(language);
+
+  function loadBoxServers() {
+    if (disposed || !runtime?.status) return;
+    boxDiscovery ??= runtime
+      .status()
+      .then(servers => {
+        if (disposed) return;
+        for (const { language, languageIds } of servers) {
+          for (const languageId of languageIds ?? []) {
+            if (!boxLanguages.has(languageId)) boxLanguages.set(languageId, language);
+          }
+        }
+        for (const { id } of monaco.languages.getLanguages()) {
+          if (boxLanguages.has(id) && !LANGUAGES.has(id)) registerProviders(id);
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        boxReady = true;
+      });
+    return boxDiscovery;
+  }
 
   const unsubscribe = runtime?.onEvent(event => {
     if (disposed) return;
@@ -587,15 +613,17 @@ export function createLanguageFeatures(monaco, api, { onState = () => {} } = {})
 
   function attachModel(editor, model, path, { active = true } = {}) {
     const language = model.getLanguageId();
-    if (disposed || !LANGUAGES.has(language)) return () => {};
+    const languageId = TYPESCRIPT.get(language) ?? language;
+    const boxLanguage = boxLanguages.get(languageId);
+    if (disposed || (!boxLanguage && !LANGUAGES.has(language))) return () => {};
     const key = model.uri.toString();
     states.get(key)?.cleanup();
     const state = {
       editor,
       model,
       path,
-      language: TYPESCRIPT.has(language) ? 'typescript' : language,
-      languageId: TYPESCRIPT.get(language) ?? language,
+      language: boxLanguage ?? (TYPESCRIPT.has(language) ? 'typescript' : language),
+      languageId,
       active,
       visible: false,
       closed: false,
@@ -695,13 +723,18 @@ export function createLanguageFeatures(monaco, api, { onState = () => {} } = {})
   function attach(editor, model, path, options) {
     if (disposed) return () => {};
     let cleanup = () => {};
+    let detached = false;
     const bind = () => {
+      if (!boxReady || detached || model.isDisposed()) return;
       cleanup();
       cleanup = attachModel(editor, model, path, options);
     };
     const languageChange = model.onDidChangeLanguage(bind);
-    bind();
+    const discovery = loadBoxServers();
+    if (!boxReady && discovery) void discovery.then(bind);
+    else bind();
     const detach = () => {
+      detached = true;
       languageChange.dispose();
       cleanup();
       attachments.delete(detach);
@@ -712,7 +745,9 @@ export function createLanguageFeatures(monaco, api, { onState = () => {} } = {})
 
   return {
     attach,
+    loadBoxServers,
     async symbols(path) {
+      if (!boxReady && boxDiscovery) await boxDiscovery;
       const state = paths.get(path);
       if (!state) return [];
       state.visible = state.active = true;

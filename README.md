@@ -71,6 +71,8 @@ diffpane
 
 The first launch unpacks the signed app. Electron and HowMany come bundled. To make `diffpane` available in new terminals, add the Box directory to your shell's PATH.
 
+Diffpane also uses language-server plugins installed through Box. Install the plugin with `box unpack PACKAGE`, then open or reopen your project window. Run `box language-servers` to see which installed packages provide servers. Diffpane starts the first matching Box server when you open a supported file and uses its own language tools for other files.
+
 ## Build from source
 
 Use the Node.js version in `.node-version`. Building the macOS app also requires Rust 1.88+ and the Xcode command-line tools.

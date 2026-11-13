@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'vite-plus/test';
@@ -95,6 +95,93 @@ test('language discovery stays lazy and managed tools take precedence over PATH 
   assert.equal(discovered.go.command, path.join(root, 'bin/gopls'));
   assert.deepEqual(discovered.go.args, ['serve']);
   assert.equal(discovered.elixir.env.ERL_FLAGS, process.env.ERL_FLAGS ?? '+S 2:2 +SDcpu 1 +SDio 1');
+});
+
+test('Box registrations start a real language server for its declared document and nearest root', async t => {
+  const home = await fixture(t);
+  const root = path.join(home, 'workspace');
+  const nested = path.join(root, 'nested');
+  const relative = 'nested/src/a.ts';
+  const text = 'function greet(name: string): string { return name; }\r\n// 🐈';
+  await mkdir(path.join(nested, '.config', 'server'), { recursive: true });
+  await mkdir(path.join(nested, 'src'));
+  await writeFile(path.join(nested, 'tsconfig.json'), '{}');
+  await writeFile(path.join(root, relative), text);
+
+  const command = process.execPath;
+  const args = [path.resolve('node_modules/typescript-language-server/lib/cli.mjs'), '--stdio'];
+  const declaration = {
+    id: 'types:stdio',
+    name: 'Box TypeScript',
+    languages: ['typescript', 'javascript'],
+    command,
+    args,
+    root_markers: ['.config/server'],
+  };
+  const output = JSON.stringify({
+    servers: [{ ...declaration, id: 'invalid', root_markers: ['../outside'] }, declaration],
+  });
+  await writeFile(
+    path.join(home, 'box'),
+    `#!/bin/sh
+[ "$*" = 'language-servers --json --offline' ] || exit 2
+[ -z "\${BOX_REGISTRY_TOKEN:-}" ] || exit 3
+cat <<'BOX_JSON'
+${output}
+BOX_JSON
+`,
+    { mode: 0o700 },
+  );
+
+  const runtime = new LanguageRuntime(root, undefined, {
+    env: {
+      ...process.env,
+      PATH: `${home}${path.delimiter}${process.env.PATH ?? ''}`,
+      BOX_REGISTRY_TOKEN: 'private',
+    },
+  });
+  t.onTestFinished(() => runtime.dispose());
+  const language = 'box:types:stdio';
+  const input = { path: relative, language, text };
+  assert.equal(
+    runtime.status().some(server => server.language === language),
+    false,
+  );
+  await runtime.loadBoxServers();
+  assert.equal(runtime.servers.size, 0);
+  assert.equal(
+    runtime.status().some(server => server.language === 'box:invalid'),
+    false,
+  );
+  assert.deepEqual(runtime.status().find(server => server.language === language)?.languageIds, [
+    'typescript',
+    'javascript',
+  ]);
+  assert.equal((await runtime.open({ ...input, languageId: 'python' })).available, false);
+  assert.equal(runtime.servers.size, 0);
+  const opened = await runtime.open({ ...input, languageId: 'typescript' });
+  assert.equal(opened.available, true, JSON.stringify(runtime.status()));
+  assert.equal(opened.workspace, nested);
+  assert.equal(runtime.documents.get(relative)?.languageId, 'typescript');
+  const symbols = () =>
+    runtime.request({ path: relative, language, method: 'textDocument/documentSymbol' });
+  assert.ok((await symbols())?.some(symbol => symbol.name === 'greet'));
+
+  const server = runtime.servers.get(language);
+  assert.equal(server.capabilities.textDocumentSync, 2);
+  const notify = server.connection.notify.bind(server.connection);
+  let edit;
+  server.connection.notify = (method, params) => {
+    if (method === 'textDocument/didChange') [edit] = params.contentChanges;
+    return notify(method, params);
+  };
+  const updated = text.replace('greet', 'welcome');
+  await runtime.open({ ...input, text: updated, languageId: 'typescript', version: 2 });
+  assert.deepEqual(edit, {
+    range: { start: { line: 0, character: 0 }, end: { line: 1, character: 5 } },
+    text: updated,
+  });
+  assert.ok((await symbols())?.some(symbol => symbol.name === 'welcome'));
 });
 
 test('language document paths and input sizes are confined before starting a server', async t => {
