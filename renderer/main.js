@@ -124,7 +124,6 @@ const ui = Object.fromEntries(
   ].map(id => [id.replaceAll('-', '_'), document.getElementById(id)]),
 );
 const api = window.diffpane;
-const workspaceLayout = createWorkspaceLayout(ui.workspace);
 const cards = new Map();
 let snapshot = null;
 let openedFile = null;
@@ -515,6 +514,7 @@ const ideas =
     media: api.media,
     colorize: colorizeMarkdown,
   });
+const workspaceLayout = createWorkspaceLayout(ui.workspace);
 ui.ideas_toggle.addEventListener('click', () => setIdeasVisible(ui.ideas_panel.hidden, true));
 
 function setIdeasVisible(visible, focus = false, remember = true) {
