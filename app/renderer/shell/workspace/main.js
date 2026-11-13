@@ -34,7 +34,6 @@ import { createContentSearch } from '../../explorer/project-search/content-searc
 import { createNavigator } from '../../explorer/tree/navigator.js'
 import { createHowMany } from '../../panels/analysis/howmany.js'
 import { codeAppearance, createAppearanceSettings, diffAppearance } from '../../panels/appearance/appearance.ts'
-import { createUiPreferences } from '../../panels/appearance/ui-preferences.ts'
 import { createAssistant } from '../../panels/assistant/assistant.js'
 import { mountIdeaBuilder } from '../../panels/ideas/ideas.ts'
 import { createSettings } from '../../panels/settings/settings.js'
@@ -48,6 +47,7 @@ import { projectIcon } from '../layout/icons.ts'
 import { createWorkspaceLayout } from '../layout/workspace-layout.ts'
 import { clearErrorNotice, guard, renderFailure, reportError, runTask, setErrorNoticeHost } from '../recovery/errors.ts'
 import { requireElement } from './dom.js'
+import { getWorkspacePreferences } from './preferences.ts'
 
 /** @import { WorkspaceComparison, WorkspaceDocument, WorkspaceFile, WorkspaceSnapshot } from '../../../electron/runtime/session/workspace-types.ts' */
 /** @import { IdeaLink } from '../../../shared/ideas/ideas.ts' */
@@ -259,7 +259,7 @@ if (!bridge) {
   })
 }
 const api = bridge
-const uiPreferences = createUiPreferences(api?.preferences)
+const uiPreferences = getWorkspacePreferences()
 const shortcutApi = api?.shortcuts
 const platform = shortcutApi?.platform ?? (globalThis.navigator.platform.startsWith('Mac') ? 'darwin' : 'linux')
 const isMac = platform === 'darwin'

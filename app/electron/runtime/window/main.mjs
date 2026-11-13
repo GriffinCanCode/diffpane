@@ -7,6 +7,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Worker } from 'node:worker_threads'
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, protocol, shell } from 'electron'
+import { colorHex } from '../../../shared/appearance/palette.ts'
 import {
   effectiveBinding,
   electronAccelerator,
@@ -233,7 +234,7 @@ function createWindow(directory = null) {
     minWidth: 650,
     minHeight: 420,
     title: directory ? `${path.basename(directory)} · Diffpane` : 'Diffpane',
-    backgroundColor: '#111315',
+    backgroundColor: colorHex('dark', 'canvas'),
     icon: path.join(app.getAppPath(), 'dist/img/diffpane.png'),
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 20, y: 10 },
