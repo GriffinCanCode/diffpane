@@ -34,7 +34,7 @@ export function createAssistant(
   container,
   toggle,
   { claude, openExternal },
-  { prepareSend, applyEdit },
+  { prepareSend, applyEdit, onOpen },
 ) {
   container.className = 'claude-panel';
   container.setAttribute('aria-labelledby', 'claude-title');
@@ -297,14 +297,15 @@ export function createAssistant(
     }
   }
 
-  function togglePanel(open = container.hidden) {
+  function togglePanel(open = container.hidden, restoreFocus = true) {
     container.hidden = !open;
     toggle.setAttribute('aria-expanded', String(open));
     if (open) {
+      onOpen?.();
       scrollToLatest();
       (promptInput.disabled ? action('settings') : promptInput).focus();
       void checkConnection();
-    } else toggle.focus();
+    } else if (restoreFocus) toggle.focus();
   }
 
   function openSettings() {

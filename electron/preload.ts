@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
+import type { ReviewNote, ReviewNoteChange } from '../review-notes.ts';
 
 type Unsubscribe = () => void;
 const listen = <T>(channel: string, callback: (value: T) => void): Unsubscribe => {
@@ -8,6 +9,12 @@ const listen = <T>(channel: string, callback: (value: T) => void): Unsubscribe =
 };
 
 contextBridge.exposeInMainWorld('diffpane', {
+  reviewNotes: {
+    list: () => ipcRenderer.invoke('review-notes-list'),
+    change: (change: ReviewNoteChange) => ipcRenderer.invoke('review-notes-change', change),
+    copy: () => ipcRenderer.invoke('review-notes-copy'),
+    onChange: (callback: (notes: ReviewNote[]) => void) => listen('review-notes-updated', callback),
+  },
   claude: {
     status: () => ipcRenderer.invoke('claude-status'),
     saveKey: (key: string) => ipcRenderer.invoke('claude-save-key', key),

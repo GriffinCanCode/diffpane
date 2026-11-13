@@ -8,6 +8,8 @@ import { configureSyntax } from './syntax.ts';
 import EditorWorker from 'monaco-editor/editor/editor.worker.js?worker';
 import './style.css';
 import { createFilePicker } from './files.ts';
+import { createReviewNotes } from './review-notes.ts';
+import { captureReviewLines, locateReviewLines } from '../review-notes.ts';
 import { projectIcon } from './icons.ts';
 import { createNavigator } from './navigator.js';
 import { createChangeReview } from './change-review.js';
@@ -88,6 +90,7 @@ const icons = {
   down: '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 3v10m-4-4 4 4 4-4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   review:
     '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m2.5 5 1 1 2-2m-3 6 1 1 2-2M8 5h5.5M8 10h5.5" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  note: '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3.5 2.5h9a1 1 0 0 1 1 1v6L9.5 13.5h-6a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1Z" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round"/><path d="M9.5 13.5v-3a1 1 0 0 1 1-1h3M5 5.5h6M5 8h3" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"/></svg>',
   claude:
     '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M5 3.2h6A2.8 2.8 0 0 1 13.8 6v2.6A2.8 2.8 0 0 1 11 11.4H7l-3.2 2v-2.3a2.8 2.8 0 0 1-1.6-2.5V6A2.8 2.8 0 0 1 5 3.2Z" stroke="currentColor" stroke-linejoin="round"/><path d="M5.5 7.3h5" stroke="currentColor" stroke-linecap="round"/></svg>',
   file: '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M9.5 1.8H4a1 1 0 0 0-1 1v10.4a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V5.3l-3.5-3.5Z" stroke="currentColor" stroke-width="1.15"/><path d="M9 2v4h4" stroke="currentColor" stroke-width="1.15"/></svg>',
@@ -105,6 +108,7 @@ app.innerHTML = `
     <span class="branch" hidden>${icons.branch}<span id="branch-name"></span></span>
     <div class="titlebar-actions">
       <button type="button" id="review-toggle" class="titlebar-button review-toggle" aria-label="Review changes" aria-controls="change-review" aria-pressed="false" aria-keyshortcuts="Meta+Shift+G Control+Shift+G" title="Review changes · ⌘⇧G" hidden>${icons.review}<span>Changes</span><span class="review-count" aria-hidden="true"></span></button>
+      <button type="button" id="review-notes-toggle" class="titlebar-button" aria-label="Review notes" aria-controls="review-notes-panel" aria-expanded="false" aria-keyshortcuts="Meta+Shift+J Control+Shift+J" title="Review notes · ⌘⇧J" hidden>${icons.note}<span>Notes</span><span class="review-notes-count" aria-hidden="true" hidden></span></button>
       <button type="button" id="claude-toggle" aria-controls="claude-panel" aria-expanded="false" aria-keyshortcuts="Meta+Shift+L Control+Shift+L" title="Claude · ⌘⇧L" hidden>${icons.claude}<span>Claude</span></button>
     </div>
   </header>
@@ -122,6 +126,7 @@ app.innerHTML = `
   <main class="feed-scroll" id="feed-scroll" hidden><div class="feed" id="feed"></div><div class="empty-state" id="empty-state"><span class="empty-symbol">${icons.mark}</span><h2>Open a file</h2><p>Select a file in the explorer, or press ⌘P.</p></div></main>
   </section>
     <aside id="claude-panel" hidden></aside>
+    <aside id="review-notes-panel" hidden></aside>
   </div>
   <footer class="statusbar"><span id="status-text">Opening workspace…</span><span class="statusbar-end" hidden><span class="current-only">Current file contents</span><span class="status-dot"></span><span id="save-state" role="status">Autosave on</span></span></footer>
 `;
@@ -132,6 +137,8 @@ const ui = Object.fromEntries(
     'sidebar',
     'change-review',
     'review-toggle',
+    'review-notes-toggle',
+    'review-notes-panel',
     'navigator',
     'navigator-resize',
     'claude-panel',
@@ -168,6 +175,7 @@ let reviewVisible = false;
 let reviewScope = 'focus';
 const savedViews = new Map();
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+const overlayNotes = matchMedia('(max-width: 1000px)');
 let recentVersion = 0;
 let recentSignature = '';
 let applyingAssistantPath = null;
@@ -176,6 +184,7 @@ let applyingAssistantEdit = null;
 const assistant =
   api?.claude &&
   createAssistant(ui.claude_panel, ui.claude_toggle, api, {
+    onOpen: () => reviewNotes?.close(),
     prepareSend: async pathname => {
       if (closingRequested || closed) throw new Error('This window is closing.');
       await cards.get(pathname)?.autosave?.flush();
@@ -455,7 +464,32 @@ const openFilePicker = createFilePicker(
   },
 );
 
-async function openFile(file, { compare = false } = {}) {
+const reviewNotes =
+  api?.reviewNotes &&
+  createReviewNotes(ui.review_notes_panel, ui.review_notes_toggle, api.reviewNotes, {
+    matchesSaveShortcut: event =>
+      event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey,
+    capture: () => {
+      const card = cards.get(openedFile?.path);
+      return card ? captureReviewAnchor(card, card.noteSide ?? 'working') : null;
+    },
+    onJump: anchor => {
+      const rename = snapshot?.files.find(
+        file => (file.index === 'R' || file.worktree === 'R') && file.originalPath === anchor.path,
+      );
+      const path = rename?.path ?? anchor.path;
+      return openFile({ path }, { anchor });
+    },
+    onVisible: visible => {
+      if (visible && !ui.claude_panel.hidden) assistant?.toggle(false, false);
+    },
+  });
+
+ui.review_notes_panel
+  .querySelector('[data-review-action="save"]')
+  ?.setAttribute('aria-keyshortcuts', 'Meta+Enter Control+Enter');
+
+async function openFile(file, { compare = false, anchor = null } = {}) {
   if (closingRequested || closed) return false;
   const version = ++navigationVersion;
   const current = cards.get(openedFile?.path);
@@ -470,7 +504,35 @@ async function openFile(file, { compare = false } = {}) {
   if (version !== navigationVersion || closingRequested || closed) return false;
   if (openedFile?.path === file.path && current) {
     navigator.select(file.path);
-    if (compare) openComparison(current);
+    current.pendingReviewAnchor = anchor;
+    current.reviewNotice.hidden = true;
+    if (anchor) {
+      current.modeVersion = (current.modeVersion ?? 0) + 1;
+      const comparing = anchor.side === 'head';
+      const markdownSource = comparing || anchor.line !== null;
+      const modeChanged =
+        current.comparing !== comparing ||
+        current.reviewComparison ||
+        (isMarkdown(file.path) && Boolean(current.markdownSource) !== markdownSource);
+      current.markdownSource = markdownSource;
+      current.comparing = comparing;
+      if (current.reviewComparison && comparing && current.diffEditor) {
+        current.reviewFocus.detach();
+        current.diffEditor.updateOptions({
+          useInlineViewWhenSpaceIsLimited: false,
+          renderIndicators: false,
+          diffWordWrap: 'off',
+          hideUnchangedRegions: { enabled: false },
+        });
+      }
+      current.reviewComparison = false;
+      if (current.documentFailed) {
+        current.dirty = true;
+        scheduleDocument();
+      } else if (modeChanged && current.document) renderDocument(current, current.document);
+      else if (!current.loading) revealReviewAnchor(current);
+      syncReviewState();
+    } else if (compare) openComparison(current);
     return true;
   }
   for (const card of cards.values()) {
@@ -486,6 +548,11 @@ async function openFile(file, { compare = false } = {}) {
   openedFile = file;
   assistant?.setContext(Boolean(snapshot), file.path);
   const card = createCard(snapshot?.files.find(value => value.path === file.path) ?? file);
+  card.pendingReviewAnchor = anchor;
+  if (anchor) {
+    card.comparing = anchor.side === 'head';
+    card.markdownSource = card.comparing || anchor.line !== null;
+  }
   card.viewState = savedViews.get(file.path) ?? null;
   cards.set(file.path, card);
   card.active = true;
@@ -664,11 +731,15 @@ function createCard(file) {
   });
   element.querySelector('.editor-host').before(labels);
   labels.before(reviewFocus.bar);
+  const reviewNotice = documentNode('div', 'file-note', '');
+  reviewNotice.hidden = true;
+  reviewNotice.setAttribute('role', 'status');
+  element.querySelector('.file-note').after(reviewNotice);
   const card = {
     file,
     element,
     reviewFocus,
-
+    reviewNotice,
     host: element.querySelector('.editor-host'),
     note: element.querySelector('.file-note'),
     lines: element.querySelector('.line-count'),
@@ -692,7 +763,7 @@ function createCard(file) {
   element.querySelector('.file-directory').textContent = file.path.slice(0, slash + 1);
   element.querySelector('.file-name').textContent = file.path.slice(slash + 1);
   element.querySelector('.file-path').title = file.path;
-  element.querySelector('.change-button:not(.diff-toggle)').addEventListener('click', () => {
+  element.querySelector('[aria-label="Next change in file"]').addEventListener('click', () => {
     if (!card.editor || card.changes.length === 0) return;
     card.changeIndex = (card.changeIndex + 1) % card.changes.length;
     card.editor.revealLineInCenter(
@@ -700,6 +771,17 @@ function createCard(file) {
       reducedMotion.matches ? monaco.editor.ScrollType.Immediate : monaco.editor.ScrollType.Smooth,
     );
   });
+  if (reviewNotes) {
+    const noteButton = documentNode('button', 'change-button file-review-note', '');
+    noteButton.type = 'button';
+    noteButton.title = 'Add file review note';
+    noteButton.setAttribute('aria-label', 'Add review note for this file');
+    noteButton.innerHTML = icons.note;
+    noteButton.addEventListener('click', () => {
+      if (!closingRequested) reviewNotes.openComposer(captureReviewAnchor(card, 'working', false));
+    });
+    element.querySelector('.diff-toggle').after(noteButton);
+  }
   element.querySelector('.diff-toggle').addEventListener('click', () => toggleDiff(card));
   if (isMarkdown(file.path)) {
     const modes = documentNode('div', 'markdown-toggle', '');
@@ -716,6 +798,7 @@ function createCard(file) {
         await changeDocumentMode(card, () => {
           if (Boolean(card.markdownSource) === source) return false;
           card.markdownSource = source;
+          card.pendingReviewAnchor = null;
           if (!source) {
             card.comparing = false;
             card.reviewComparison = false;
@@ -758,6 +841,7 @@ function applySnapshot(next) {
   if (first) {
     setSidebarVisible(true);
     ui.review_toggle.hidden = false;
+    reviewNotes?.setContext(true);
     document.querySelector('.branch').hidden = false;
     document.querySelector('.statusbar-end').hidden = false;
   }
@@ -832,6 +916,10 @@ async function loadDocument(card) {
       card.note.hidden = false;
       card.note.classList.add('is-error');
       card.host.classList.add('has-error');
+      if (card.pendingReviewAnchor) {
+        card.pendingReviewAnchor = null;
+        reviewNotes?.notify('The saved note’s file could not be opened.');
+      }
     }
   } finally {
     card.loading = false;
@@ -910,7 +998,10 @@ function renderDocument(card, document) {
   card.note.hidden = !card.note.textContent;
   card.note.classList.remove('is-error');
   card.host.classList.remove('has-error');
-  if (reusableMarkdown) return;
+  if (reusableMarkdown) {
+    revealReviewAnchor(card);
+    return;
+  }
   card.functionEpoch = (card.functionEpoch ?? 0) + 1;
   card.mediaCleanup?.();
   card.mediaCleanup = null;
@@ -924,7 +1015,7 @@ function renderDocument(card, document) {
   }
   for (const control of card.element.querySelectorAll('.symbol-outline, .language-state'))
     control.hidden = Boolean(preview) || reading;
-  card.element.querySelector('.change-button:not(.diff-toggle)').hidden =
+  card.element.querySelector('[aria-label="Next change in file"]').hidden =
     Boolean(preview) || reading || Boolean(card.reviewComparison);
   const button = card.element.querySelector('.diff-toggle');
   button.disabled = false;
@@ -961,6 +1052,7 @@ function renderDocument(card, document) {
         sum + ((side.data?.length ?? 0) + (side.hex?.length ?? 0) + (side.value?.length ?? 0)) * 2,
       0,
     );
+    revealReviewAnchor(card);
     return;
   }
   const state = card.editor?.saveViewState();
@@ -1004,6 +1096,7 @@ function renderDocument(card, document) {
     card.markdownText = text;
     const outline = ui.navigator.querySelector('.navigator-outline .symbol-list');
     if (outline) showMarkdownOutline(card, outline);
+    revealReviewAnchor(card);
     return;
   }
   if (!card.element.querySelector('.howmany-counts')) {
@@ -1103,7 +1196,7 @@ function renderDocument(card, document) {
   }
   card.decorationCollection.set(decorations);
   card.changes = [...changeLines].sort((a, b) => a - b);
-  card.element.querySelector('.change-button:not(.diff-toggle)').disabled =
+  card.element.querySelector('[aria-label="Next change in file"]').disabled =
     card.changes.length === 0;
   card.lines.textContent = `${lineCount.toLocaleString()} ${lineCount === 1 ? 'line' : 'lines'}`;
   const language = card.model.getLanguageId();
@@ -1111,12 +1204,91 @@ function renderDocument(card, document) {
     monaco.languages.getLanguages().find(value => value.id === language)?.aliases?.[0] ?? language;
   (card.diffEditor ?? card.editor).layout();
   card.editor.render(true);
+  revealReviewAnchor(card);
   howmany.updateFile(card, document);
   if (card.diffEditor) void highlightFunctions(card);
   else card.changedFunctions = 0;
   if (card.element.querySelector('.symbol-outline').open) void showSymbols(card);
   const outline = ui.navigator.querySelector('.navigator-outline[open] .symbol-list');
   if (outline) void showSymbols(card, outline);
+}
+
+function selectionLines(selection) {
+  const line = selection.startLineNumber;
+  const endLine =
+    selection.endColumn === 1 && selection.endLineNumber > line
+      ? selection.endLineNumber - 1
+      : selection.endLineNumber;
+  return { line, endLine };
+}
+
+function captureReviewAnchor(card, side, includeLines = true) {
+  const original = side === 'head';
+  const editor = original ? card.diffEditor?.getOriginalEditor() : card.editor;
+  const model = includeLines ? editor?.getModel() : null;
+  const selection = model ? editor.getSelection() : null;
+  const root = snapshot.root.replace(/\/$/u, '');
+  const scope = snapshot.scope ?? snapshot.root;
+  const inScope = path => `${root}/${path}`.startsWith(`${scope.replace(/\/$/u, '')}/`);
+  let pathname = card.file.path;
+  const originalPath = original ? card.file.originalPath : null;
+  if (!inScope(pathname)) {
+    if (!originalPath || !inScope(originalPath)) return null;
+    pathname = originalPath;
+  }
+  const anchor = {
+    path: pathname,
+    ...(originalPath && originalPath !== pathname ? { originalPath } : {}),
+    side,
+    line: null,
+    endLine: null,
+    excerpt: '',
+    truncated: false,
+  };
+  if (!selection) return anchor;
+  const { line, endLine } = selectionLines(selection);
+  return { ...anchor, line, endLine, ...captureReviewLines(model, line, endLine) };
+}
+
+function revealReviewAnchor(card) {
+  const anchor = card.pendingReviewAnchor;
+  if (!anchor || !card.document || card.dirty) return;
+  card.pendingReviewAnchor = null;
+  const overlay = overlayNotes.matches && !ui.review_notes_panel.hidden;
+  if (overlay) reviewNotes.close();
+  if (anchor.line === null) return;
+  const editor = anchor.side === 'head' ? card.diffEditor?.getOriginalEditor() : card.editor;
+  const model = editor?.getModel();
+  if (!model) {
+    showReviewLocation(card, 'The saved lines are unavailable in the current file view.');
+    return;
+  }
+  const location = locateReviewLines(model, anchor);
+  if (location.state === 'stale') {
+    editor.setPosition({ lineNumber: location.line, column: 1 });
+    showReviewLocation(card, 'The captured lines changed. Showing the nearest saved line.');
+  } else {
+    const range = new monaco.Range(
+      location.line,
+      1,
+      location.endLine,
+      model.getLineMaxColumn(location.endLine),
+    );
+    editor.setSelection(range);
+    if (location.state === 'moved') {
+      const message = `The captured lines moved to line ${location.line.toLocaleString()}.`;
+      showReviewLocation(card, message);
+    }
+  }
+  editor.revealLineInCenter(location.line, monaco.editor.ScrollType.Immediate);
+  if (overlay && !globalThis.document.querySelector('dialog[open]')) editor.focus();
+}
+
+function showReviewLocation(card, message) {
+  if (ui.review_notes_panel.hidden) {
+    card.reviewNotice.hidden = false;
+    card.reviewNotice.textContent = message;
+  } else reviewNotes?.notify(message);
 }
 
 function updateSaveLabel(card) {
@@ -1146,6 +1318,7 @@ async function changeDocumentMode(card, change) {
 function toggleDiff(card) {
   const comparing = !card.comparing;
   return changeDocumentMode(card, () => {
+    card.pendingReviewAnchor = null;
     card.comparing = comparing;
     if (comparing) card.markdownSource = true;
     else card.reviewComparison = false;
@@ -1171,6 +1344,7 @@ function openComparison(card) {
 }
 
 function setCardEditor(card, state) {
+  for (const action of card.noteActions ?? []) action.dispose();
   card.languageCleanup?.();
   card.languageCleanup = null;
   if (card.diffEditor) {
@@ -1222,6 +1396,28 @@ function setCardEditor(card, state) {
     card.originalDecorations = originalEditor.createDecorationsCollection();
     card.functionDecorations = card.editor.createDecorationsCollection();
   } else card.editor = monaco.editor.create(card.host, editorOptions(card));
+  card.noteSide = 'working';
+  if (reviewNotes) {
+    card.noteActions = [];
+    const bindNote = (editor, side) => {
+      card.noteActions.push(
+        editor.onDidFocusEditorText(() => {
+          card.noteSide = side;
+        }),
+        editor.addAction({
+          id: `diffpane-add-review-note-${side}`,
+          label: 'Add review note',
+          contextMenuGroupId: 'navigation',
+          contextMenuOrder: 20,
+          run: () => {
+            if (!closingRequested) reviewNotes.openComposer(captureReviewAnchor(card, side));
+          },
+        }),
+      );
+    };
+    bindNote(card.editor, 'working');
+    if (card.diffEditor) bindNote(card.diffEditor.getOriginalEditor(), 'head');
+  }
   card.decorationCollection = card.editor.createDecorationsCollection();
   card.languageCleanup = languageFeatures.attach(card.editor, card.model, card.file.path, {
     active: true,
@@ -1320,6 +1516,9 @@ function deactivate(card) {
 
 function releaseEditor(card) {
   if (!card.editor) return;
+  for (const action of card.noteActions ?? []) action.dispose();
+  card.noteActions = [];
+  card.noteSide = 'working';
   card.contentCleanup?.dispose();
   card.contentCleanup = null;
   card.autosave = null;
@@ -1377,6 +1576,17 @@ document.addEventListener('keydown', event => {
       event.preventDefault();
       void openFilePicker();
     }
+    return;
+  }
+  if (
+    event.shiftKey &&
+    !event.altKey &&
+    event.key.toLowerCase() === 'j' &&
+    reviewNotes &&
+    snapshot
+  ) {
+    event.preventDefault();
+    if (!event.repeat) ui.review_notes_toggle.click();
     return;
   }
   if (event.shiftKey && !event.altKey && event.key.toLowerCase() === 'g' && snapshot) {
@@ -1499,6 +1709,7 @@ else {
       closed = true;
       howmany.dispose();
       assistant?.dispose();
+      reviewNotes?.dispose();
       if (snapshotFrame !== null) cancelAnimationFrame(snapshotFrame);
       if (documentFrame !== null) cancelAnimationFrame(documentFrame);
       navigator.dispose();

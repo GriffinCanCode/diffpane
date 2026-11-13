@@ -10,6 +10,8 @@ import { mediaResponse } from './media.ts';
 import { RecentTargets } from './recent-targets.ts';
 import { ClaudeCredentials } from './claude-credentials.mjs';
 import { ClaudeSession } from './claude-session.mjs';
+import { ReviewNotesStore } from './review-notes.ts';
+import { formatReviewHandoff } from '../review-notes.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const sessions = new Map();
@@ -24,6 +26,9 @@ const shutdowns = new Set();
 const pendingOpenPaths = [];
 app.setName('Diffpane');
 const claudeCredentials = new ClaudeCredentials(path.join(app.getPath('userData'), 'claude-key'));
+const reviewNotes = new ReviewNotesStore(path.join(app.getPath('userData'), 'review-notes'));
+let reviewNoteUpdates = Promise.resolve();
+let updatingReviewNotes = false;
 const recentTargetsReady = app.whenReady().then(async () => {
   const history = new RecentTargets(path.join(app.getPath('userData'), 'recent-targets.json'));
   await history.ready;
@@ -114,6 +119,7 @@ function createWindow(directory = null) {
     if (message.event) {
       if (message.event === 'change' && message.value?.root) {
         session.repositoryRoot = message.value.root;
+        session.repositoryScope = message.value.scope;
         if (!remembered) {
           remembered = true;
           rememberTarget(directory);
@@ -152,6 +158,16 @@ function createWindow(directory = null) {
       if (!this.repositoryRoot) this.repositoryRoot = (await this.call('snapshot'))?.root;
       if (!this.repositoryRoot) throw new Error('Open a file or folder first.');
       return this.repositoryRoot;
+    },
+    async reviewWorkspace() {
+      if (!this.repositoryScope) {
+        const snapshot = await this.call('snapshot');
+        this.repositoryRoot = snapshot?.root;
+        this.repositoryScope = snapshot?.scope;
+      }
+      if (!this.repositoryRoot || !this.repositoryScope)
+        throw new Error('Open a file or folder first.');
+      return { root: this.repositoryRoot, scope: this.repositoryScope };
     },
     flush() {
       // Startup and empty windows have no editable buffers to flush. Their close
@@ -365,6 +381,47 @@ for (const [method, handler] of Object.entries(claudeHandlers)) {
   });
 }
 
+for (const method of ['list', 'change', 'copy']) {
+  ipcMain.handle(`review-notes-${method}`, async (event, input) => {
+    const session = sessions.get(event.sender.id);
+    if (!session || event.senderFrame !== event.sender.mainFrame) throw new Error('Unknown window');
+    const { root, scope } = await session.reviewWorkspace();
+    if (method === 'change') {
+      updatingReviewNotes = true;
+      const result = reviewNoteUpdates.then(async () => {
+        const notes = await reviewNotes.change(root, scope, input);
+        const scopes = new Map([[scope, Promise.resolve(notes)]]);
+        const recipients = [...sessions.values()].filter(
+          other => other.repositoryRoot === root && other.repositoryScope && other.rendererReady,
+        );
+        await Promise.allSettled(
+          recipients.map(async other => {
+            const otherScope = other.repositoryScope;
+            if (!scopes.has(otherScope)) scopes.set(otherScope, reviewNotes.list(root, otherScope));
+            const visible = await scopes.get(otherScope);
+            if (!other.contents.isDestroyed()) other.contents.send('review-notes-updated', visible);
+          }),
+        );
+        return notes;
+      });
+      const update = (reviewNoteUpdates = result.then(
+        () => {},
+        () => {},
+      ));
+      void update.then(() => {
+        if (reviewNoteUpdates === update) updatingReviewNotes = false;
+      });
+      return result;
+    }
+    await reviewNoteUpdates;
+    const notes = await reviewNotes.list(root, scope);
+    if (method === 'list') return notes;
+    const { count, text } = formatReviewHandoff(notes);
+    if (count) await clipboard.writeText(text);
+    return count;
+  });
+}
+
 for (const method of [
   'snapshot',
   'files',
@@ -540,7 +597,8 @@ void app.whenReady().then(() => {
 });
 let preparingQuit = false;
 app.on('before-quit', event => {
-  if (quitting || (!sessions.size && !shutdowns.size && !updatingRecents)) return;
+  if (quitting || (!sessions.size && !shutdowns.size && !updatingRecents && !updatingReviewNotes))
+    return;
   event.preventDefault();
   if (preparingQuit) return;
   preparingQuit = true;
@@ -553,7 +611,13 @@ app.on('before-quit', event => {
         return;
       }
       const pending = [...sessions.values()].map(session => session.stop());
-      await Promise.allSettled([...pending, ...shutdowns, ...fileChanges.values(), recentUpdates]);
+      await Promise.allSettled([
+        ...pending,
+        ...shutdowns,
+        ...fileChanges.values(),
+        recentUpdates,
+        reviewNoteUpdates,
+      ]);
       quitting = true;
       app.quit();
     } finally {

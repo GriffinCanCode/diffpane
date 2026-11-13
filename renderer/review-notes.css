@@ -1,0 +1,465 @@
+.review-notes-panel {
+  --notes-inset: 14px;
+  --notes-panel: light-dark(#f5f8f8, #191b1c);
+  --notes-card: light-dark(#fff, #202324);
+  --notes-line: light-dark(#ccd8d8, #34393a);
+  --notes-muted: light-dark(#536567, #a0a8a7);
+  --notes-accent: light-dark(#316d61, #add8ca);
+  --notes-field: light-dark(#edf3f3, #141617);
+  --notes-mono: 'SFMono-Regular', Menlo, Monaco, Consolas, monospace;
+  display: flex;
+  flex: 0 0 clamp(305px, 27vw, 390px);
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--notes-panel);
+}
+
+#review-notes-toggle[aria-expanded='true'] {
+  border-color: light-dark(#afcfc2, #394b46);
+  background: light-dark(#e3f1eb, #26332f);
+  color: light-dark(#2c6151, #d3e8e0);
+}
+
+.review-notes-count {
+  min-width: 16px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: light-dark(#d8ebe3, #303b37);
+  color: light-dark(#32634f, #b9dbcf);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  line-height: 12px;
+  text-align: center;
+}
+
+.review-notes-panel :is(button, textarea, summary, pre):focus-visible {
+  outline: 1px solid var(--notes-accent);
+  outline-offset: 2px;
+}
+
+.review-notes-heading,
+.review-notes-toolbar,
+.review-notes-footer {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-inline: var(--notes-inset);
+}
+
+.review-notes-heading {
+  padding-block: 12px 8px;
+}
+
+.review-notes-heading h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.025em;
+}
+
+.review-notes-icon {
+  display: grid;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--notes-muted);
+}
+
+.review-notes-icon:hover {
+  border-color: var(--notes-line);
+  background: var(--notes-card);
+  color: var(--text);
+}
+
+.review-notes-panel button svg {
+  width: 14px;
+  height: 14px;
+}
+
+.review-notes-toolbar {
+  padding-block: 2px 12px;
+  border-block-end: 1px solid var(--notes-line);
+}
+
+.review-notes-filters {
+  display: flex;
+  gap: 2px;
+  min-width: 0;
+  padding: 2px;
+  border: 1px solid var(--notes-line);
+  border-radius: 6px;
+  background: var(--notes-field);
+}
+
+.review-notes-filters button,
+.review-notes-button,
+.review-notes-text-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--notes-muted);
+  font-size: 11px;
+  font-weight: 550;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.review-notes-filters button {
+  min-height: 25px;
+  padding: 3px 6px;
+}
+
+.review-notes-filters button[aria-pressed='true'] {
+  border-color: var(--notes-line);
+  background: light-dark(#e4eded, #2a3030);
+  color: var(--text);
+}
+
+.review-notes-filters button:hover:not([aria-pressed='true']) {
+  background: var(--notes-card);
+  color: var(--text);
+}
+
+.review-notes-filters span {
+  min-width: 1ch;
+  color: var(--notes-muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.review-notes-button {
+  min-height: 29px;
+  padding: 4px 8px;
+  border-color: var(--notes-line);
+  background: light-dark(#edf2f3, #262a2b);
+  color: var(--text);
+}
+
+.review-notes-text-button {
+  min-height: 24px;
+  padding: 3px 5px;
+}
+
+.review-notes-button:hover:not(:disabled),
+.review-notes-text-button:hover:not(:disabled) {
+  background: light-dark(#e1ebec, #313636);
+  color: var(--text);
+}
+
+.review-notes-add {
+  flex: none;
+  color: var(--notes-accent);
+}
+
+.review-notes-primary,
+.review-notes-copy {
+  border-color: light-dark(#b0c9bf, #476159);
+  background: light-dark(#deeee6, #293c36);
+  color: light-dark(#315f53, #d3ebe2);
+}
+
+.review-notes-primary:hover:not(:disabled),
+.review-notes-copy:hover:not(:disabled) {
+  background: light-dark(#d4e8df, #365047);
+  color: light-dark(#234d41, #e8f7f2);
+}
+
+.review-notes-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 12px var(--notes-inset);
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: light-dark(#bacbc9, #444b4b) transparent;
+}
+
+.review-notes-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 24px 12px 10px;
+  text-align: center;
+}
+
+.review-notes-empty-icon {
+  display: grid;
+  width: 35px;
+  height: 35px;
+  margin-bottom: 10px;
+  place-items: center;
+  border: 1px solid light-dark(#bdcfc9, #3d4c47);
+  border-radius: 8px;
+  background: light-dark(#e8f1ec, #25312e);
+  color: var(--notes-accent);
+}
+
+.review-notes-empty-icon svg {
+  width: 17px;
+  height: 17px;
+}
+
+.review-notes-empty h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.review-notes-empty p {
+  max-width: 30ch;
+  margin: 5px 0 0;
+  color: var(--notes-muted);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.review-notes-empty button {
+  margin-top: 12px;
+}
+
+.review-notes-list {
+  display: grid;
+  gap: 9px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.review-notes-card,
+.review-notes-composer {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--notes-line);
+  border-radius: 7px;
+  background: var(--notes-card);
+}
+
+.review-notes-location {
+  min-width: 0;
+  color: var(--notes-muted);
+  font: 11px/1.45 var(--notes-mono);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.review-notes-jump {
+  justify-self: start;
+  max-width: 100%;
+  margin-inline: -3px;
+  padding: 2px 3px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--notes-accent);
+  text-align: start;
+}
+
+.review-notes-jump:hover {
+  background: light-dark(#2436470b, #ffffff0b);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.review-notes-text {
+  margin: 0;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.review-notes-excerpt {
+  min-width: 0;
+  color: var(--notes-muted);
+  font-size: 11px;
+}
+
+.review-notes-excerpt summary {
+  width: fit-content;
+  padding-block: 2px;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.review-notes-excerpt summary:hover {
+  color: var(--text);
+}
+
+.review-notes-excerpt pre {
+  max-height: 144px;
+  margin: 4px 0 0;
+  padding: 7px;
+  overflow: auto;
+  border-radius: 4px;
+  background: var(--notes-field);
+  color: var(--text);
+  font: 11px/1.4 var(--notes-mono);
+  scrollbar-width: thin;
+  tab-size: 2;
+}
+
+.review-notes-card-actions,
+.review-notes-composer-actions,
+.review-notes-confirm {
+  display: flex;
+  align-items: center;
+  justify-content: end;
+  gap: 4px;
+}
+
+.review-notes-card-actions {
+  margin-block-end: -3px;
+  padding-block-start: 3px;
+  border-block-start: 1px solid var(--line);
+}
+
+.review-notes-composer {
+  margin-block-end: 10px;
+  border-color: light-dark(#a7c0b7, #435950);
+}
+
+.review-notes-composer label {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.review-notes-composer-location {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 3px;
+  min-width: 0;
+  margin-block: -2px 0;
+}
+
+.review-notes-composer-location button {
+  min-height: 20px;
+  margin-inline: -4px;
+  color: var(--notes-accent);
+}
+
+.review-notes-composer textarea {
+  width: 100%;
+  min-width: 0;
+  min-height: 76px;
+  max-height: 180px;
+  padding: 7px 8px;
+  resize: vertical;
+  border: 1px solid var(--notes-line);
+  border-radius: 5px;
+  background: var(--notes-field);
+  color: var(--text);
+  font: inherit;
+  line-height: 1.45;
+}
+
+.review-notes-composer textarea::placeholder {
+  color: var(--notes-muted);
+}
+
+.review-notes-composer textarea[readonly] {
+  opacity: 0.75;
+}
+
+.review-notes-conflict,
+.review-notes-confirm p {
+  margin: 0;
+  color: light-dark(#79571c, #e7bc8e);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.review-notes-current-text {
+  max-height: 90px;
+  margin: 0;
+  padding: 6px 8px;
+  overflow: auto;
+  border-radius: 4px;
+  background: var(--notes-field);
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.review-notes-refresh {
+  justify-self: start;
+}
+
+.review-notes-confirm p,
+.review-notes-composer-actions .review-notes-delete {
+  margin-inline-end: auto;
+}
+
+.review-notes-delete {
+  color: light-dark(#963e3d, #edb4af);
+}
+
+.review-notes-delete:hover:not(:disabled) {
+  background: light-dark(#f2dede, #422e2e);
+  color: light-dark(#812e36, #f1c0bd);
+}
+
+.review-notes-cancel {
+  background: transparent;
+  color: var(--notes-muted);
+}
+
+.review-notes-footer {
+  padding-block: 9px;
+  border-block-start: 1px solid var(--notes-line);
+  background: light-dark(#f1f6f6, #1d2021);
+}
+
+.review-notes-footer p {
+  min-width: 0;
+  max-height: 5em;
+  margin: 0;
+  overflow: auto;
+  color: var(--notes-muted);
+  font-size: 11px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.review-notes-footer .is-error {
+  color: light-dark(#963e3d, #edb4af);
+}
+
+.review-notes-copy {
+  flex: none;
+}
+
+@media (max-width: 1000px) {
+  .workspace:has(> .review-notes-panel:not([hidden])) {
+    position: relative;
+  }
+
+  .review-notes-panel {
+    position: absolute;
+    inset: 0 0 0 auto;
+    z-index: 7;
+    width: min(360px, 52vw);
+    border-inline-start: 1px solid var(--notes-line);
+    box-shadow: -12px 0 26px #0005;
+  }
+}

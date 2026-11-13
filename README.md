@@ -46,6 +46,8 @@ Git changes are marked beside the line numbers. You can open a side-by-side comp
 
 Open **Changes** with ⌘⇧G to see the review queue and its progress. Select a file to jump to its first edit. Long stretches of unchanged code are collapsed, and you can move between edits or choose **Full file** to restore context. Use **Mark reviewed & next** to advance and **Mark reviewed** to finish the last file. Progress lasts for the window session. From **Reviewed**, you can return a file to **Pending**. New edits also return the file to **Pending**.
 
+Open **Notes** from the title bar or press ⌘⇧J by default. Right-click in the editor and choose **Add review note** to capture the current line or selection, including on the HEAD side of a comparison. Use the file header’s note button for a whole file, or choose **Make project note** for feedback without a file. Notes stay on this Mac across restarts. Select a note’s location to return to the captured lines. If they moved, Diffpane looks for a unique match and tells you when the original lines can’t be located. Choose **Copy handoff** to paste your open notes, file references, and captured excerpts into any agent chat.
+
 It includes search, a file picker, language tools, line counts, and previews for images, audio, video, and PDFs.
 
 ## Claude in Diffpane

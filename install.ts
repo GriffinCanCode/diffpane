@@ -93,7 +93,7 @@ const [bundle] = await packager({
     },
   ],
   ignore: [
-    /^\/(?!(?:dist|electron|node_modules|resources)(?:\/|$)|(?:NOTICE|package\.json|media-types\.ts|text-lines\.ts)$)/,
+    /^\/(?!(?:dist|electron|node_modules|resources)(?:\/|$)|(?:NOTICE|package\.json|media-types\.ts|review-notes\.ts|text-lines\.ts)$)/,
     /^\/resources\/(?!howmany(?:\/|$))/,
     /^\/resources\/howmany\/build\.json$/,
     /^\/node_modules\/\.vite[^/]*(?:\/|$)/,

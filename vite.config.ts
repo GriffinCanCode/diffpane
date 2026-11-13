@@ -51,6 +51,7 @@ export default defineConfig({
             'syntax/**',
             'syntax.ts',
             'media-types.ts',
+            'review-notes.ts',
             'text-lines.ts',
             'public/**',
             '!dist/**',

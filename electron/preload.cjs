@@ -5,6 +5,12 @@ const listen = (channel, callback) => {
   return () => electron_1.ipcRenderer.removeListener(channel, listener);
 };
 electron_1.contextBridge.exposeInMainWorld('diffpane', {
+  reviewNotes: {
+    list: () => electron_1.ipcRenderer.invoke('review-notes-list'),
+    change: change => electron_1.ipcRenderer.invoke('review-notes-change', change),
+    copy: () => electron_1.ipcRenderer.invoke('review-notes-copy'),
+    onChange: callback => listen('review-notes-updated', callback),
+  },
   claude: {
     status: () => electron_1.ipcRenderer.invoke('claude-status'),
     saveKey: key => electron_1.ipcRenderer.invoke('claude-save-key', key),
