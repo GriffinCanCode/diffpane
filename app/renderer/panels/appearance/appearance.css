@@ -116,7 +116,7 @@
 .appearance-save-error {
   margin: 0 12px;
   font-size: 11px;
-  color: var(--red);
+  color: var(--removed);
 }
 
 .appearance-header {
@@ -125,6 +125,9 @@
   padding-inline-end: 65px;
   padding-block: 25px 19px;
   border-bottom: 1px solid var(--settings-border);
+  background:
+    radial-gradient(ellipse at 78% 0, color-mix(in oklab, var(--accent-surface) 45%, transparent), transparent 55%),
+    var(--settings-panel);
 }
 
 .appearance-header h2 {
@@ -200,6 +203,7 @@
   border: 1px solid var(--settings-border);
   border-radius: 8px;
   background: var(--settings-raised);
+  box-shadow: 0 2px 4px color-mix(in oklab, var(--shadow) 22%, transparent);
 }
 
 .appearance-theme-choice:hover .appearance-theme-card {
@@ -209,6 +213,7 @@
 .appearance-theme-choice input:checked + .appearance-theme-card {
   border-color: var(--settings-accent);
   background: var(--settings-selected);
+  box-shadow: 0 3px 9px color-mix(in oklab, var(--accent) 19%, transparent);
 }
 
 .appearance-theme-choice input:focus-visible + .appearance-theme-card,
@@ -226,31 +231,19 @@
 }
 
 .appearance-theme-artwork {
-  --mini-backdrop: #252e30;
-  --mini-surface: #171c1d;
-  --mini-sidebar: #202728;
-  --mini-editor: #1a2021;
-  --mini-edge: #435052;
-  --mini-ink: #637774;
-  --mini-accent: #81c1ad;
-  --mini-added: #467b66;
-  --mini-removed: #ab6767;
+  color-scheme: dark;
   display: grid;
   grid-area: 1 / 1;
   place-items: center;
-  background: var(--mini-backdrop);
+  background:
+    radial-gradient(circle, color-mix(in oklab, var(--accent) 24%, transparent) 0.7px, transparent 1px) center / 11px
+      11px,
+    radial-gradient(ellipse at 50% 24%, var(--accent-surface), transparent 78%),
+    var(--surface-raised);
 }
 
 .appearance-theme-artwork[data-scheme='light'] {
-  --mini-backdrop: #e3ede9;
-  --mini-surface: #f9fbfa;
-  --mini-sidebar: #ecf3f0;
-  --mini-editor: #fff;
-  --mini-edge: #b9cec5;
-  --mini-ink: #a4b8b0;
-  --mini-accent: #569383;
-  --mini-added: #83bb9e;
-  --mini-removed: #c88f8b;
+  color-scheme: light;
 }
 
 .appearance-theme-artwork + .appearance-theme-artwork {
@@ -264,9 +257,11 @@
   max-width: 122px;
   height: 55px;
   overflow: hidden;
-  border: 1px solid var(--mini-edge);
+  border: 1px solid var(--control-border);
   border-radius: 5px;
-  box-shadow: 0 3px 9px #0003;
+  box-shadow:
+    0 2px 0 color-mix(in oklab, var(--control-border) 32%, var(--surface)),
+    0 5px 11px var(--shadow);
 }
 
 .appearance-mini-title {
@@ -275,14 +270,26 @@
   align-items: center;
   gap: 3px;
   padding-inline: 5px;
-  background: var(--mini-surface);
+  background: var(--canvas);
 }
 
 .appearance-mini-title i {
   width: 3px;
   height: 3px;
   border-radius: 50%;
-  background: var(--mini-ink);
+  background: var(--subtle);
+}
+
+.appearance-mini-title i:first-child {
+  background: var(--removed);
+}
+
+.appearance-mini-title i:nth-child(2) {
+  background: var(--warning);
+}
+
+.appearance-mini-title i:nth-child(3) {
+  background: var(--added);
 }
 
 .appearance-mini-sidebar,
@@ -292,17 +299,17 @@
   align-items: flex-start;
   gap: 4px;
   padding: 6px 5px;
-  border-top: 1px solid var(--mini-edge);
+  border-top: 1px solid var(--control-border);
 }
 
 .appearance-mini-sidebar {
-  background: var(--mini-sidebar);
+  background: var(--surface);
 }
 
 .appearance-mini-editor {
   padding-inline: 7px;
-  border-inline-start: 1px solid var(--mini-edge);
-  background: var(--mini-editor);
+  border-inline-start: 1px solid var(--control-border);
+  background: var(--workbench-background);
 }
 
 .appearance-mini-sidebar i,
@@ -310,23 +317,23 @@
   width: 75%;
   height: 2px;
   border-radius: 4px;
-  background: var(--mini-ink);
+  background: var(--subtle);
 }
 
 .appearance-mini-sidebar i:nth-child(2),
 .appearance-mini-editor i:first-child {
   width: 57%;
-  background: var(--mini-accent);
+  background: var(--accent);
 }
 
 .appearance-mini-editor i:nth-child(2) {
   width: 66%;
-  background: var(--mini-removed);
+  background: var(--removed);
 }
 
 .appearance-mini-editor i:nth-child(3) {
   width: 78%;
-  background: var(--mini-added);
+  background: var(--added);
 }
 
 .appearance-mini-editor i:nth-child(4) {
@@ -511,14 +518,22 @@
   height: 11px;
   border-radius: 50%;
   background: currentColor;
+  box-shadow: 0 1px 2px var(--shadow);
   content: '';
 }
 
+.appearance-switch:hover:not(:checked) {
+  background: var(--settings-hover);
+}
+
 .appearance-switch:checked {
-  justify-items: end;
   border-color: var(--settings-action);
   background: var(--settings-action);
   color: var(--settings-action-text);
+}
+
+.appearance-switch:checked::before {
+  transform: translateX(16px);
 }
 
 .appearance-preview {
@@ -527,6 +542,7 @@
   border: 1px solid var(--settings-border);
   border-radius: 8px;
   background: var(--settings-code);
+  box-shadow: 0 3px 10px color-mix(in oklab, var(--shadow) 36%, transparent);
   overflow: hidden;
 }
 
@@ -635,6 +651,47 @@
 
 .appearance-footer .appearance-done:hover {
   background: color-mix(in srgb, var(--settings-action), var(--settings-action-text) 10%);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .appearance-dialog[open] {
+    animation: appearance-dialog-in 180ms ease-out both;
+  }
+
+  .appearance-dialog[open] :is(.appearance-main, .settings-page):not([hidden]) > .appearance-header {
+    animation: appearance-page-in 160ms ease-out both;
+  }
+
+  .appearance-theme-card,
+  .appearance-mini-window {
+    transition:
+      transform 170ms ease-out,
+      border-color 170ms ease-out,
+      box-shadow 170ms ease-out;
+  }
+
+  .appearance-theme-choice:hover .appearance-mini-window,
+  .appearance-theme-choice input:focus-visible + .appearance-theme-card .appearance-mini-window {
+    transform: translateY(-3px);
+  }
+
+  .appearance-switch::before {
+    transition: transform 150ms ease-out;
+  }
+}
+
+@keyframes appearance-dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.99);
+  }
+}
+
+@keyframes appearance-page-in {
+  from {
+    opacity: 0.65;
+    transform: translateY(2px);
+  }
 }
 
 @media (max-width: 700px) {

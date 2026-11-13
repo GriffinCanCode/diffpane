@@ -1,47 +1,3 @@
-:root {
-  color-scheme: dark;
-  --canvas: oklch(15.2% 0.008 265);
-  --surface: oklch(18.2% 0.008 265);
-  --surface-raised: oklch(22% 0.009 265);
-  --text: oklch(91% 0.008 265);
-  --muted: oklch(60% 0.012 265);
-  --subtle: oklch(43% 0.012 265);
-  --line: oklch(100% 0 0 / 0.075);
-  --green: oklch(67% 0.045 150);
-  --red: oklch(70% 0.14 20);
-  --workbench-background: light-dark(#fff, #181818);
-  --accent: light-dark(#276f67, #80cbc4);
-  --hover: light-dark(#2436470b, #ffffff0a);
-  --control-border: light-dark(#bcc6ce, #383838);
-  --focus-ring: light-dark(#346e97, oklch(72% 0.1 255 / 0.7));
-  --backdrop: light-dark(#26374755, #0008);
-  --match-background: light-dark(#fae8af, oklch(76% 0.13 82 / 0.23));
-  --match-text: light-dark(#694c17, oklch(89% 0.1 90));
-  font:
-    13px -apple-system,
-    BlinkMacSystemFont,
-    'Segoe UI',
-    sans-serif;
-  background: var(--canvas);
-  color: var(--text);
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-}
-
-:root[data-theme='light'] {
-  color-scheme: light;
-  --canvas: #f8f9fa;
-  --surface: #f4f6f7;
-  --surface-raised: #e9edf0;
-  --text: #252b33;
-  --muted: #53616d;
-  --subtle: #656e79;
-  --line: #202e401f;
-  --green: #367054;
-  --red: #a03640;
-}
-
 * {
   box-sizing: border-box;
 }
@@ -99,7 +55,7 @@ button svg,
   align-items: center;
   gap: 16px;
   border-bottom: 1px solid var(--line);
-  background: light-dark(#f5f7f8, #181818);
+  background: linear-gradient(180deg, var(--surface-raised), var(--surface));
   -webkit-app-region: drag;
   user-select: none;
 }
@@ -184,6 +140,9 @@ button svg,
   border-color: var(--line);
   color: var(--text);
 }
+.titlebar-button:is([aria-pressed='true'], [aria-expanded='true']) {
+  box-shadow: inset 0 1px color-mix(in oklab, var(--text) 10%, transparent);
+}
 .titlebar-button svg {
   width: 14px;
   height: 14px;
@@ -225,6 +184,24 @@ button svg,
   min-height: 0;
   container-type: inline-size;
 }
+.start-screen,
+.empty-state {
+  --idle-glow: color-mix(in oklab, var(--accent-surface) 60%, transparent);
+  --idle-dots: color-mix(in oklab, var(--accent) 17%, transparent);
+  position: relative;
+  isolation: isolate;
+  background: radial-gradient(ellipse at 50% 35%, var(--idle-glow), transparent 70%), var(--workbench-background);
+}
+.start-screen::before,
+.empty-state::before {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  background: radial-gradient(circle, var(--idle-dots) 0.8px, transparent 1.15px) center / 20px 20px;
+  mask-image: radial-gradient(ellipse at 50% 35%, #000 8%, transparent 65%);
+  pointer-events: none;
+  content: '';
+}
 .start-screen {
   display: grid;
   place-items: center;
@@ -232,39 +209,90 @@ button svg,
   min-height: 0;
   overflow: auto;
   padding: 48px 24px;
-  background: var(--workbench-background);
   text-align: center;
 }
 .start-content {
   width: min(100%, 880px);
 }
+.workspace-art {
+  position: relative;
+  display: block;
+  width: 152px;
+  height: 78px;
+  margin-inline: auto;
+}
+.workspace-art::before,
+.workspace-art::after {
+  position: absolute;
+  content: '';
+}
+.workspace-art::before {
+  inset: auto 35px 7px;
+  height: 9px;
+  border-radius: 50%;
+  background: radial-gradient(ellipse, color-mix(in oklab, var(--accent) 19%, transparent), transparent 72%);
+}
+.workspace-art::after {
+  inset: 9px 14px auto auto;
+  width: 11px;
+  height: 11px;
+  background: color-mix(in oklab, var(--accent) 66%, transparent);
+  clip-path: polygon(50% 0%, 62% 38%, 100% 50%, 62% 62%, 50% 100%, 38% 62%, 0% 50%, 38% 38%);
+}
+.workspace-art__tile {
+  --tile-ink: var(--accent);
+  --tile-fill: var(--accent-surface);
+  position: absolute;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid color-mix(in oklab, var(--tile-ink) 28%, var(--line));
+  border-radius: 10px;
+  background: linear-gradient(150deg, var(--surface-raised), var(--tile-fill));
+  box-shadow:
+    inset 0 1px color-mix(in oklab, var(--text) 9%, transparent),
+    0 2px 0 color-mix(in oklab, var(--tile-ink) 20%, var(--surface)),
+    0 6px 15px color-mix(in oklab, var(--tile-ink) 15%, transparent);
+  color: var(--tile-ink);
+  transform: rotate(var(--tile-tilt));
+}
+.workspace-art__tile svg {
+  width: 56%;
+  height: 56%;
+}
+.workspace-art__tile--left {
+  --tile-ink: var(--modified);
+  --tile-fill: var(--modified-surface);
+  --tile-tilt: -19deg;
+  inset: 24px auto auto 19px;
+}
+.workspace-art__tile--right {
+  --tile-ink: var(--violet);
+  --tile-fill: var(--violet-surface);
+  --tile-tilt: 16deg;
+  inset: 17px 17px auto auto;
+}
+.workspace-art__tile--main {
+  --tile-tilt: -6deg;
+  inset: 9px auto auto 49px;
+  width: 54px;
+  height: 54px;
+  border-radius: 13px;
+}
 .start-mark {
-  display: inline-flex;
-  width: 60px;
-  height: 60px;
-  margin-bottom: 18px;
-  color: var(--green);
+  margin-block-end: 12px;
 }
 .start-screen h1 {
   margin: 0;
-  font-size: 25px;
-  font-weight: 500;
+  font-size: var(--text-display);
+  font-weight: var(--weight-medium);
   letter-spacing: -0.7px;
 }
 .start-screen p {
   margin: 12px 0 28px;
   color: var(--muted);
-  line-height: 1.7;
-}
-.start-loading {
-  --loading-width: 58px;
-  --loading-height: 4px;
-  --loading-gap: 0;
-  display: flex;
-  justify-content: center;
-}
-.start-screen[aria-busy='false'] .start-loading {
-  display: none;
+  line-height: var(--leading-prose);
 }
 .start-actions {
   display: flex;
@@ -275,12 +303,22 @@ button svg,
 .start-actions button {
   min-width: 136px;
   padding: 10px 18px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--surface-raised);
+  border: 1px solid var(--control-border);
+  border-radius: 8px;
+  background: linear-gradient(160deg, var(--surface), var(--surface-raised));
+  box-shadow: 0 2px 0 color-mix(in oklab, var(--line) 70%, transparent);
 }
-.start-actions button:hover {
-  background: light-dark(#e0e7ec, oklch(28% 0.009 265));
+.start-actions button:hover:not(:disabled) {
+  background: var(--hover);
+}
+.start-actions #open-folder {
+  border-color: transparent;
+  background: var(--action);
+  color: var(--action-text);
+  font-weight: var(--weight-medium);
+}
+.start-actions #open-folder:hover:not(:disabled) {
+  background: var(--action-hover);
 }
 .recent-targets {
   margin-top: 52px;
@@ -288,9 +326,9 @@ button svg,
 }
 .recent-targets h2 {
   margin: 0 0 15px 2px;
-  color: light-dark(#46515d, #aaa);
-  font-size: 12px;
-  font-weight: 500;
+  color: var(--muted);
+  font-size: var(--text-label);
+  font-weight: var(--weight-medium);
   letter-spacing: 0.1px;
 }
 .recent-list {
@@ -310,9 +348,12 @@ button svg,
   gap: 14px;
   width: 100%;
   padding: 20px 16px;
-  border: 1px solid light-dark(#202e401f, #ffffff09);
+  border: 1px solid var(--line);
   border-radius: 10px;
-  background: light-dark(#24364704, #ffffff02);
+  background: linear-gradient(150deg, var(--surface), color-mix(in oklab, var(--surface-raised) 55%, var(--surface)));
+  box-shadow:
+    inset 0 1px color-mix(in oklab, var(--text) 6%, transparent),
+    0 4px 14px color-mix(in oklab, var(--shadow) 33%, transparent);
   text-align: left;
   transition:
     transform 180ms ease,
@@ -321,8 +362,8 @@ button svg,
 }
 .recent-target:hover {
   transform: translateY(-3px);
-  background: light-dark(#2436470b, #ffffff06);
-  border-color: light-dark(#202e4034, #ffffff14);
+  background: var(--hover);
+  border-color: var(--control-border);
 }
 .recent-glyph {
   position: relative;
@@ -331,7 +372,7 @@ button svg,
   justify-content: center;
   flex: 0 0 42px;
   height: 48px;
-  color: light-dark(#578576, #89aaa2);
+  color: var(--accent);
 }
 .recent-glyph::after {
   content: '';
@@ -340,21 +381,21 @@ button svg,
   height: 4px;
   bottom: 0;
   border-radius: 50%;
-  background: #0004;
+  background: var(--shadow);
   filter: blur(3px);
 }
 .recent-glyph svg {
   width: 42px;
   height: 42px;
   transform: translateY(-3px) rotate(-6deg);
-  filter: drop-shadow(0 5px 3px #0002);
+  filter: drop-shadow(0 5px 3px var(--shadow));
   transition: transform 180ms ease;
 }
 .recent-list li:nth-child(3n + 2) .recent-glyph {
-  color: light-dark(#5a7ea5, #92a8c2);
+  color: var(--modified);
 }
 .recent-list li:nth-child(3n) .recent-glyph {
-  color: light-dark(#826b9d, #aa9bb8);
+  color: var(--violet);
 }
 .recent-list li:nth-child(even) .recent-glyph svg {
   transform: translateY(-3px) rotate(5deg);
@@ -378,26 +419,26 @@ button svg,
   white-space: nowrap;
 }
 .recent-label strong {
-  color: light-dark(#343e49, #c7c7c7);
-  font-size: 13px;
-  font-weight: 500;
+  color: var(--text);
+  font-size: var(--text-body);
+  font-weight: var(--weight-medium);
 }
 .recent-location {
   margin-top: 6px;
-  color: light-dark(#596671, #818181);
-  font-size: 11px;
+  color: var(--muted);
+  font-size: var(--text-caption);
 }
 .recent-arrow {
   align-self: flex-start;
-  color: light-dark(#69737b, #555);
-  font-size: 14px;
+  color: var(--subtle);
+  font-size: var(--text-content);
 }
 .recent-target:hover .recent-arrow {
-  color: light-dark(#46515d, #aaa);
+  color: var(--muted);
 }
 .recent-targets #recent-status {
   margin: 16px 2px 0;
-  font-size: 12px;
+  font-size: var(--text-label);
 }
 @container (max-width: 760px) {
   .recent-list {
@@ -414,10 +455,11 @@ button svg,
     padding: 24px;
   }
   .start-mark {
-    display: none;
+    margin-block-end: 0;
+    zoom: 0.78;
   }
   .start-screen h1 {
-    font-size: 22px;
+    font-size: var(--text-heading);
   }
   .start-screen p {
     margin: 8px 0 18px;
@@ -491,15 +533,25 @@ button svg,
   align-items: center;
   gap: 10px;
   flex-shrink: 0;
+  background: linear-gradient(160deg, var(--surface), var(--workbench-background));
+  box-shadow: inset 0 -1px color-mix(in oklab, var(--line) 70%, transparent);
 }
 .file-card[data-diff='true'] .file-header {
   min-height: 46px;
-  background: light-dark(#f4f6f7, #20201f);
+  background: var(--surface);
   border-bottom: 1px solid var(--line);
+  box-shadow: none;
 }
 .file-icon {
   display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: linear-gradient(150deg, var(--surface-raised), var(--surface));
 }
 .file-icon svg,
 .file-icon img {
@@ -610,12 +662,12 @@ button svg,
   white-space: nowrap;
 }
 .comparison-original {
-  background: var(--comparison-base-surface);
+  background: linear-gradient(112deg, var(--comparison-base-surface), var(--surface));
   box-shadow: inset 0 1px color-mix(in srgb, var(--comparison-base) 28%, transparent);
 }
 .comparison-working {
   border-inline-start: 1px solid var(--line);
-  background: var(--comparison-working-surface);
+  background: linear-gradient(112deg, var(--comparison-working-surface), var(--surface));
   box-shadow: inset 0 1px color-mix(in srgb, var(--comparison-working) 28%, transparent);
 }
 .comparison-version {
@@ -641,6 +693,7 @@ button svg,
   border-radius: 4px;
   background: linear-gradient(currentColor, currentColor) center / 8px 1px no-repeat;
   background-color: color-mix(in srgb, currentColor 8%, transparent);
+  box-shadow: 0 1px 0 color-mix(in oklab, currentColor 15%, transparent);
   content: '';
 }
 .comparison-version.is-working::before {
@@ -740,13 +793,18 @@ button svg,
   display: flex;
   align-items: center;
   justify-content: center;
-  background: repeating-conic-gradient(light-dark(#2436470a, #ffffff05) 0% 25%, transparent 0% 50%) 0 0 / 20px 20px;
+  background:
+    radial-gradient(ellipse at center, transparent 35%, color-mix(in oklab, var(--canvas) 80%, transparent)),
+    repeating-conic-gradient(var(--surface-inset) 0% 25%, var(--surface) 0% 50%) 0 0 / 20px 20px;
 }
 .media-content {
   display: block;
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
+}
+.media-preview:not(.media-actual-size) .media-content {
+  box-shadow: 0 6px 28px color-mix(in oklab, var(--shadow) 70%, transparent);
 }
 .media-image-toggle {
   display: flex;
@@ -822,10 +880,14 @@ button svg,
   text-align: center;
 }
 .empty-symbol {
-  color: light-dark(#649175, #5d7661);
-  width: 43px;
-  height: 43px;
-  margin-bottom: 19px;
+  width: 138px;
+  margin-block-end: 8px;
+}
+.empty-symbol .workspace-art__tile--right {
+  inset-inline-end: 21px;
+}
+.empty-symbol .workspace-art__tile--main {
+  inset-inline-start: 34px;
 }
 .empty-state h2 {
   margin: 0 0 9px;
@@ -840,6 +902,35 @@ button svg,
 }
 .feed:empty {
   display: none;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .workspace-art__tile {
+    animation: workspace-art-settle 390ms cubic-bezier(0.18, 0.78, 0.35, 1) backwards;
+  }
+  .workspace-art__tile--right {
+    animation-delay: 50ms;
+  }
+  .workspace-art__tile--main {
+    animation-delay: 95ms;
+  }
+  .start-actions button,
+  .titlebar-button,
+  .change-button {
+    transition:
+      background-color 140ms ease,
+      border-color 140ms ease,
+      color 140ms ease,
+      transform 140ms ease;
+  }
+  .start-actions button:active:not(:disabled) {
+    transform: translateY(1px);
+  }
+}
+@keyframes workspace-art-settle {
+  from {
+    opacity: 0;
+    transform: translateY(8px) rotate(calc(var(--tile-tilt) - 8deg)) scale(0.94);
+  }
 }
 .statusbar {
   height: 22px;

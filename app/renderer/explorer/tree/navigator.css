@@ -3,7 +3,13 @@
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  background: light-dark(#f4f6f7, #121212);
+  background:
+    radial-gradient(
+      ellipse 180px 80px at 20% 0,
+      color-mix(in oklab, var(--modified-surface) 66%, transparent),
+      transparent
+    ),
+    var(--surface);
   color: light-dark(#303943, #ccc);
   user-select: none;
   overflow: hidden;
@@ -108,6 +114,7 @@
 }
 .navigator-search:focus-within {
   border-color: light-dark(#417685, #56808b);
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent) 15%, transparent);
 }
 .navigator-summary {
   padding: 0 10px 5px;
@@ -158,6 +165,7 @@
 }
 .navigator-row[aria-selected='true'] {
   background: light-dark(#dfeaf1, #37373d);
+  box-shadow: inset 2px 0 var(--accent);
 }
 .navigator-tree:focus-visible .navigator-row[data-active='true'] {
   outline: 1px solid light-dark(#417685, #56808b);
@@ -493,5 +501,17 @@
   .picker-filter-host .search-filter-panel select,
   .picker-filter-host .search-filter-panel input {
     height: 24px;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .navigator-search {
+    transition:
+      border-color 130ms ease-out,
+      box-shadow 130ms ease-out;
+  }
+
+  .navigator-chevron::after {
+    transition: transform 150ms ease-out;
   }
 }

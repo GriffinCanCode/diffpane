@@ -116,7 +116,7 @@ export function createChangeReview(container, { onOpen, onBack, onProgress, onCa
         <div class="change-review-rows" role="presentation"></div>
       </div>
       <div class="change-review-empty" hidden>
-        <span class="change-review-empty-icon"></span>
+        <span class="change-review-empty-icon" aria-hidden="true"></span>
         <h3 tabindex="-1"></h3>
         <p></p>
         <button type="button" class="change-review-empty-action"></button>

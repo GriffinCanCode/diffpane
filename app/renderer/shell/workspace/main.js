@@ -154,7 +154,8 @@ const icons = {
     '<svg viewBox="0 0 48 48" fill="none" aria-hidden="true"><path d="M5 12a4 4 0 0 1 4-4h10l5 5h15a4 4 0 0 1 4 4v19a4 4 0 0 1-4 4H9a4 4 0 0 1-4-4V12Z" fill="currentColor" opacity=".22"/><path d="M5 19a4 4 0 0 1 4-4h30a4 4 0 0 1 4 4v17a4 4 0 0 1-4 4H9a4 4 0 0 1-4-4V19Z" fill="currentColor" opacity=".72"/><path d="M9 15h30a4 4 0 0 1 4 4v1H5v-1a4 4 0 0 1 4-4Z" fill="white" opacity=".12"/><path d="M10 33h12" stroke="white" stroke-opacity=".3" stroke-width="1.5" stroke-linecap="round"/></svg>',
 }
 
-const app = document.querySelector('#app') ?? document.body.appendChild(document.createElement('div'))
+const app = document.getElementById('app') ?? document.body.appendChild(document.createElement('div'))
+const workspaceOpening = document.getElementById('workspace-opening')
 app.innerHTML = `
   <header class="titlebar">
     <div class="brand" role="img" aria-label="diffpane"><span class="brand-mark">${icons.mark}</span></div>
@@ -179,9 +180,37 @@ app.innerHTML = `
     </div>
     <section class="workbench" tabindex="-1" aria-label="Code workspace">
   <main class="start-screen" id="start-screen" aria-labelledby="start-title" aria-busy="true">
-    <div class="start-content"><span class="start-mark">${icons.mark}</span><h1 id="start-title">Opening workspace…</h1><p id="start-description" role="status">Your files will appear here in a moment.</p><div class="start-loading" data-loading-status aria-hidden="true"></div><div id="start-error" hidden></div><div class="start-actions" id="start-actions" hidden><button type="button" id="open-folder">Open Folder…</button><button type="button" id="open-file">Open File…</button></div><section class="recent-targets" id="recent-targets" aria-labelledby="recent-title" hidden><h2 id="recent-title">Recently opened</h2><ul class="recent-list" id="recent-list"></ul><p id="recent-status" role="status" hidden></p></section></div>
+    <div class="start-content">
+      <span class="workspace-art start-mark" aria-hidden="true">
+        <span class="workspace-art__tile workspace-art__tile--left">${icons.folder}</span>
+        <span class="workspace-art__tile workspace-art__tile--right">${icons.file}</span>
+        <span class="workspace-art__tile workspace-art__tile--main">${icons.mark}</span>
+      </span>
+      <h1 id="start-title">Welcome to Diffpane</h1>
+      <p id="start-description">Open a file or folder in a Git working tree to get started.</p>
+      <div id="start-error" hidden></div>
+      <div class="start-actions" id="start-actions" hidden>
+        <button type="button" id="open-folder">Open Folder…</button>
+        <button type="button" id="open-file">Open File…</button>
+      </div>
+      <section class="recent-targets" id="recent-targets" aria-labelledby="recent-title" hidden>
+        <h2 id="recent-title">Recently opened</h2>
+        <ul class="recent-list" id="recent-list"></ul>
+        <p id="recent-status" role="status" hidden></p>
+      </section>
+    </div>
   </main>
-  <main class="feed-scroll" id="feed-scroll" hidden><div class="feed" id="feed"></div><div class="empty-state" id="empty-state"><span class="empty-symbol">${icons.mark}</span><h2>Open a file</h2><p>Select a file in the explorer.</p></div></main>
+  <main class="feed-scroll" id="feed-scroll" hidden>
+    <div class="feed" id="feed"></div>
+    <div class="empty-state" id="empty-state">
+      <span class="workspace-art empty-symbol" aria-hidden="true">
+        <span class="workspace-art__tile workspace-art__tile--right">${icons.mark}</span>
+        <span class="workspace-art__tile workspace-art__tile--main">${icons.file}</span>
+      </span>
+      <h2>Open a file</h2>
+      <p>Select a file in the explorer.</p>
+    </div>
+  </main>
   </section>
     <aside id="claude-panel" hidden></aside>
     <aside id="review-notes-panel" hidden></aside>
@@ -262,6 +291,11 @@ let reviewComparison = 'head'
 /** @type {Map<string, ViewState>} */
 const savedViews = new Map()
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)')
+const minimumOpeningMs = 2100
+let initialInventoryReady = false
+let initialDocumentReady = false
+/** @type {number | undefined} */
+let workspaceOpeningTimer
 let recentVersion = 0
 let recentSignature = ''
 let targetOpening = false
@@ -378,6 +412,29 @@ const assistant =
     },
   })
 
+function finishWorkspaceOpening() {
+  window.clearTimeout(workspaceOpeningTimer)
+  workspaceOpeningTimer = undefined
+  if (workspaceOpening?.hidden !== false) return
+  workspaceOpening.hidden = true
+  app.inert = false
+}
+
+function revealWorkspaceWhenReady() {
+  if (closed || workspaceOpening?.hidden !== false || !initialInventoryReady || !initialDocumentReady) return
+  const firstPaint = performance.getEntriesByName('first-contentful-paint', 'paint')[0]
+  const openingStart = firstPaint ?? performance.getEntriesByName('workspace-opening', 'mark')[0]
+  const elapsed = performance.now() - (openingStart?.startTime ?? 0)
+  const remaining = reducedMotion.matches ? 0 : minimumOpeningMs - elapsed
+  if (remaining <= 0) finishWorkspaceOpening()
+  else {
+    workspaceOpeningTimer ??= window.setTimeout(() => {
+      workspaceOpeningTimer = undefined
+      revealWorkspaceWhenReady()
+    }, remaining)
+  }
+}
+
 function showStartScreen(failed = false) {
   ui.startScreen.hidden = false
   ui.startScreen.setAttribute('aria-busy', 'false')
@@ -394,6 +451,7 @@ function showStartScreen(failed = false) {
       ? 'Choose another file or folder'
       : 'No project open'
   document.title = 'Diffpane'
+  finishWorkspaceOpening()
   runTask('Load recent projects', loadRecentTargets)
 }
 
@@ -625,6 +683,12 @@ async function mutateFile(action, pathname, name) {
   }
 }
 const navigator = createNavigator(ui.navigator, api, openFile, {
+  onInitialScan: ready => {
+    if (ready) {
+      initialInventoryReady = true
+      revealWorkspaceWhenReady()
+    } else finishWorkspaceOpening()
+  },
   onReady: startBackgroundAnalysis,
   iconFor: projectIcon,
   onMutate: (action, path, name) => {
@@ -1408,14 +1472,16 @@ function applySnapshot(next) {
       title: 'Live updates are using polling',
     })
   } else if (!next.watchError) clearErrorNotice('watcher')
-  if (first && (next.initialPath || next.files.length)) {
-    const path = next.initialPath ?? next.files[0]?.path
+  if (first) {
+    const path = next.initialPath?.length ? next.initialPath : next.files[0]?.path
     if (path) {
       const open = async () => {
-        await openFile({ path, submodule: false })
+        const result = await attemptAsync(() => openFile({ path, submodule: false }))
+        if (!result.ok || !result.value) finishWorkspaceOpening()
+        if (!result.ok) throw result.error
       }
       runTask('Open initial file', open, { retry: open })
-    }
+    } else initialDocumentReady = true
   } else {
     const card = openedFile ? cards.get(openedFile.path) : undefined
     const file = card && reviewFiles(card.comparison).find(entry => entry.path === card.file.path)
@@ -1432,6 +1498,7 @@ function applySnapshot(next) {
   }
   syncReviewState()
   ui.statusText.textContent = `${next.files.length.toLocaleString()} changed ${next.files.length === 1 ? 'file' : 'files'} · ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`
+  revealWorkspaceWhenReady()
 }
 
 /** @param {Card} card */
@@ -1467,9 +1534,11 @@ async function loadDocument(card, retry = false) {
     }
     renderDocument(card, document)
     clearDocumentFailure(card)
+    initialDocumentReady = true
   } catch (cause) {
     if (card.active && generation === card.generation) {
       if (retry && card.errorBoundary?.isConnected) throw appError(cause, { operation: 'Load file' })
+      finishWorkspaceOpening()
       showDocumentFailure(card, cause)
     }
   } finally {
@@ -1477,6 +1546,7 @@ async function loadDocument(card, retry = false) {
     card.element.classList.remove('is-loading')
     if (card.active) syncReviewState()
     scheduleDocument()
+    revealWorkspaceWhenReady()
     runTask('Start background analysis', startBackgroundAnalysis, { silent: true })
   }
 }
@@ -2393,6 +2463,7 @@ function showWorkspaceFailure(cause) {
   const retryLabel = workspaceFailure ? 'Reconnect workspace' : 'Try again'
   const title = snapshot ? 'Workspace connection interrupted' : 'Couldn’t open this project'
   if (snapshot) {
+    finishWorkspaceOpening()
     reportError(error, { key: 'workspace', title, retry: recoverWorkspace, retryLabel })
     return
   }
@@ -2490,7 +2561,7 @@ const workspaceShortcuts = {
 document.addEventListener(
   'keydown',
   event => {
-    if (!api || closingRequested || settings?.isOpen || event.defaultPrevented) return
+    if (!api || app.inert || closingRequested || settings?.isOpen || event.defaultPrevented) return
     if (document.querySelector('dialog#claude-settings')?.matches('[open]')) return
     const binding = bindingFromEvent(event, isMac)
     if (!binding) return
@@ -2636,6 +2707,7 @@ Object.assign(window, {
     })
   })
   const unsubscribeErrors = api.onError(showWorkspaceFailure)
+  reducedMotion.addEventListener('change', revealWorkspaceWhenReady)
   runTask('Load workspace', async () => {
     const result = await attemptAsync(async () => applySnapshot(await api.snapshot()))
     if (!result.ok) showWorkspaceFailure(result.error)
@@ -2644,6 +2716,8 @@ Object.assign(window, {
     'pagehide',
     () => {
       closed = true
+      window.clearTimeout(workspaceOpeningTimer)
+      reducedMotion.removeEventListener('change', revealWorkspaceWhenReady)
       howmany?.dispose()
       assistant?.dispose()
       reviewNotes?.dispose()

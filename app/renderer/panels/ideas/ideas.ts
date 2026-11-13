@@ -274,6 +274,10 @@ export function mountIdeaBuilder(host: HTMLElement, options: IdeaBuilderOptions)
       </section>
       <div class="idea-stage">
         <div class="idea-empty" hidden>
+          <div class="idea-empty-scene" aria-hidden="true">
+            <span class="idea-empty-checklist">${icon('task')}</span>
+            <span class="idea-empty-notebook">${icon('notebook')}</span>
+          </div>
           <h3 aria-live="polite"></h3>
           <p></p>
           <div class="idea-empty-actions"></div>

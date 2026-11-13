@@ -20,7 +20,13 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  background: var(--queue-bg);
+  background:
+    radial-gradient(
+      ellipse 230px 120px at 5% 0,
+      color-mix(in oklab, var(--accent-surface) 62%, transparent),
+      transparent
+    ),
+    var(--queue-bg);
   color: var(--queue-text);
   user-select: none;
 }
@@ -287,10 +293,11 @@
 
 .change-review-row[aria-selected='true']::before {
   position: absolute;
-  inset-block: 0;
-  inset-inline-start: 0;
+  inset-block: 5px;
+  inset-inline-start: 3px;
   width: 2px;
-  background: var(--queue-accent);
+  border-radius: 2px;
+  background: var(--accent);
   content: '';
 }
 
@@ -391,6 +398,8 @@
 }
 
 .change-review-empty {
+  --queue-empty-ink: var(--accent);
+  --queue-empty-fill: var(--accent-surface);
   position: absolute;
   inset: 0;
   display: flex;
@@ -402,15 +411,43 @@
 }
 
 .change-review-empty-icon {
+  position: relative;
   display: grid;
   flex: 0 0 auto;
-  width: 36px;
-  height: 36px;
-  margin-bottom: 10px;
+  width: 44px;
+  height: 44px;
+  margin-bottom: 14px;
   place-items: center;
-  border-radius: 50%;
-  background: var(--queue-selected);
-  color: var(--queue-accent);
+  border: 1px solid color-mix(in oklab, currentColor 28%, var(--line));
+  border-radius: 10px;
+  background: linear-gradient(145deg, var(--surface-raised), var(--queue-empty-fill));
+  box-shadow:
+    inset 0 1px color-mix(in oklab, var(--text) 10%, transparent),
+    0 2px 0 color-mix(in oklab, currentColor 17%, var(--surface)),
+    0 6px 14px color-mix(in oklab, currentColor 13%, transparent);
+  color: var(--queue-empty-ink);
+  transform: rotate(-7deg);
+}
+
+.change-review-empty:is([data-state='head'], [data-state='complete']) {
+  --queue-empty-ink: var(--added);
+  --queue-empty-fill: var(--added-surface);
+}
+
+.change-review-empty[data-state='error'] {
+  --queue-empty-ink: var(--warning);
+  --queue-empty-fill: var(--warning-surface);
+}
+
+.change-review-empty-icon::after {
+  position: absolute;
+  inset: -5px -11px auto auto;
+  width: 9px;
+  height: 9px;
+  background: currentColor;
+  clip-path: polygon(50% 0, 63% 37%, 100% 50%, 63% 63%, 50% 100%, 37% 63%, 0 50%, 37% 37%);
+  opacity: 0.64;
+  content: '';
 }
 
 .change-review-empty-icon svg {
@@ -592,5 +629,26 @@
 
   .change-review-mark-next {
     display: none;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .change-review-empty-icon {
+    animation: change-review-stamp 320ms cubic-bezier(0.2, 0.8, 0.3, 1) both;
+  }
+
+  .change-review-mark-next {
+    transition: transform 130ms ease-out;
+  }
+
+  .change-review-mark:not([aria-disabled='true']):is(:hover, :focus-visible) .change-review-mark-next {
+    transform: translateX(2px);
+  }
+}
+
+@keyframes change-review-stamp {
+  from {
+    opacity: 0;
+    transform: translateY(5px) rotate(-14deg) scale(0.9);
   }
 }

@@ -15,6 +15,10 @@
   font-size: 11px;
   padding: 3px 10px;
 }
+.markdown-toggle button:hover:not([aria-pressed='true']) {
+  background: var(--hover);
+  color: var(--text);
+}
 .markdown-toggle button[aria-pressed='true'] {
   color: light-dark(#315e57, #dde8e6);
   background: light-dark(#e6efed, #ffffff0e);
@@ -23,9 +27,12 @@
 .markdown-preview {
   height: 100%;
   overflow: auto;
-  scrollbar-color: light-dark(#24364738, #ffffff20) transparent;
+  scrollbar-color: var(--scrollbar) transparent;
   scrollbar-gutter: stable both-edges;
-  background: var(--workbench-background);
+  background:
+    radial-gradient(ellipse at 50% 0%, color-mix(in oklab, var(--accent-surface) 32%, transparent), transparent 75%) 0
+      0 / 100% 260px no-repeat,
+    var(--workbench-background);
   outline: none;
 }
 .markdown-preview:focus-visible {
@@ -158,23 +165,29 @@
   margin-bottom: 0;
 }
 .markdown-body .md-callout {
-  --callout-color: light-dark(#336786, #86b9d4);
+  --callout-color: var(--accent);
+  --callout-surface: var(--accent-surface);
   border-left-color: var(--callout-color);
   padding: 16px 20px;
   border-radius: 0 7px 7px 0;
-  background: light-dark(#f4f7f9, #ffffff03);
-  font-size: 14px;
+  background: var(--callout-surface);
+  color: var(--text);
+  font-size: var(--text-content);
 }
 .md-callout[data-tone='tip'] {
+  --callout-surface: var(--added-surface);
   --callout-color: light-dark(#367054, #91c6a3);
 }
 .md-callout[data-tone='important'] {
+  --callout-surface: var(--violet-surface);
   --callout-color: light-dark(#715495, #b4a1d9);
 }
 .md-callout[data-tone='warning'] {
+  --callout-surface: var(--warning-surface);
   --callout-color: light-dark(#79571c, #d3b97c);
 }
 .md-callout[data-tone='caution'] {
+  --callout-surface: var(--removed-surface);
   --callout-color: light-dark(#a2494b, #d69595);
 }
 .md-callout-label {
@@ -211,10 +224,11 @@
 }
 .md-block {
   margin: 24px 0;
-  border: 1px solid light-dark(#dce3e9, #ffffff10);
+  border: 1px solid var(--line);
   border-radius: 10px;
   overflow: hidden;
-  background: light-dark(#f5f7f9, #1c1e21);
+  background: var(--surface);
+  box-shadow: 0 4px 16px color-mix(in oklab, var(--shadow) 20%, transparent);
 }
 .md-block-toolbar {
   display: flex;
@@ -222,8 +236,8 @@
   justify-content: space-between;
   min-height: 40px;
   padding: 6px 12px 6px 16px;
-  border-bottom: 1px solid light-dark(#2436471c, #ffffff0a);
-  background: light-dark(#24364706, #ffffff02);
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(160deg, var(--surface-raised), var(--surface));
   gap: 16px;
 }
 .md-block-label {
@@ -270,7 +284,8 @@
   color: light-dark(#34404a, #e1e7ec);
 }
 .md-action[data-copied='true'] {
-  color: var(--accent);
+  background: var(--added-surface);
+  color: var(--added);
 }
 .md-action svg {
   width: 16px;
@@ -435,5 +450,13 @@
 @media (prefers-reduced-motion: reduce) {
   .markdown-body .md-heading-anchor {
     transition: none;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .markdown-toggle button,
+  .md-action {
+    transition:
+      color 140ms ease,
+      background-color 140ms ease;
   }
 }

@@ -95,7 +95,10 @@ export function createAssistant(
     <div class="claude-transcript">
       <div class="claude-conversation" role="log" aria-live="off" aria-label="Conversation" tabindex="0">
         <div class="claude-empty">
-          <span class="claude-empty-mark">${icon('mark')}</span>
+          <div class="claude-empty-scene" aria-hidden="true">
+            <span class="claude-empty-file">${icon('file')}</span>
+            <span class="claude-empty-mark">${icon('mark')}</span>
+          </div>
           <h3></h3>
           <p></p>
           <div class="claude-starters"></div>
@@ -248,6 +251,7 @@ export function createAssistant(
     const currentFile = getFileContext()
     const context = attachedIdea ? 'idea' : currentFile && includeFile ? 'file' : 'project'
     empty.hidden = hasTurns
+    empty.toggleAttribute('data-checking', checkingConnection)
     emptyTitle.textContent = checkingConnection
       ? 'Connecting to Claude…'
       : !connected

@@ -96,6 +96,8 @@ export function showStartupFailure(cause: unknown): void {
   })
   const app = document.getElementById('app')
   if (app) app.inert = true
+  const opener = document.getElementById('workspace-opening')
+  if (opener) opener.hidden = true
   startupBoundary = renderFailure(document.body, error, {
     scope: 'app',
     title: 'Diffpane couldn’t start',

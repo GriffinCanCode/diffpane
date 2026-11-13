@@ -2,6 +2,7 @@ import { attemptAsync } from '../../../shared/recovery/app-errors.ts'
 import { showErrorBoundary } from '../../shell/recovery/error-boundary.ts'
 import { reportError, runTask } from '../../shell/recovery/errors.ts'
 import { requireElement } from '../../shell/workspace/dom.js'
+import '../search-illustration.css'
 import './content-search.css'
 
 export interface ContentMatch {
@@ -59,7 +60,12 @@ export function createContentSearch(api: SearchApi, onSelect: (match: ContentMat
     <p class="content-search-summary" role="status"></p>
     <div class="content-search-body">
       <div class="content-search-results" id="content-search-results" role="listbox" aria-label="Matching lines" hidden></div>
-      <p class="content-search-empty"></p>
+      <div class="content-search-empty" hidden>
+        <span class="search-illustration" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round"><path d="M10 5H4m8 5H4m4 5H4"/><circle cx="15.5" cy="13.5" r="4.5"/><path d="m19 17 3 3"/></svg>
+        </span>
+        <p></p>
+      </div>
       <div class="content-search-error" hidden></div>
     </div>
     <footer class="content-search-footer"><span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span><span><kbd>↵</kbd> Open match</span></footer>`
@@ -69,6 +75,7 @@ export function createContentSearch(api: SearchApi, onSelect: (match: ContentMat
   const results = requireElement(dialog, '.content-search-results', HTMLElement)
   const summary = requireElement(dialog, '.content-search-summary', HTMLElement)
   const empty = requireElement(dialog, '.content-search-empty', HTMLElement)
+  const emptyMessage = requireElement(empty, 'p', HTMLParagraphElement)
   const context = requireElement(dialog, '.content-search-context', HTMLElement)
   const clear = requireElement(dialog, '.content-search-clear', HTMLButtonElement)
   const matchCaseButton = requireElement(dialog, '.content-search-case', HTMLButtonElement)
@@ -131,7 +138,7 @@ export function createContentSearch(api: SearchApi, onSelect: (match: ContentMat
     results.hidden = !matches.length
     input.setAttribute('aria-expanded', String(!results.hidden))
     empty.hidden = !detail
-    empty.textContent = detail
+    emptyMessage.textContent = detail
     summary.textContent = status
     const same = previous ? matches.findIndex(hit => hit.path === previous.path && hit.line === previous.line) : -1
     results.scrollTop = same >= 0 ? scrollTop : 0

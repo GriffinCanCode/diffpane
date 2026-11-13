@@ -12,6 +12,25 @@
   cursor: pointer;
   color: light-dark(#56626d, #aaa);
 }
+.howmany-panel > summary:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.howmany-panel > summary:focus-visible {
+  outline-offset: -2px;
+}
+.howmany-panel > summary::before {
+  width: 5px;
+  height: 5px;
+  margin-inline: 1px 3px;
+  border-inline-end: 1px solid;
+  border-block-end: 1px solid;
+  transform: rotate(-45deg);
+  content: '' / '';
+}
+.howmany-panel[open] > summary::before {
+  transform: translateY(-1px) rotate(45deg);
+}
 .howmany-panel > summary > span:first-child {
   font-weight: 650;
   text-transform: uppercase;
@@ -146,10 +165,50 @@
 }
 .howmany-dialog > header {
   display: flex;
+  gap: 12px;
   justify-content: space-between;
   align-items: start;
   padding: 22px 24px 16px;
   border-bottom: 1px solid var(--line);
+  background:
+    radial-gradient(ellipse at 10% 0, color-mix(in oklab, var(--accent-surface) 70%, transparent), transparent 58%),
+    var(--surface);
+}
+.howmany-heading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 13px;
+}
+.howmany-chart-glyph {
+  display: flex;
+  flex: none;
+  align-items: end;
+  gap: 3px;
+  padding: 10px 9px;
+  border: 1px solid color-mix(in oklab, var(--accent) 28%, var(--line));
+  border-radius: 9px;
+  background: linear-gradient(140deg, var(--surface-raised), var(--accent-surface));
+  box-shadow:
+    inset 0 1px color-mix(in oklab, var(--text) 8%, transparent),
+    0 2px 0 color-mix(in oklab, var(--accent) 18%, var(--surface)),
+    0 5px 9px color-mix(in oklab, var(--shadow) 55%, transparent);
+  transform: rotate(-6deg);
+}
+.howmany-chart-glyph i {
+  width: 4px;
+  height: 9px;
+  border-radius: 2px;
+  background: var(--chart-comments);
+  transform-origin: bottom;
+}
+.howmany-chart-glyph i:nth-child(2) {
+  height: 17px;
+  background: var(--chart-code);
+}
+.howmany-chart-glyph i:nth-child(3) {
+  height: 12px;
+  background: var(--chart-docs);
 }
 .howmany-dialog h2 {
   font-size: 19px;
@@ -163,23 +222,49 @@
   font-size: 12px;
 }
 .howmany-close {
-  border: 0;
-  background: none;
-  color: light-dark(#5e6b77, #999);
-  font-size: 23px;
-  padding: 0 2px;
+  display: grid;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-raised);
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+}
+.howmany-close:hover {
+  background: var(--hover);
+  color: var(--text);
 }
 .howmany-report-content {
   max-height: calc(100vh - 250px);
   overflow: auto;
-  padding: 0 24px 20px;
+  padding: 18px 24px 20px;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  column-gap: 32px;
+  align-items: start;
+  gap: 12px;
 }
 .howmany-section {
-  padding-top: 22px;
   min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 2px 7px color-mix(in oklab, var(--shadow) 24%, transparent);
+}
+.howmany-report-content > .howmany-empty {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 16px 12px;
+  text-align: center;
+}
+.howmany-section .howmany-composition {
+  height: 6px;
+  border-radius: 3px;
 }
 .howmany-section h3 {
   margin: 0 0 12px;
@@ -218,6 +303,34 @@
   padding: 5px 10px;
   font-size: 12px;
   flex-shrink: 0;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .howmany-dialog[open] {
+    animation: howmany-report-in 180ms ease-out both;
+  }
+  .howmany-panel > summary::before {
+    transition: transform 150ms ease-out;
+  }
+  .howmany-dialog[open][data-analyzing] .howmany-chart-glyph i {
+    animation: howmany-chart-pulse 840ms ease-in-out infinite alternate;
+  }
+  .howmany-dialog[open][data-analyzing] .howmany-chart-glyph i:nth-child(2) {
+    animation-delay: 140ms;
+  }
+  .howmany-dialog[open][data-analyzing] .howmany-chart-glyph i:nth-child(3) {
+    animation-delay: 280ms;
+  }
+}
+@keyframes howmany-report-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.99);
+  }
+}
+@keyframes howmany-chart-pulse {
+  to {
+    transform: scaleY(0.58);
+  }
 }
 @media (max-width: 700px) {
   .howmany-report-content {

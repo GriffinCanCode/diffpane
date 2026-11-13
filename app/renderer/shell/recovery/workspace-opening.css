@@ -1,0 +1,455 @@
+@import './window-mascot.css';
+
+.workspace-opening {
+  position: fixed;
+  inset: 0;
+  z-index: 1001;
+  display: grid;
+  place-items: safe center;
+  padding: 48px 20px 24px;
+  overflow: auto;
+  background:
+    radial-gradient(ellipse at 24% 25%, color-mix(in oklab, var(--accent-surface) 48%, transparent), transparent 42%),
+    radial-gradient(ellipse at 80% 77%, color-mix(in oklab, var(--violet-surface) 62%, transparent), transparent 42%),
+    var(--canvas);
+  color: var(--text);
+  font: var(--text-body)/var(--leading-ui) var(--font-ui);
+  text-align: center;
+}
+
+.workspace-opening[hidden] {
+  display: none;
+}
+
+.workspace-opening::before {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 1;
+  height: 34px;
+  -webkit-app-region: drag;
+  content: '';
+}
+
+.workspace-opening__field {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.workspace-opening__field::before {
+  position: absolute;
+  inset: 36px 0 0;
+  background: radial-gradient(circle, color-mix(in oklab, var(--accent) 18%, transparent) 1px, transparent 1.2px) 50%
+    50% / 22px 22px;
+  mask-image: radial-gradient(ellipse, transparent 13%, #000 54%, transparent 88%);
+  content: '';
+}
+
+.workspace-opening__glyph {
+  --glyph-ink: var(--accent);
+  --glyph-fill: var(--accent-surface);
+  position: absolute;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  width: var(--glyph-size);
+  height: var(--glyph-size);
+  border: 1px solid color-mix(in oklab, var(--glyph-ink) 23%, var(--line));
+  border-radius: 24%;
+  background: linear-gradient(148deg, var(--surface-raised), var(--glyph-fill));
+  box-shadow:
+    inset 0 1px color-mix(in oklab, var(--text) 11%, transparent),
+    0 2px 0 color-mix(in oklab, var(--glyph-ink) 16%, var(--surface)),
+    0 10px 22px color-mix(in oklab, var(--glyph-ink) 12%, transparent);
+  color: color-mix(in oklab, var(--glyph-ink) 78%, var(--muted));
+  font: 600 var(--glyph-font, 15px)/1 var(--font-mono);
+  transform: rotate(var(--glyph-tilt));
+}
+
+.workspace-opening__glyph--code {
+  --glyph-size: 53px;
+  --glyph-tilt: -13deg;
+  --glyph-delay: -0.6s;
+  top: 22%;
+  left: 16%;
+}
+
+.workspace-opening__glyph--file {
+  --glyph-ink: var(--violet);
+  --glyph-fill: var(--violet-surface);
+  --glyph-size: 39px;
+  --glyph-tilt: 13deg;
+  --glyph-delay: -1.9s;
+  top: 14%;
+  right: 28%;
+}
+
+.workspace-opening__glyph--file::before {
+  width: 12px;
+  height: 15px;
+  border: 1px solid;
+  border-radius: 2px 4px 2px 2px;
+  background:
+    linear-gradient(currentColor, currentColor) center 6px / 7px 1px no-repeat,
+    linear-gradient(currentColor, currentColor) center 9px / 7px 1px no-repeat;
+  content: '';
+}
+
+.workspace-opening__glyph--diff {
+  --glyph-size: 55px;
+  --glyph-tilt: 10deg;
+  --glyph-delay: -2.8s;
+  --glyph-ink: var(--added);
+  --glyph-fill: var(--added-surface);
+  top: 36%;
+  right: 11%;
+  grid-template-columns: 1fr 1fr;
+  font-size: 18px;
+}
+
+.workspace-opening__glyph--diff::before {
+  position: absolute;
+  inset: 9px 50% 9px auto;
+  border-inline-end: 1px solid var(--line);
+  content: '';
+}
+
+.workspace-opening__glyph--diff span:last-child {
+  color: var(--removed);
+}
+
+.workspace-opening__glyph--branch {
+  --glyph-size: 44px;
+  --glyph-tilt: 11deg;
+  --glyph-delay: -2.2s;
+  --glyph-ink: var(--modified);
+  --glyph-fill: var(--modified-surface);
+  bottom: 20%;
+  left: 11%;
+}
+
+.workspace-opening__glyph--branch::before {
+  width: 11px;
+  height: 14px;
+  border-inline-start: 1px solid;
+  background: linear-gradient(currentColor, currentColor) 1px 7px / 9px 1px no-repeat;
+  content: '';
+}
+
+.workspace-opening__glyph--branch::after {
+  position: absolute;
+  top: calc(50% - 9px);
+  left: calc(50% - 8px);
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow:
+    0 14px currentColor,
+    11px 7px currentColor;
+  content: '';
+}
+
+.workspace-opening__glyph--prompt {
+  --glyph-size: 49px;
+  --glyph-tilt: -11deg;
+  --glyph-delay: -1.2s;
+  --glyph-ink: var(--violet);
+  --glyph-fill: var(--violet-surface);
+  --glyph-font: 20px;
+  right: 18%;
+  bottom: 15%;
+}
+
+.workspace-opening__glyph--commit {
+  --glyph-size: 33px;
+  --glyph-tilt: -12deg;
+  --glyph-delay: -3.4s;
+  left: 32%;
+  bottom: 9%;
+}
+
+.workspace-opening__glyph--commit::before {
+  width: 6px;
+  height: 6px;
+  border: 1px solid;
+  border-radius: 50%;
+  content: '';
+}
+
+.workspace-opening__glyph--commit::after {
+  position: absolute;
+  inset: 50% 0 auto;
+  height: 1px;
+  background: linear-gradient(
+    to right,
+    transparent 20%,
+    currentColor 20% 38%,
+    transparent 38% 62%,
+    currentColor 62% 80%,
+    transparent 80%
+  );
+  content: '';
+}
+
+.workspace-opening__card {
+  position: relative;
+  box-sizing: border-box;
+  width: min(100%, 382px);
+  padding: 25px clamp(16px, 4vw, 36px) 31px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 12px 36px var(--shadow);
+}
+
+.workspace-opening h1 {
+  margin: 13px 0 0;
+  font-size: clamp(21px, 4vw, var(--text-display));
+  font-weight: var(--weight-semibold);
+  line-height: 1.2;
+  letter-spacing: -0.025em;
+}
+
+.workspace-opening__scene {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 172px;
+  height: 104px;
+  margin-inline: auto;
+  isolation: isolate;
+  color: var(--accent);
+}
+
+.workspace-opening__scene::before {
+  position: absolute;
+  inset: 2px 25px 5px;
+  z-index: -1;
+  border-radius: 50%;
+  background: radial-gradient(ellipse, var(--accent-surface) 32%, transparent 74%);
+  content: '';
+}
+
+.workspace-opening__character {
+  --mascot-surface: var(--surface);
+  --mascot-fill: var(--accent-surface);
+  position: relative;
+  transform: translateY(-3px) rotate(-5deg) scale(1.62);
+}
+
+.workspace-opening .window-mascot__face::after {
+  top: 5px;
+  height: 4px;
+  border-top: 0;
+  border-radius: 0 0 5px 5px;
+}
+
+.workspace-opening__shadow {
+  position: absolute;
+  inset: auto 48px 10px;
+  height: 8px;
+  border-radius: 50%;
+  background: color-mix(in oklab, currentColor 20%, transparent);
+}
+
+.workspace-opening__page {
+  position: absolute;
+  top: 26px;
+  left: calc(50% - 14px);
+  box-sizing: border-box;
+  width: 28px;
+  height: 36px;
+  border: 1px solid color-mix(in oklab, currentColor 48%, var(--surface));
+  border-radius: 5px;
+  background:
+    linear-gradient(currentColor, currentColor) 6px 12px / 13px 1px no-repeat,
+    linear-gradient(currentColor, currentColor) 6px 17px / 10px 1px no-repeat,
+    linear-gradient(currentColor, currentColor) 6px 22px / 12px 1px no-repeat,
+    var(--selection);
+  transform: translate(var(--page-x), var(--page-y)) rotate(var(--page-turn));
+}
+
+.workspace-opening__page--left {
+  --page-x: -34px;
+  --page-y: -7px;
+  --page-turn: -23deg;
+  --page-delay: 150ms;
+}
+
+.workspace-opening__page--right {
+  --page-x: 34px;
+  --page-y: -12px;
+  --page-turn: 18deg;
+  --page-delay: 310ms;
+}
+
+.workspace-opening__spark {
+  position: absolute;
+  width: 11px;
+  height: 11px;
+  background: currentColor;
+  clip-path: polygon(50% 0%, 62% 38%, 100% 50%, 62% 62%, 50% 100%, 38% 62%, 0% 50%, 38% 38%);
+  opacity: 0.65;
+}
+
+.workspace-opening__spark--left {
+  top: 51px;
+  left: 17px;
+}
+
+.workspace-opening__spark--right {
+  top: 11px;
+  right: 16px;
+}
+
+.workspace-opening__field .workspace-opening__spark {
+  width: var(--spark-size);
+  height: var(--spark-size);
+  color: var(--spark-ink, var(--accent));
+  opacity: 0.48;
+}
+
+.workspace-opening__spark--field-top {
+  --spark-size: 10px;
+  --spark-delay: -1.2s;
+  top: 16%;
+  left: 31%;
+}
+
+.workspace-opening__spark--field-right {
+  --spark-size: 13px;
+  --spark-delay: -2.4s;
+  --spark-ink: var(--violet);
+  top: 25%;
+  right: 18%;
+}
+
+.workspace-opening__spark--field-bottom {
+  --spark-size: 10px;
+  --spark-delay: -0.5s;
+  right: 34%;
+  bottom: 13%;
+}
+
+.workspace-opening__spark--field-left {
+  --spark-size: 9px;
+  --spark-delay: -3.1s;
+  --spark-ink: var(--modified);
+  bottom: 39%;
+  left: 20%;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .workspace-opening__glyph {
+    animation: workspace-opening-drift 3.7s ease-in-out var(--glyph-delay) infinite alternate;
+  }
+
+  .workspace-opening__character {
+    animation: workspace-opening-hop 1.95s cubic-bezier(0.28, 0.65, 0.33, 1) both;
+  }
+
+  .workspace-opening .window-mascot__face::before {
+    animation: workspace-opening-blink 1.8s ease-in-out both;
+  }
+
+  .workspace-opening__page {
+    animation: workspace-opening-file 1.2s cubic-bezier(0.25, 0.65, 0.34, 1) var(--page-delay) both;
+  }
+
+  .workspace-opening__shadow {
+    animation: workspace-opening-shadow 1.95s ease-in-out both;
+  }
+
+  .workspace-opening__scene .workspace-opening__spark {
+    animation: workspace-opening-twinkle 680ms ease-out 930ms both;
+  }
+
+  .workspace-opening__spark--right {
+    animation-delay: 1.16s;
+  }
+
+  .workspace-opening__field .workspace-opening__spark {
+    animation: workspace-opening-glimmer 3.4s ease-in-out var(--spark-delay) infinite alternate;
+  }
+}
+
+@keyframes workspace-opening-drift {
+  from {
+    transform: translateY(5px) rotate(var(--glyph-tilt));
+  }
+  to {
+    transform: translateY(-8px) rotate(calc(var(--glyph-tilt) + 7deg));
+  }
+}
+
+@keyframes workspace-opening-glimmer {
+  from {
+    opacity: 0.24;
+    transform: scale(0.75);
+  }
+  to {
+    opacity: 0.65;
+    transform: scale(1.12);
+  }
+}
+
+@keyframes workspace-opening-hop {
+  0% {
+    transform: translateY(6px) rotate(-11deg) scale(1.5);
+  }
+  29% {
+    transform: translateY(-12px) rotate(4deg) scale(1.67);
+  }
+  57% {
+    transform: translateY(1px) rotate(-8deg) scale(1.57);
+  }
+  77% {
+    transform: translateY(-6px) rotate(-3deg) scale(1.64);
+  }
+}
+
+@keyframes workspace-opening-blink {
+  0%,
+  68%,
+  80%,
+  100% {
+    transform: scaleY(1);
+  }
+  74% {
+    transform: scaleY(0.18);
+  }
+}
+
+@keyframes workspace-opening-file {
+  0% {
+    opacity: 0;
+    transform: translate(0, 14px) rotate(0) scale(0.64);
+  }
+  60% {
+    opacity: 1;
+    transform: translate(var(--page-x), calc(var(--page-y) - 10px)) rotate(var(--page-turn));
+  }
+}
+
+@keyframes workspace-opening-shadow {
+  29% {
+    opacity: 0.45;
+    transform: scaleX(0.7);
+  }
+  57% {
+    transform: scaleX(1.08);
+  }
+}
+
+@keyframes workspace-opening-twinkle {
+  0% {
+    opacity: 0;
+    transform: scale(0.25) rotate(-30deg);
+  }
+  55% {
+    opacity: 1;
+    transform: scale(1.15) rotate(8deg);
+  }
+}

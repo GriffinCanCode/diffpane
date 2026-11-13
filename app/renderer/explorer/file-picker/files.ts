@@ -4,6 +4,7 @@ import { reportError, runTask } from '../../shell/recovery/errors.ts'
 import { requireElement } from '../../shell/workspace/dom.js'
 import { createSearchFilters, searchableEntries } from '../project-search/search-filters.ts'
 import type { LanguageFor, SearchEntry } from '../project-search/search-filters.ts'
+import '../search-illustration.css'
 import { createFileSearch } from './search-runtime.ts'
 
 type PickerFile = SearchEntry
@@ -44,7 +45,20 @@ export function createFilePicker(
   dialog.id = 'file-picker'
   dialog.className = 'file-picker'
   dialog.setAttribute('aria-labelledby', 'picker-title')
-  dialog.innerHTML = `<header class="picker-heading"><div><h2 id="picker-title">Search files</h2><p class="picker-context"></p></div><button type="button" class="picker-close" aria-label="Close file search" title="Close · Escape">×</button></header><div class="picker-search"><svg viewBox="0 0 18 18" fill="none" aria-hidden="true"><circle cx="7.8" cy="7.8" r="4.6" stroke="currentColor" stroke-width="1.4"/><path d="m11.3 11.3 3.3 3.3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><input id="file-search" placeholder="Search files, folders, or paths…" aria-label="Search files" role="combobox" aria-autocomplete="list" aria-controls="file-list" aria-expanded="true" autocomplete="off" spellcheck="false"><button type="button" class="picker-clear" aria-label="Clear file search" hidden>Clear</button><kbd>esc</kbd></div><div class="picker-filter-host"></div><div class="picker-summary" role="status" aria-live="polite">Reading files…</div><div class="picker-results"><div id="file-list" class="picker-list" role="listbox" aria-label="Project files"><div class="picker-rows"></div></div><div class="picker-empty" hidden><strong></strong><p></p><button type="button" class="open-button picker-retry" hidden>Try again</button></div></div><footer class="picker-footer"><span><kbd>↑</kbd><kbd>↓</kbd> Navigate <kbd>↵</kbd> Open</span><span>Tracked + untracked</span></footer>`
+  dialog.innerHTML = `
+    <header class="picker-heading"><div><h2 id="picker-title">Search files</h2><p class="picker-context"></p></div><button type="button" class="picker-close" aria-label="Close file search" title="Close · Escape">×</button></header>
+    <div class="picker-search"><svg viewBox="0 0 18 18" fill="none" aria-hidden="true"><circle cx="7.8" cy="7.8" r="4.6" stroke="currentColor" stroke-width="1.4"/><path d="m11.3 11.3 3.3 3.3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><input id="file-search" placeholder="Search files, folders, or paths…" aria-label="Search files" role="combobox" aria-autocomplete="list" aria-controls="file-list" aria-expanded="true" autocomplete="off" spellcheck="false"><button type="button" class="picker-clear" aria-label="Clear file search" hidden>Clear</button><kbd>esc</kbd></div>
+    <div class="picker-filter-host"></div>
+    <div class="picker-summary" role="status" aria-live="polite">Reading files…</div>
+    <div class="picker-results"><div id="file-list" class="picker-list" role="listbox" aria-label="Project files"><div class="picker-rows"></div></div>
+      <div class="picker-empty" hidden>
+        <span class="search-illustration" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 19.5v-13a1 1 0 0 1 1-1h5l2 2h8a1 1 0 0 1 1 1V10M3.5 19.5l2.3-7.6a1 1 0 0 1 1-.7h13.6a1 1 0 0 1 .9 1.3l-2.2 6.3a1 1 0 0 1-1 .7H3.5Z"/></svg>
+        </span>
+        <strong></strong><p></p><button type="button" class="open-button picker-retry" hidden>Try again</button>
+      </div>
+    </div>
+    <footer class="picker-footer"><span><kbd>↑</kbd><kbd>↓</kbd> Navigate <kbd>↵</kbd> Open</span><span>Tracked + untracked</span></footer>`
   document.body.appendChild(dialog)
   const input = requireElement(dialog, 'input', HTMLInputElement)
   const list = requireElement(dialog, '.picker-list', HTMLElement)

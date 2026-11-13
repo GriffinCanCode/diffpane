@@ -103,7 +103,7 @@ export function createReviewNotes(
         </div>
       </form>
       <div class="review-notes-empty" hidden>
-        <span class="review-notes-empty-icon">${ICONS.notes}</span>
+        <span class="review-notes-empty-icon" aria-hidden="true">${ICONS.notes}</span>
         <h3></h3>
         <p></p>
         <button type="button" class="review-notes-button" data-review-action="retry" hidden>Retry</button>

@@ -117,8 +117,20 @@ export function createHowMany(monaco, api, navigator, statusbar) {
   const dialog = node('dialog', 'howmany-dialog')
   dialog.id = 'howmany-report'
   dialog.setAttribute('aria-labelledby', 'howmany-title')
-  dialog.innerHTML =
-    '<header><div><h2 id="howmany-title">HowMany</h2><p>Workspace analysis</p></div><button type="button" class="howmany-close" aria-label="Close HowMany report">×</button></header><div class="howmany-report-content"></div><footer><span class="howmany-report-state" role="status"></span><button type="button" class="howmany-export">Export JSON</button><button type="button" class="howmany-report-refresh">Refresh</button></footer>'
+  dialog.innerHTML = `
+    <header>
+      <div class="howmany-heading">
+        <span class="howmany-chart-glyph" aria-hidden="true"><i></i><i></i><i></i></span>
+        <div><h2 id="howmany-title">HowMany</h2><p>Workspace analysis</p></div>
+      </div>
+      <button type="button" class="howmany-close" aria-label="Close HowMany report">×</button>
+    </header>
+    <div class="howmany-report-content"></div>
+    <footer>
+      <span class="howmany-report-state" role="status"></span>
+      <button type="button" class="howmany-export">Export JSON</button>
+      <button type="button" class="howmany-report-refresh">Refresh</button>
+    </footer>`
   document.body.append(dialog)
   const content = requireElement(dialog, '.howmany-report-content', HTMLDivElement)
   const reportState = requireElement(dialog, '.howmany-report-state', HTMLSpanElement)
@@ -140,6 +152,7 @@ export function createHowMany(monaco, api, navigator, statusbar) {
 
   function renderReport() {
     const running = state.status === 'analyzing'
+    dialog.toggleAttribute('data-analyzing', running)
     const report = state.report
     const reportData = asReportData(report)
     const source = report?.source

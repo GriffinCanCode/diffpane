@@ -43,6 +43,7 @@ import { applyNavigationDelta, reconcileNavigationTree } from './navigation-reco
  *   onMutate?: (action: string, path: string, name?: string) => Promise<unknown>,
  *   onAttach?: Parameters<typeof createFileActions>[3],
  *   languageFor?: LanguageFor,
+ *   onInitialScan?: (ready: boolean) => unknown,
  *   onReady?: () => unknown,
  *   matchesShortcut?: (event: KeyboardEvent, action: ShortcutAction) => boolean,
  * }} NavigatorOptions
@@ -154,14 +155,40 @@ export function createNavigator(
   container,
   api,
   onOpen,
-  { iconFor, onPick, onFolder, onOutline, onMutate, onAttach, languageFor, onReady, matchesShortcut } = {},
+  {
+    iconFor,
+    onPick,
+    onFolder,
+    onOutline,
+    onMutate,
+    onAttach,
+    languageFor,
+    onInitialScan,
+    onReady,
+    matchesShortcut,
+  } = {},
 ) {
   const id = ++instance
   container.classList.add('navigator')
   container.style.setProperty('--navigator-row-height', `${ROW_HEIGHT}px`)
   container.setAttribute('aria-label', 'Project explorer')
   container.dataset.searching = 'false'
-  container.innerHTML = `<div class="navigator-heading"><button type="button" class="navigator-root" data-action="root" aria-expanded="true"><span class="navigator-chevron" aria-hidden="true"></span><span class="navigator-project">Project</span></button><div class="navigator-actions"><button type="button" class="navigator-action" data-action="open-file" aria-label="Search files" title="Search files">${ICONS.openFile}</button><button type="button" class="navigator-action" data-action="open-folder" aria-label="Open folder" title="Open folder">${ICONS.openFolder}</button><button type="button" class="navigator-action" data-action="refresh" aria-label="Refresh explorer" title="Refresh explorer">${ICONS.refresh}</button><button type="button" class="navigator-action" data-action="collapse" aria-label="Collapse folders" title="Collapse folders">${ICONS.collapse}</button></div></div><div class="navigator-search">${ICONS.search}<input type="search" placeholder="Find files or folders…" aria-label="Find files or folders in explorer" spellcheck="false" autocomplete="off"></div><div class="navigator-filter-host"></div><div class="navigator-summary" role="status">Reading files…</div><div class="navigator-tree" role="tree" aria-label="Project files" tabindex="0"><div class="navigator-rows"></div></div><details class="navigator-outline"><summary>Outline</summary><div class="symbol-list navigator-symbols"></div></details><div class="navigator-footer"><span>Project files</span><span class="navigator-total"></span></div>`
+  container.innerHTML = `
+    <div class="navigator-heading">
+      <button type="button" class="navigator-root" data-action="root" aria-expanded="true"><span class="navigator-chevron" aria-hidden="true"></span><span class="navigator-project">Project</span></button>
+      <div class="navigator-actions">
+        <button type="button" class="navigator-action" data-action="open-file" aria-label="Search files" title="Search files">${ICONS.openFile}</button>
+        <button type="button" class="navigator-action" data-action="open-folder" aria-label="Open folder" title="Open folder">${ICONS.openFolder}</button>
+        <button type="button" class="navigator-action" data-action="refresh" aria-label="Refresh explorer" title="Refresh explorer">${ICONS.refresh}</button>
+        <button type="button" class="navigator-action" data-action="collapse" aria-label="Collapse folders" title="Collapse folders">${ICONS.collapse}</button>
+      </div>
+    </div>
+    <div class="navigator-search">${ICONS.search}<input type="search" placeholder="Find files or folders…" aria-label="Find files or folders in explorer" spellcheck="false" autocomplete="off"></div>
+    <div class="navigator-filter-host"></div>
+    <div class="navigator-summary" role="status">Reading files…</div>
+    <div class="navigator-tree" role="tree" aria-label="Project files" tabindex="0"><div class="navigator-rows"></div></div>
+    <details class="navigator-outline"><summary>Outline</summary><div class="symbol-list navigator-symbols"></div></details>
+    <div class="navigator-footer"><span>Project files</span><span class="navigator-total"></span></div>`
   const list = requireElement(container, '.navigator-tree', HTMLDivElement)
   const rows = requireElement(container, '.navigator-rows', HTMLDivElement)
   const input = requireElement(container, 'input', HTMLInputElement)
@@ -437,6 +464,7 @@ export function createNavigator(
           reportError(result.error, { silent: true })
           if (generation === wanted) summary.textContent = result.error.message
         }
+        reportInitialScan(result.ok)
       }
       if (generation !== wanted) await scan()
     }
@@ -447,8 +475,19 @@ export function createNavigator(
       loading = false
       refreshButton.removeAttribute('data-loading-status')
       refreshButton.removeAttribute('aria-busy')
-      if (!disposed) runTask('Complete navigator scan', () => onReady?.())
+      if (!disposed) {
+        reportInitialScan(false)
+        runTask('Complete navigator scan', () => onReady?.())
+      }
     }
+  }
+
+  let initialScanReported = false
+  /** @param {boolean} ready */
+  function reportInitialScan(ready) {
+    if (initialScanReported) return
+    initialScanReported = true
+    runTask('Complete initial navigator scan', () => onInitialScan?.(ready))
   }
 
   /** @param {NavigatorSnapshot | { error: unknown } | null | undefined} next */

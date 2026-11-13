@@ -104,8 +104,16 @@
   font-weight: 500;
 }
 
-.settings-list tbody tr:has(.settings-command):hover {
+.settings-list tbody tr:has(.settings-command):hover:not(:has(.settings-change[aria-pressed='true'])) {
   background: var(--hover);
+}
+
+.settings-list tr:has(.settings-change[aria-pressed='true']) {
+  background: var(--accent-surface);
+}
+
+.settings-list tr:has(.settings-change[aria-pressed='true']) .settings-command {
+  box-shadow: inset 3px 0 var(--accent);
 }
 
 .settings-keys {
@@ -123,7 +131,8 @@
   place-items: center;
   border: 1px solid var(--settings-border);
   border-radius: 4px;
-  background: var(--settings-raised);
+  background: linear-gradient(var(--settings-raised), var(--settings-panel));
+  box-shadow: 0 1px 0 color-mix(in oklab, var(--settings-muted) 36%, var(--settings-panel));
   font:
     11px/1.35 ui-monospace,
     monospace;
@@ -158,7 +167,7 @@
   white-space: nowrap;
 }
 
-.settings-button:hover:not([aria-disabled='true']) {
+.settings-button:hover:not([aria-disabled='true'], [aria-pressed='true']) {
   background: var(--settings-hover);
 }
 
@@ -199,7 +208,36 @@
 }
 
 .settings-status.is-error {
-  color: var(--red);
+  color: var(--removed);
+}
+
+.settings-page:has(.settings-change[aria-pressed='true']) .settings-status:not(:empty)::before {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-inline-end: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  vertical-align: 1px;
+  content: '' / '';
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .settings-button {
+    transition:
+      background-color 120ms ease-out,
+      border-color 120ms ease-out;
+  }
+
+  .settings-page:has(.settings-change[aria-pressed='true']) .settings-status:not(:empty, .is-error)::before {
+    animation: settings-recording 1.3s ease-in-out infinite alternate;
+  }
+}
+
+@keyframes settings-recording {
+  from {
+    opacity: 0.45;
+  }
 }
 
 .settings-visually-hidden {

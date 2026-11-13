@@ -53,8 +53,8 @@ export function showErrorBoundary(container: HTMLElement, options: ErrorBoundary
   const card = element(owner, 'div', 'error-boundary__card')
   const illustration = element(owner, 'div', 'error-boundary__illustration')
   illustration.setAttribute('aria-hidden', 'true')
-  const sprite = element(owner, 'span', 'error-boundary__sprite')
-  sprite.append(element(owner, 'span', 'error-boundary__face'))
+  const sprite = element(owner, 'span', 'window-mascot error-boundary__sprite')
+  sprite.append(element(owner, 'span', 'window-mascot__face'))
   illustration.append(sprite)
 
   const content = element(owner, 'div', 'error-boundary__content')

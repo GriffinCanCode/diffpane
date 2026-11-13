@@ -12,9 +12,39 @@
     <link rel="icon" type="image/png" sizes="16x16" href="/img/favicons/favicon-16.png" />
     <link rel="icon" href="/img/favicons/favicon.ico" sizes="any" />
     <link rel="apple-touch-icon" sizes="180x180" href="/img/apple-touch-icon.png" />
+    <link rel="stylesheet" href="/renderer/shell/workspace/theme-tokens.css" />
+    <link rel="stylesheet" href="/renderer/shell/workspace/theme.css" />
+    <link rel="stylesheet" href="/renderer/shell/recovery/workspace-opening.css" />
   </head>
   <body>
-    <div id="app"></div>
+    <section class="workspace-opening" id="workspace-opening" aria-labelledby="workspace-opening-title">
+      <div class="workspace-opening__field" aria-hidden="true">
+        <span class="workspace-opening__glyph workspace-opening__glyph--code">&lt;/&gt;</span>
+        <span class="workspace-opening__glyph workspace-opening__glyph--file"></span>
+        <span class="workspace-opening__glyph workspace-opening__glyph--diff"><span>+</span><span>−</span></span>
+        <span class="workspace-opening__glyph workspace-opening__glyph--branch"></span>
+        <span class="workspace-opening__glyph workspace-opening__glyph--prompt">›_</span>
+        <span class="workspace-opening__glyph workspace-opening__glyph--commit"></span>
+        <span class="workspace-opening__spark workspace-opening__spark--field-top"></span>
+        <span class="workspace-opening__spark workspace-opening__spark--field-right"></span>
+        <span class="workspace-opening__spark workspace-opening__spark--field-bottom"></span>
+        <span class="workspace-opening__spark workspace-opening__spark--field-left"></span>
+      </div>
+      <div class="workspace-opening__card">
+        <div class="workspace-opening__scene" aria-hidden="true">
+          <span class="workspace-opening__shadow"></span>
+          <span class="workspace-opening__page workspace-opening__page--left"></span>
+          <span class="workspace-opening__page workspace-opening__page--right"></span>
+          <span class="workspace-opening__spark workspace-opening__spark--left"></span>
+          <span class="workspace-opening__spark workspace-opening__spark--right"></span>
+          <span class="workspace-opening__character">
+            <span class="window-mascot"><span class="window-mascot__face"></span></span>
+          </span>
+        </div>
+        <h1 id="workspace-opening-title">Opening workspace…</h1>
+      </div>
+    </section>
+    <div id="app" inert></div>
     <script type="module" src="/renderer/shell/workspace/bootstrap.ts"></script>
   </body>
 </html>
