@@ -14,7 +14,8 @@ import { discoverServers } from './servers.ts'
 /** @typedef {{path: string, type: 'create' | 'update' | 'delete'}} FileEvent */
 /** @typedef {{tokenTypes: string[], tokenModifiers: string[]}} SemanticLegend */
 /** @typedef {Record<string, unknown> & {semanticTokensProvider?: {legend?: SemanticLegend, range?: boolean, full?: boolean | Record<string, unknown>}, diagnosticProvider?: {identifier?: string}, textDocumentSync?: number | {change?: number}, positionEncoding?: string}} ServerCapabilities */
-/** @typedef {{language: string, workspace: string, spec: ServerSpec, used: number, status: 'starting' | 'ready' | 'error', capabilities: ServerCapabilities, docs: Map<string, LanguageDocument>, diagnosticTimers: Map<string, NodeJS.Timeout>, diagnosticRequests: Map<string, AbortController>, watchedChanges: Map<string, WatchedChange>, ready: Promise<Server | null> | null, connection: Connection, message?: string, failedAt?: number, idle?: NodeJS.Timeout}} Server */
+/** @typedef {{method: string, capability: string, options: unknown}} CapabilityRegistration */
+/** @typedef {{language: string, workspace: string, spec: ServerSpec, used: number, status: 'starting' | 'ready' | 'error', capabilities: ServerCapabilities, staticCapabilities: Record<string, unknown>, registrations: Map<string, CapabilityRegistration>, docs: Map<string, LanguageDocument>, diagnosticTimers: Map<string, NodeJS.Timeout>, diagnosticRequests: Map<string, AbortController>, watchedChanges: Map<string, WatchedChange>, ready: Promise<Server | null> | null, connection: Connection, message?: string, failedAt?: number, idle?: NodeJS.Timeout}} Server */
 /** @typedef {{path: string, language: string, languageId?: string, text: string, version?: number}} OpenDocumentRequest */
 /** @typedef {{path: string, language: string, method: string, params?: Record<string, unknown>, text?: string, version?: number, requestId?: number | string, signal?: AbortSignal}} FeatureRequest */
 /** @typedef {{type: 'status', language: string, status: string, message: string, pid?: number, capabilities?: ServerCapabilities} | {type: 'process', language: string, status: 'started' | 'stopped', pid: number} | {type: 'diagnostics', language: string, path: string, version?: number, diagnostics: unknown[]} | {type: 'refresh', language: string}} LanguageEvent */
@@ -116,6 +117,15 @@ const feature = {
   'textDocument/inlayHint': 'inlayHintProvider',
   'textDocument/definition': 'definitionProvider',
   'textDocument/diagnostic': 'diagnosticProvider',
+}
+
+/** @param {string} method */
+function registrationCapability(method) {
+  return method === 'textDocument/semanticTokens'
+    ? 'semanticTokensProvider'
+    : Object.hasOwn(feature, method)
+      ? feature[method]
+      : undefined
 }
 
 /** @param {unknown} message */
@@ -250,7 +260,11 @@ class Connection {
 
   /** @param {Record<string, unknown>} message */
   send(message) {
-    if (this.closed || this.child.stdin.destroyed) return false
+    if (this.closed) return false
+    if (this.child.stdin.destroyed) {
+      this.fail(new Error('Language server input is closed'))
+      return false
+    }
     const bytes = encodeMessage({ jsonrpc: '2.0', ...message })
     if (bytes.length + this.child.stdin.writableLength > MAX_MESSAGE) {
       this.fail(new Error('Language server write queue exceeds the size limit'))
@@ -438,12 +452,14 @@ export class LanguageRuntime {
     this.servers = new Map()
     /** @type {Map<string, LanguageDocument>} */
     this.documents = new Map()
-    /** @type {Map<string, object>} */
+    /** @type {Map<string, { language: string, version: number }>} */
     this.openings = new Map()
     /** @type {Map<number | string, AbortController>} */
     this.requests = new Map()
     /** @type {Set<Promise<void>>} */
     this.stopping = new Set()
+    /** @type {Promise<void> | undefined} */
+    this.shutdown = undefined
     this.disposed = false
     this.clock = 0
   }
@@ -579,6 +595,8 @@ export class LanguageRuntime {
       used: ++this.clock,
       status: 'starting',
       capabilities: {},
+      staticCapabilities: {},
+      registrations: new Map(),
       docs: new Map(),
       diagnosticTimers: new Map(),
       diagnosticRequests: new Map(),
@@ -627,7 +645,8 @@ export class LanguageRuntime {
       this.options.initializeTimeoutMs ?? 30_000,
     )
     if (server.connection.closed || this.servers.get(server.language) !== server) return null
-    server.capabilities = serverCapabilities(isRecord(result) ? result.capabilities : undefined)
+    if (isRecord(result) && isRecord(result.capabilities)) server.staticCapabilities = result.capabilities
+    this.updateCapabilities(server)
     if (server.capabilities.positionEncoding && server.capabilities.positionEncoding !== 'utf-16')
       throw new Error(`Unsupported position encoding: ${server.capabilities.positionEncoding}`)
     server.connection.notify('initialized', {})
@@ -638,6 +657,7 @@ export class LanguageRuntime {
       })
       server.watchedChanges.clear()
     }
+    if (server.connection.closed) return null
     server.status = 'ready'
     server.message = server.spec.name
     this.event({
@@ -703,23 +723,36 @@ export class LanguageRuntime {
       else if (message.method === 'client/registerCapability') {
         const registrations = Array.isArray(params?.registrations) ? params.registrations : []
         for (const registration of /** @type {unknown[]} */ (registrations)) {
-          if (!isRecord(registration) || typeof registration.method !== 'string') continue
-          const capability =
-            feature[registration.method] ??
-            (registration.method === 'textDocument/semanticTokens' ? 'semanticTokensProvider' : null)
-          if (capability === 'semanticTokensProvider') {
-            server.capabilities.semanticTokensProvider = serverCapabilities({
-              semanticTokensProvider: registration.registerOptions,
-            }).semanticTokensProvider
-          } else if (capability) server.capabilities[capability] = registration.registerOptions ?? true
+          if (!isRecord(registration) || typeof registration.id !== 'string' || typeof registration.method !== 'string')
+            continue
+          const capability = registrationCapability(registration.method)
+          if (capability) {
+            server.registrations.delete(registration.id)
+            server.registrations.set(registration.id, {
+              method: registration.method,
+              capability,
+              options: registration.registerOptions ?? {},
+            })
+          }
         }
+        this.updateCapabilities(server)
+        this.refresh(server)
+      } else if (message.method === 'client/unregisterCapability') {
+        const registrations = Array.isArray(params?.unregisterations) ? params.unregisterations : []
+        for (const registration of /** @type {unknown[]} */ (registrations)) {
+          if (!isRecord(registration) || typeof registration.id !== 'string' || typeof registration.method !== 'string')
+            continue
+          const active = server.registrations.get(registration.id)
+          if (active?.method === registration.method) server.registrations.delete(registration.id)
+          const capability = registrationCapability(registration.method)
+          const declared = capability ? server.staticCapabilities[capability] : undefined
+          if (capability && isRecord(declared) && declared.id === registration.id)
+            delete server.staticCapabilities[capability]
+        }
+        this.updateCapabilities(server)
         this.refresh(server)
       } else if (message.method.endsWith('/refresh')) this.refresh(server)
-      else if (
-        !['client/unregisterCapability', 'window/workDoneProgress/create', 'window/showMessageRequest'].includes(
-          message.method,
-        )
-      ) {
+      else if (!['window/workDoneProgress/create', 'window/showMessageRequest'].includes(message.method)) {
         connection.send({
           id: message.id,
           error: { code: -32601, message: 'Client method is not supported' },
@@ -731,6 +764,13 @@ export class LanguageRuntime {
   }
 
   /** @param {Server} server */
+  updateCapabilities(server) {
+    const capabilities = { ...server.staticCapabilities }
+    for (const { capability, options } of server.registrations.values()) capabilities[capability] = options
+    server.capabilities = serverCapabilities(capabilities)
+  }
+
+  /** @param {Server} server */
   refresh(server) {
     this.event({ type: 'refresh', language: server.language })
     for (const relative of server.docs.keys()) this.scheduleDiagnostics(server, relative)
@@ -739,9 +779,10 @@ export class LanguageRuntime {
   /** @param {Server} server @param {string} relative */
   scheduleDiagnostics(server, relative) {
     const provider = server.capabilities.diagnosticProvider
-    if (!provider || !server.docs.has(relative)) return
     clearTimeout(server.diagnosticTimers.get(relative))
+    server.diagnosticTimers.delete(relative)
     server.diagnosticRequests.get(relative)?.abort()
+    if (!provider || !server.docs.has(relative) || server.connection.closed) return
     const pull = async () => {
       server.diagnosticTimers.delete(relative)
       const document = this.documents.get(relative)
@@ -784,21 +825,24 @@ export class LanguageRuntime {
     server.diagnosticTimers.set(relative, timer)
   }
 
-  /** @param {OpenDocumentRequest} input @param {() => Promise<void>} [validate] */
-  async open({ path: relative, language, languageId, text, version = 1 }, validate) {
+  /** @param {OpenDocumentRequest} input @param {() => Promise<void>} [validate] @param {AbortSignal} [signal] */
+  async open({ path: relative, language, languageId, text, version = 1 }, validate, signal) {
     if (typeof text !== 'string' || Buffer.byteLength(text) > MAX_DOCUMENT)
       throw new Error('Language document exceeds 2 MiB')
     if (!Number.isSafeInteger(version) || version < 1) throw new Error('Invalid language document version')
-    const opening = {}
+    if (this.disposed || signal?.aborted) return { available: false, stale: true }
+    const pending = this.openings.get(relative)
+    if (pending?.language === language && pending.version > version) return { available: false, stale: true }
+    const opening = { language, version }
     this.openings.set(relative, opening)
     try {
       await validate?.()
-      if (this.openings.get(relative) !== opening) return { available: false, stale: true }
+      if (signal?.aborted || this.openings.get(relative) !== opening) return { available: false, stale: true }
       const { uri, absolute } = await this.documentPath(relative)
       const workspace = await this.projectRoot(absolute, language)
-      if (this.openings.get(relative) !== opening) return { available: false, stale: true }
+      if (signal?.aborted || this.openings.get(relative) !== opening) return { available: false, stale: true }
       const previous = this.documents.get(relative)
-      if (previous && previous.language !== language) this.close(relative)
+      if (previous && previous.language !== language) this.closeDocument(relative)
       const document = this.documents.get(relative)
       if (document && version < document.version) return { available: false, stale: true }
       languageId ??= document?.languageId ?? language
@@ -811,6 +855,7 @@ export class LanguageRuntime {
           : { uri, workspace, language, languageId, text, version }
       this.documents.set(relative, current)
       const server = await this.server(language, workspace)
+      if (signal?.aborted || this.openings.get(relative) !== opening) return { available: false, stale: true }
       if (!server) return { available: false, capabilities: {} }
       if (!this.syncDocument(server, relative, current)) return { available: false, stale: true }
       return {
@@ -869,10 +914,14 @@ export class LanguageRuntime {
       controller = new AbortController()
       this.requests.set(requestId, controller)
     }
-    const cancellation = controller?.signal ?? signal
+    const cancellation =
+      controller && signal ? AbortSignal.any([controller.signal, signal]) : (controller?.signal ?? signal)
     try {
       if (cancellation?.aborted) return null
-      if (text !== undefined && !(await this.open({ path: relative, language, text, version })).available) return null
+      if (text !== undefined) {
+        const opened = await this.open({ path: relative, language, text, version }, undefined, cancellation)
+        if (!opened.available) return null
+      }
       const document = this.documents.get(relative)
       if (
         cancellation?.aborted ||
@@ -902,9 +951,12 @@ export class LanguageRuntime {
         : null
     } catch (error) {
       if (
-        error instanceof Error &&
-        (error.name === 'AbortError' ||
-          ('code' in error && typeof error.code === 'number' && [-32601, -32800, -32801, -32802].includes(error.code)))
+        cancellation?.aborted ||
+        (error instanceof Error &&
+          (error.name === 'AbortError' ||
+            ('code' in error &&
+              typeof error.code === 'number' &&
+              [-32601, -32800, -32801, -32802].includes(error.code))))
       )
         return null
       throw error
@@ -953,6 +1005,11 @@ export class LanguageRuntime {
   /** @param {string} relative */
   close(relative) {
     this.openings.delete(relative)
+    this.closeDocument(relative)
+  }
+
+  /** @param {string} relative */
+  closeDocument(relative) {
     const document = this.documents.get(relative)
     if (!document) return
     this.documents.delete(relative)
@@ -1005,12 +1062,13 @@ export class LanguageRuntime {
   }
 
   async dispose() {
-    if (this.disposed) return
+    if (this.disposed) return this.shutdown
     this.disposed = true
     for (const requestId of this.requests.keys()) this.cancel(requestId)
     for (const language of this.servers.keys()) this.stop(language)
     this.documents.clear()
     this.openings.clear()
-    await Promise.allSettled(this.stopping)
+    this.shutdown = Promise.allSettled(this.stopping).then(() => undefined)
+    return this.shutdown
   }
 }

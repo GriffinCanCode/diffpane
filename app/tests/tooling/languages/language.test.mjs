@@ -162,6 +162,97 @@ test('language document paths and input sizes are confined before starting a ser
   assert.equal(runtime.servers.size, 0)
 })
 
+test('an older open cannot replace a newer document while validation is pending', async t => {
+  const root = await fixture(t)
+  await writeFile(path.join(root, 'example.ts'), '')
+  const runtime = new LanguageRuntime(root, () => {}, { servers: {} })
+  t.onTestFinished(() => runtime.dispose())
+  /** @type {PromiseWithResolvers<void>} */
+  const validation = Promise.withResolvers()
+  const input = { path: 'example.ts', language: 'typescript' }
+  const newer = runtime.open({ ...input, text: 'new', version: 2 }, () => validation.promise)
+  const older = await runtime.open({ ...input, text: 'old', version: 1 })
+  validation.resolve()
+  await newer
+
+  assert.equal(older.stale, true)
+  assert.equal(runtime.documents.get(input.path)?.text, 'new')
+})
+
+test('request-ID cancellation and an external signal both govern language requests', async t => {
+  const root = await fixture(t)
+  const runtime = new LanguageRuntime(root, () => {}, { servers: {} })
+  t.onTestFinished(() => runtime.dispose())
+  const controller = new AbortController()
+  controller.abort()
+
+  assert.equal(
+    await runtime.request({
+      path: 'example.ts',
+      language: 'typescript',
+      method: 'textDocument/hover',
+      text: 'New document',
+      requestId: 'external-cancel',
+      signal: controller.signal,
+    }),
+    null,
+  )
+  assert.equal(runtime.documents.size, 0)
+  assert.equal(runtime.requests.size, 0)
+})
+
+test('dynamic capability removal restores the remaining registration for the same feature', async t => {
+  const root = await fixture(t)
+  const command = 'test'
+  const runtime = new LanguageRuntime(root, () => {}, {
+    servers: {
+      [command]: { name: command, command: process.execPath, args: ['-e', 'process.stdin.resume()'], env: process.env },
+    },
+  })
+  t.onTestFinished(() => runtime.dispose())
+  const starting = runtime.server(command)
+  const server = runtime.servers.get(command)
+  assert.ok(server)
+  const method = 'textDocument/inlayHint'
+  runtime.receive(
+    server,
+    {
+      id: 1,
+      method: 'client/registerCapability',
+      params: {
+        registrations: [
+          { id: 'a', method, registerOptions: { resolveProvider: false } },
+          { id: 'b', method, registerOptions: { resolveProvider: true } },
+        ],
+      },
+    },
+    server.connection,
+  )
+  assert.deepEqual(server.capabilities.inlayHintProvider, { resolveProvider: true })
+  runtime.receive(
+    server,
+    {
+      id: 2,
+      method: 'client/unregisterCapability',
+      params: { unregisterations: [{ id: 'b', method }] },
+    },
+    server.connection,
+  )
+  assert.deepEqual(server.capabilities.inlayHintProvider, { resolveProvider: false })
+  runtime.receive(
+    server,
+    {
+      id: 3,
+      method: 'client/unregisterCapability',
+      params: { unregisterations: [{ id: 'a', method }] },
+    },
+    server.connection,
+  )
+  assert.equal(server.capabilities.inlayHintProvider, undefined)
+  await runtime.dispose()
+  await starting
+})
+
 const discovered = discoverServers()
 for (const [language, filename, text, hover] of /** @type {const} */ ([
   [

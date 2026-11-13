@@ -170,6 +170,35 @@ test('TSX documents use the TypeScript server with their own language ID', async
   assert.equal(opens[0]?.languageId, 'typescriptreact')
 })
 
+test('a server refresh during document open fetches the new capabilities', async t => {
+  const started = Promise.withResolvers()
+  /** @type {PromiseWithResolvers<unknown>} */
+  const first = Promise.withResolvers()
+  let opens = 0
+  const range = { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } }
+  const { symbols, receive } = fixture(
+    t,
+    async () => {
+      if (++opens === 1) {
+        started.resolve(undefined)
+        return first.promise
+      }
+      return { available: true, capabilities: { documentSymbolProvider: true } }
+    },
+    async () => [{ name: 'enabled', range }],
+  )
+
+  const opening = symbols()
+  await started.promise
+  receive({ type: 'refresh' })
+  const refreshed = symbols()
+  first.resolve({ available: true, capabilities: {} })
+
+  assert.deepEqual(await opening, [])
+  assert.equal((await refreshed)[0]?.name, 'enabled')
+  assert.equal(opens, 2)
+})
+
 test('server failure drops cached and pending results and clears language diagnostics', async t => {
   const range = { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } }
   let requests = 0

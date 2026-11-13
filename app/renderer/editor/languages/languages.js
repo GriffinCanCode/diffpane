@@ -64,7 +64,8 @@ import {
  *   available: boolean,
  *   epoch: number,
  *   openVersion: number | null,
- *   opening: { version: number, promise: Promise<boolean> } | null,
+ *   opening: { version: number, refresh: number, promise: Promise<boolean> } | null,
+ *   refresh: number,
  *   capabilities: Record<string, unknown>,
  *   legend: import('monaco-editor').languages.SemanticTokensLegend | undefined,
  *   status: LanguageStatus,
@@ -294,17 +295,19 @@ export function createLanguageFeatures(monaco, api, { onState = () => {} } = {})
   async function open(state) {
     if (state.closed || disposed || !state.visible || !state.active || !runtime) return false
     const version = state.model.getVersionId()
+    const refresh = state.refresh
     if (state.openVersion === version && state.available) return true
     if (state.opening) {
       const opening = state.opening
       const available = await opening.promise
-      return opening.version === version ? available : open(state)
+      return opening.version === version && opening.refresh === refresh ? available : open(state)
     }
     const input = documentInput(state)
     publish(state, state.openVersion === null ? 'starting' : state.status, state.message)
     const promise = attemptAsync(() => runtime.open(input), { operation: 'Open language document' })
       .then(opened => {
-        if (state.closed || disposed) return false
+        if (state.closed || disposed || state.refresh !== refresh || state.model.getVersionId() !== input.version)
+          return false
         if (!opened.ok) {
           reportError(opened.error, { silent: true })
           metrics.errors++
@@ -337,7 +340,7 @@ export function createLanguageFeatures(monaco, api, { onState = () => {} } = {})
       .finally(() => {
         state.opening = null
       })
-    state.opening = { version: input.version, promise }
+    state.opening = { version: input.version, refresh, promise }
     return promise
   }
 
@@ -423,6 +426,7 @@ export function createLanguageFeatures(monaco, api, { onState = () => {} } = {})
       metrics.discarded++
       return null
     }
+    if (result !== null && result !== undefined && state.status === 'error' && state.available) publish(state, 'ready')
     // An initialized server may still be indexing; an empty first answer is not a proof of absence.
     if (
       cache &&
@@ -587,6 +591,7 @@ export function createLanguageFeatures(monaco, api, { onState = () => {} } = {})
     if (event.type === 'refresh') {
       for (const state of states.values()) {
         if (state.language !== event.language) continue
+        state.refresh++
         state.openVersion = null
         invalidate(state)
         if (state.active && state.visible) runTask('Open language document', () => open(state))
@@ -672,6 +677,7 @@ export function createLanguageFeatures(monaco, api, { onState = () => {} } = {})
       closed: false,
       available: false,
       epoch: 0,
+      refresh: 0,
       openVersion: null,
       opening: null,
       capabilities: {},
