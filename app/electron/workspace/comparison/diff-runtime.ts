@@ -1,5 +1,7 @@
+import { availableParallelism } from 'node:os'
 import { Worker } from 'node:worker_threads'
 import type { createDiagnostics } from '../../../shared/diagnostics/diagnostics.ts'
+import { smallDecorations, unchangedDecorations } from './changes.ts'
 import type { DiffDecorations, LineDecoration } from './changes.ts'
 import type { DiffReply, DiffRequest } from './diff-worker.ts'
 
@@ -7,6 +9,20 @@ interface Pending {
   resolve: (value: DiffDecorations) => void
   reject: (reason: Error) => void
 }
+
+interface DiffLane {
+  worker: Worker
+  pending: Map<number, Pending>
+  timer?: ReturnType<typeof setTimeout>
+}
+
+interface DiffRuntimeOptions {
+  idleMs?: number
+  concurrency?: number
+  diagnostics?: ReturnType<typeof createDiagnostics>
+}
+
+const MAX_WORKERS = Math.min(availableParallelism(), 2)
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -44,94 +60,100 @@ function isDiffReply(value: unknown): value is DiffReply {
   )
 }
 
-/** Keep CPU-heavy diffing off the Git/watch/language event loop. Callers bound the queue. */
+/** Isolate large diffs while letting overlapping document reads use separate workers. */
 export class DiffRuntime {
-  pending = new Map<number, Pending>()
-  sequence = 0
-  worker?: Worker | null
-  disposed?: boolean
-  timer?: ReturnType<typeof setTimeout>
-  stopping = new Set<Promise<number>>()
+  readonly lanes = new Set<DiffLane>()
+  readonly stopping = new Set<Promise<number>>()
+  private sequence = 0
+  private disposed = false
 
-  private readonly options: { idleMs?: number; diagnostics?: ReturnType<typeof createDiagnostics> }
+  private readonly options: DiffRuntimeOptions
 
-  constructor(options: { idleMs?: number; diagnostics?: ReturnType<typeof createDiagnostics> } = {}) {
+  constructor(options: DiffRuntimeOptions = {}) {
     this.options = options
   }
 
   calculate(before: string, after: string): Promise<DiffDecorations> {
     if (this.disposed) return Promise.reject(new Error('Diff worker closed'))
-    if (before === after)
-      return Promise.resolve({
-        decorations: [],
-        beforeDecorations: [],
-        additions: 0,
-        deletions: 0,
-      })
-    clearTimeout(this.timer)
-    let worker = this.worker
-    if (!worker) {
-      try {
-        worker = new Worker(new URL('./diff-worker.ts', import.meta.url))
-      } catch (error) {
-        return Promise.reject(
-          error instanceof Error ? error : new Error('Could not start diff worker.', { cause: error }),
-        )
-      }
-      this.worker = worker
-      const activeWorker = worker
-      const fail = (error: Error) => {
-        if (this.worker !== activeWorker) return
-        this.worker = null
-        clearTimeout(this.timer)
-        for (const request of this.pending.values()) request.reject(error)
-        this.pending.clear()
-        this.terminate(activeWorker)
-      }
-      worker.on('message', (reply: unknown) => {
-        if (!isDiffReply(reply)) {
-          fail(new Error('Invalid diff worker response.'))
-          return
-        }
-        const request = this.pending.get(reply.id)
-        if (!request) return
-        this.pending.delete(reply.id)
-        this.scheduleIdle()
-        if (reply.ok) request.resolve(reply.value)
-        else request.reject(new Error(reply.error))
-      })
-      worker.on('error', fail)
-      worker.on('exit', code => fail(new Error(`Diff worker exited (${code})`)))
+    if (before === after) return Promise.resolve(unchangedDecorations())
+    let lane: DiffLane
+    try {
+      const small = smallDecorations(before, after)
+      if (small) return Promise.resolve(small)
+      lane = this.acquireLane()
+    } catch (error) {
+      return Promise.reject(
+        error instanceof Error ? error : new Error('Could not start diff calculation.', { cause: error }),
+      )
     }
-    const activeWorker = worker
+
+    clearTimeout(lane.timer)
     return new Promise((resolve, reject) => {
       const id = ++this.sequence
-      this.pending.set(id, { resolve, reject })
+      lane.pending.set(id, { resolve, reject })
       try {
         const request: DiffRequest = { id, before, after }
         // oxlint-disable-next-line unicorn/require-post-message-target-origin -- Node Worker messages have no target origin.
-        activeWorker.postMessage(request)
+        lane.worker.postMessage(request)
       } catch (error) {
-        this.pending.delete(id)
-        this.scheduleIdle()
+        lane.pending.delete(id)
+        this.scheduleIdle(lane)
         reject(error instanceof Error ? error : new Error('Could not queue diff calculation.', { cause: error }))
       }
     })
   }
 
-  private scheduleIdle() {
-    if (this.pending.size || !this.worker || this.disposed) return
-    clearTimeout(this.timer)
-    this.timer = setTimeout(() => {
-      const worker = this.worker
-      this.worker = null
-      if (worker) this.terminate(worker)
-    }, this.options.idleMs ?? 30_000)
-    this.timer.unref()
+  private acquireLane(): DiffLane {
+    let leastBusy: DiffLane | undefined
+    for (const lane of this.lanes) {
+      if (!lane.pending.size) return lane
+      if (!leastBusy || lane.pending.size < leastBusy.pending.size) leastBusy = lane
+    }
+    if (leastBusy && this.lanes.size >= (this.options.concurrency ?? MAX_WORKERS)) return leastBusy
+
+    let worker: Worker
+    try {
+      worker = new Worker(new URL('./diff-worker.ts', import.meta.url))
+    } catch (error) {
+      if (leastBusy) return leastBusy
+      throw error
+    }
+    const lane: DiffLane = { worker, pending: new Map() }
+    this.lanes.add(lane)
+    worker.on('message', (reply: unknown) => {
+      if (!isDiffReply(reply)) {
+        this.release(lane, new Error('Invalid diff worker response.'))
+        return
+      }
+      const request = lane.pending.get(reply.id)
+      if (!request) return
+      lane.pending.delete(reply.id)
+      this.scheduleIdle(lane)
+      if (reply.ok) request.resolve(reply.value)
+      else request.reject(new Error(reply.error))
+    })
+    worker.on('error', (error: unknown) =>
+      this.release(lane, error instanceof Error ? error : new Error('Diff worker failed.', { cause: error })),
+    )
+    worker.on('exit', code => this.release(lane, new Error(`Diff worker exited (${code})`)))
+    return lane
   }
 
-  private terminate(worker: Worker) {
-    const stopping = worker.terminate()
+  private scheduleIdle(lane: DiffLane) {
+    if (lane.pending.size) return
+    clearTimeout(lane.timer)
+    lane.timer = setTimeout(() => this.release(lane), this.options.idleMs ?? 30_000)
+    lane.timer.unref()
+  }
+
+  private release(lane: DiffLane, failure?: Error) {
+    if (!this.lanes.delete(lane)) return
+    clearTimeout(lane.timer)
+    if (failure) {
+      for (const request of lane.pending.values()) request.reject(failure)
+      lane.pending.clear()
+    }
+    const stopping = lane.worker.terminate()
     this.stopping.add(stopping)
     void stopping.then(
       () => this.stopping.delete(stopping),
@@ -144,12 +166,8 @@ export class DiffRuntime {
 
   async dispose() {
     this.disposed = true
-    clearTimeout(this.timer)
-    const worker = this.worker
-    this.worker = null
-    for (const request of this.pending.values()) request.reject(new Error('Diff worker closed'))
-    this.pending.clear()
-    if (worker) this.terminate(worker)
+    const failure = new Error('Diff worker closed')
+    for (const lane of this.lanes) this.release(lane, failure)
     await Promise.allSettled(this.stopping)
   }
 }

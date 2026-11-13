@@ -152,17 +152,15 @@ async function loadDocument(filePath, comparison) {
     throw appError('This review checkpoint has been replaced.', { code: 'CHECKPOINT_EXPIRED' })
   const checkpointFile = baseline && checkpointIndex.get(filePath)
   const file = baseline ? (checkpointFile ?? { path: filePath }) : await findFile(filePath)
-  if (!file)
-    throw appError('This file is no longer available in this directory.', {
-      code: 'DOCUMENT_UNAVAILABLE',
-    })
+  if (!file) throw appError('This file is no longer available in this directory.', { code: 'DOCUMENT_UNAVAILABLE' })
   const start = performance.now()
   const contents = await diagnostics.run('workspace.document.read', () =>
     baseline ? repository.checkpointContents(baseline, file) : repository.contents(file, comparison),
   )
-  const decorations = await diagnostics.run('workspace.document.diff', () =>
-    diffs.calculate(contents.before, contents.after),
-  )
+  const [decorations, editable] = await Promise.all([
+    diagnostics.run('workspace.document.diff', () => diffs.calculate(contents.before, contents.after)),
+    !contents.preview && !file.submodule && repository.editable(filePath),
+  ])
   if (decorations.diffNote) diagnostics.event('workspace.document.diff.budget', 'warn')
   return {
     path: filePath,
@@ -171,7 +169,7 @@ async function loadDocument(filePath, comparison) {
     after: contents.after,
     note: contents.note,
     ...(contents.workingMissing ? { workingMissing: true } : {}),
-    editable: !contents.preview && !file.submodule && (await repository.editable(filePath)),
+    editable,
     ...(contents.preview ? { preview: contents.preview } : {}),
     ...decorations,
     lineCount: countLines(contents.after),
@@ -986,9 +984,7 @@ async function receive({ id, method, args }) {
       const claude = method === 'claude-save'
       const file = await (claude ? claudeFile(filePath) : findFile(filePath))
       if (!file || file.submodule)
-        throw appError('This file is no longer available in this directory.', {
-          code: 'DOCUMENT_UNAVAILABLE',
-        })
+        throw appError('This file is no longer available in this directory.', { code: 'DOCUMENT_UNAVAILABLE' })
       await repository.save(filePath, text, expected, claude)
       documents.invalidate([filePath])
       const absolute = path.join(repository.root, filePath)

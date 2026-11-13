@@ -339,7 +339,7 @@ test('media and binary preview payloads count toward the document cache budget',
   assert.equal(cache.stats().bytes, 0)
 })
 
-test('diff computation runs in its own worker and preserves current-line highlights', async t => {
+test('unchanged and bounded small diffs skip worker startup and preserve current-line highlights', async t => {
   const runtime = new DiffRuntime()
   t.onTestFinished(() => runtime.dispose())
   assert.deepEqual(await runtime.calculate('same', 'same'), {
@@ -348,27 +348,47 @@ test('diff computation runs in its own worker and preserves current-line highlig
     additions: 0,
     deletions: 0,
   })
-  assert.equal(Boolean(runtime.worker), false)
-  const results = await Promise.all([
-    runtime.calculate('before\n', 'after\n'),
-    runtime.calculate('unchanged\nremoved\n', 'unchanged\n'),
-  ])
-  assert.equal(results[0].additions, 1)
+  const result = await runtime.calculate('before\n', 'after\n')
+  assert.equal(result.additions, 1)
+  assert.ok(result.decorations.some(change => change.kind === 'modified'))
+  assert.equal(runtime.lanes.size, 0)
+})
+
+test('concurrent large diffs use two workers, settle independently, and release both workers', async t => {
+  const runtime = new DiffRuntime({ concurrency: 2, idleMs: 40 })
+  t.onTestFinished(() => runtime.dispose())
+  const prefix = 'unchanged\n'.repeat(1_000)
+  const first = runtime.calculate(`${prefix}before\n`, `${prefix}after\n`)
+  const second = runtime.calculate(`${prefix}removed\n`, prefix)
+  const third = runtime.calculate(prefix, `${prefix}inserted\n`)
+  assert.equal(runtime.lanes.size, 2)
+  const results = await Promise.all([first, second, third])
+  assert.deepEqual(results[0].decorations, [{ startLine: 1_001, endLine: 1_001, kind: 'modified' }])
   assert.equal(results[1].deletions, 1)
-  assert.ok(results[0].decorations.some(change => change.kind === 'modified'))
-  assert.equal(runtime.pending.size, 0)
+  assert.equal(results[2].additions, 1)
+  for (const lane of runtime.lanes) assert.equal(lane.pending.size, 0)
+  await vi.waitFor(() => assert.equal(runtime.lanes.size, 0), { interval: 10, timeout: 5000 })
+})
+
+test('small files with a complex edit fall back to a worker', async t => {
+  const runtime = new DiffRuntime()
+  t.onTestFinished(() => runtime.dispose())
+  const result = runtime.calculate('old\n'.repeat(100), 'new\n'.repeat(100))
+  assert.equal(runtime.lanes.size, 1)
+  assert.equal((await result).additions, 100)
 })
 
 test('idle diff workers are released and subsequent edits recreate them without stale exit failures', async t => {
   const runtime = new DiffRuntime({ idleMs: 40 })
   t.onTestFinished(() => runtime.dispose())
-  await runtime.calculate('before\n', 'after\n')
-  const first = runtime.worker
+  const prefix = 'unchanged\n'.repeat(1_000)
+  await runtime.calculate(`${prefix}before\n`, `${prefix}after\n`)
+  const first = runtime.lanes.values().next().value
   assert.ok(first)
-  await vi.waitFor(() => assert.equal(runtime.worker, null), { interval: 10, timeout: 5000 })
-  assert.equal(runtime.pending.size, 0)
-  assert.equal((await runtime.calculate('one\n', 'two\n')).additions, 1)
-  assert.notEqual(runtime.worker, first)
+  await vi.waitFor(() => assert.equal(runtime.lanes.size, 0), { interval: 10, timeout: 5000 })
+  assert.equal(first.pending.size, 0)
+  assert.equal((await runtime.calculate(`${prefix}one\n`, `${prefix}two\n`)).additions, 1)
+  assert.ok(!runtime.lanes.has(first))
   await runtime.dispose()
   assert.equal(runtime.stopping.size, 0)
   await assert.rejects(runtime.calculate('a', 'b'), /closed/)
@@ -377,15 +397,16 @@ test('idle diff workers are released and subsequent edits recreate them without 
 test('a failed diff dispatch releases its request and the idle worker', async t => {
   const runtime = new DiffRuntime({ idleMs: 40 })
   t.onTestFinished(() => runtime.dispose())
-  await runtime.calculate('before', 'after')
-  const worker = runtime.worker
-  assert.ok(worker)
-  worker.postMessage = () => {
+  const prefix = 'unchanged\n'.repeat(1_000)
+  await runtime.calculate(`${prefix}before`, `${prefix}after`)
+  const lane = runtime.lanes.values().next().value
+  assert.ok(lane)
+  lane.worker.postMessage = () => {
     throw new Error('postMessage failed')
   }
-  await assert.rejects(runtime.calculate('first', 'second'), /postMessage failed/)
-  assert.equal(runtime.pending.size, 0)
-  await vi.waitFor(() => assert.equal(runtime.worker, null), { interval: 10, timeout: 5000 })
+  await assert.rejects(runtime.calculate(`${prefix}first`, `${prefix}second`), /postMessage failed/)
+  assert.equal(lane.pending.size, 0)
+  await vi.waitFor(() => assert.equal(runtime.lanes.size, 0), { interval: 10, timeout: 5000 })
 })
 
 test('closing a document cache rejects queued reads and never retains a late result', async () => {

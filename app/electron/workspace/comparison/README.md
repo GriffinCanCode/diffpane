@@ -9,8 +9,8 @@ doc_radar:
 
 # Diff calculation
 
-- [`changes.ts`](changes.ts) computes bounded line decorations from the two document versions.
-- [`diff-runtime.ts`](diff-runtime.ts) starts the diff worker on demand and releases it when idle.
+- [`changes.ts`](changes.ts) computes bounded line decorations without reconstructing the text of the change segments.
+- [`diff-runtime.ts`](diff-runtime.ts) handles small edits in the workspace worker and runs overlapping larger diffs in up to two dedicated workers. Each dedicated worker is started on demand and released when idle.
 - [`diff-worker.ts`](diff-worker.ts) receives requests and returns results using the worker's message protocol.
 
-The [workspace session](../../runtime/session/README.md) owns the runtime and supplies the document versions. Run `npm test -- app/tests/interface/review/changes.test.mjs app/tests/runtime/session/session.test.mjs` from the repository root.
+The [workspace session](../../runtime/session/README.md) owns the runtime and supplies the document versions. Run `npm test -- app/tests/interface/review/changes.test.mjs app/tests/runtime/documents/document-cache.test.mjs` from the repository root.
