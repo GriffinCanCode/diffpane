@@ -70,7 +70,8 @@ export function createContentSearch(api: SearchApi, onSelect: (match: ContentMat
             <path d="m70 42 9 9" stroke="var(--illustration-light)" stroke-width="1.2"/>
             <circle cx="56" cy="28" r="16" fill="var(--illustration-fill)" stroke="currentColor" stroke-width="2.6"/>
             <path d="M46 25a11 11 0 0 1 8-7" stroke="var(--illustration-light)" stroke-width="1.4"/>
-            <path d="M46 31h20" stroke="currentColor" stroke-width="3.6"/>
+            <path d="M46 29h20m-18 6h12" stroke="var(--illustration-light)" stroke-width="1.5"/>
+            <path d="M52 29h11" stroke="currentColor" stroke-width="3.2"/>
           </svg>
         </span>
         <p></p>
