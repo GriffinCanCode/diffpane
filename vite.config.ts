@@ -1,5 +1,4 @@
 import { defineConfig, lazyPlugins } from 'vite-plus';
-import { syntaxCatalog } from './syntax.ts';
 export default defineConfig({
   staged: {
     '*': 'vp check --fix',
@@ -20,9 +19,18 @@ export default defineConfig({
     },
     options: { typeAware: true, typeCheck: true },
   },
-  plugins: lazyPlugins(() => [syntaxCatalog()]),
+  plugins: lazyPlugins(async () => {
+    const { syntaxCatalog } = await import('./syntax.ts');
+    return [syntaxCatalog()];
+  }),
   base: './',
-  build: { target: 'esnext', chunkSizeWarningLimit: 2500, outDir: 'dist', sourcemap: false },
+  build: {
+    target: 'esnext',
+    chunkSizeWarningLimit: 2500,
+    outDir: 'dist',
+    reportCompressedSize: false,
+    sourcemap: false,
+  },
   worker: { format: 'es' },
   optimizeDeps: {
     exclude: ['@wooorm/starry-night', '@shikijs/langs'],
