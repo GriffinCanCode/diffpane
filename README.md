@@ -86,9 +86,9 @@ diffpane
 
 The app goes in `~/Applications`. The command goes in `~/.local/bin`, which needs to be on your PATH. A path is optional: `diffpane ~/Projects/your-project` opens another folder.
 
-Opening Diffpane from Finder or the Dock shows a welcome screen. Choose Open Folder or Open File to browse a Git working tree, or reopen a recent file or folder. File → New Window opens another welcome screen; the terminal command still opens the current directory.
+Opening Diffpane from Finder or the Dock shows a welcome screen. Choose Open Folder or Open File to browse a Git working tree, or reopen a recent file or folder. The terminal command opens the current directory by default.
 
-⌘P finds files, ⌘F searches a file, and ⌘B shows or hides the explorer.
+⌘N opens a new welcome window and ⌘O opens the folder picker. ⌘P finds files, ⌘F searches a file, and ⌘B shows or hides the explorer.
 
 ## Development
 

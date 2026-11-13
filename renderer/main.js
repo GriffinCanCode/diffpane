@@ -1403,10 +1403,6 @@ document.addEventListener('keydown', event => {
     if (snapshot) void openFilePicker();
     else void chooseTarget('file');
   }
-  if (event.key.toLowerCase() === 'o') {
-    event.preventDefault();
-    void chooseTarget(event.shiftKey ? 'file' : 'folder');
-  }
   if (event.key.toLowerCase() === 'r') {
     event.preventDefault();
     void refresh();

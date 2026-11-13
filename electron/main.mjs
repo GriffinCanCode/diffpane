@@ -487,7 +487,7 @@ void app.whenReady().then(() => {
         submenu: [
           {
             label: 'New Window',
-            accelerator: 'CmdOrCtrl+Shift+N',
+            accelerator: 'CmdOrCtrl+N',
             click: () => createWindow(),
           },
           {
