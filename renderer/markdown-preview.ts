@@ -162,6 +162,13 @@ export function showMarkdownPreview(host: ParentNode, source: string, options: M
     heading.append(anchor);
   }
   for (const table of article.querySelectorAll('table')) {
+    for (const row of table.rows) {
+      for (const cell of row.cells) {
+        const content = node('div', 'md-table-cell');
+        while (cell.firstChild) content.append(cell.firstChild);
+        cell.append(content);
+      }
+    }
     const wrapper = node('div', 'md-table-scroll');
     wrapper.tabIndex = 0;
     wrapper.setAttribute('role', 'region');

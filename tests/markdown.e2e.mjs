@@ -43,11 +43,16 @@ export function greet(name) {
 }
 \`\`\`
 
-| Feature | Status | Why it matters |
+| Phase | Built | Its pass |
 | :--- | :---: | ---: |
-| Mermaid diagrams | Ready | See the big picture |
-| Live previews | Ready | Stay in the flow |
-| Source & compare | Ready | Every detail, on demand |
+| 0. The rules | 277 theorems in 23 models | Passed, and broken four times on the way |
+| 1. The store | Yes | Passed on correctness. **Failed its own "rethink if":** the first look at a tree is slower than \`git status\` |
+| 4. The depot | Yes | Partly. A change goes from a lane on one site to the road, inspected, with no GitHub. The build half is not measured. |
+
+| File | Status |
+| --- | --- |
+| Guide | Ready |
+| Notes | Draft |
 
 - [x] Read the whole document
 - [ ] Review the next change
@@ -100,6 +105,23 @@ async function pick(file) {
   await page.waitForFunction(file => window.__diffpane.stats().openedPath === file, file);
 }
 
+async function measurePhaseTable(tableScroll) {
+  return tableScroll.evaluate(wrapper => {
+    const lineCount = cell => {
+      const range = document.createRange();
+      const text = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT).nextNode();
+      range.selectNodeContents(text);
+      return range.getClientRects().length;
+    };
+    return {
+      width: wrapper.clientWidth,
+      scrollWidth: wrapper.scrollWidth,
+      phaseLines: Array.from(wrapper.querySelectorAll('tbody td:first-child'), lineCount),
+      proseLines: lineCount(wrapper.querySelector('tbody tr:last-child td:last-child')),
+    };
+  });
+}
+
 try {
   await mkdir(path.join(root, 'docs'));
   await writeFile(path.join(root, 'README.md'), fixture);
@@ -129,6 +151,7 @@ try {
     env: { ...process.env, ELECTRON_ENABLE_LOGGING: '1' },
   });
   page = await application.firstWindow();
+  await page.setViewportSize({ width: 1400, height: 960 });
   page.on('pageerror', error => errors.push(error.message));
   page.on('console', message => {
     if (message.type() === 'error') console.error(message.text());
@@ -145,7 +168,17 @@ try {
     'A quieter way to read your work#',
   );
   assert.equal(await page.locator('.md-callout[data-tone="tip"]').count(), 1);
-  assert.equal(await page.locator('.md-table-scroll table tbody tr').count(), 3);
+  const phaseTable = page.locator('.md-table-scroll').filter({
+    has: page.getByRole('columnheader', { name: 'Phase', exact: true }),
+  });
+  const wideTable = await measurePhaseTable(phaseTable);
+  assert.deepEqual(wideTable.phaseLines, [1, 1, 1], 'Short phase labels should fit on one line');
+  assert.equal(wideTable.scrollWidth, wideTable.width, 'The table should fit the wide pane');
+  const compactTableWidth = await page
+    .locator('.md-table-scroll')
+    .filter({ has: page.getByRole('columnheader', { name: 'File', exact: true }) })
+    .evaluate(wrapper => wrapper.clientWidth);
+  assert.ok(compactTableWidth < wideTable.width, 'Compact tables should take less space');
   assert.equal(await page.locator('.md-task input:disabled').count(), 2);
   assert.equal(await page.locator('.md-frontmatter').count(), 1);
   assert.equal(await page.locator('.markdown-body > hr').count(), 0);
@@ -231,6 +264,14 @@ try {
   await mkdir('test-results', { recursive: true });
   await page.screenshot({ path: 'test-results/markdown.png' });
   await page.setViewportSize({ width: 760, height: 850 });
+  const narrowTable = await measurePhaseTable(phaseTable);
+  assert.ok(narrowTable.width < wideTable.width, 'The table should shrink with the pane');
+  assert.ok(narrowTable.proseLines > wideTable.proseLines, 'Prose should reflow in a narrow pane');
+  assert.equal(
+    narrowTable.scrollWidth,
+    narrowTable.width,
+    'The reflowed table should fit the pane',
+  );
   const fits = await page
     .locator('.markdown-body')
     .evaluate(element => element.scrollWidth <= element.clientWidth);
@@ -244,7 +285,7 @@ try {
   );
   assert.deepEqual(errors, []);
   console.log(
-    'Markdown: diagrams, code, copy, zoom, source, diff, local links/images, live saves, narrow layout, sanitization and cleanup passed.',
+    'Markdown: diagrams, code, copy, zoom, source, diff, local links/images, live saves, responsive tables, narrow layout, sanitization and cleanup passed.',
   );
 } catch (error) {
   if (page && !page.isClosed()) {

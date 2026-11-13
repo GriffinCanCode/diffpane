@@ -315,6 +315,8 @@
   pointer-events: none;
 }
 .md-table-scroll {
+  width: fit-content;
+  max-width: 100%;
   overflow: auto;
   margin: 24px 0;
   border: 1px solid #ffffff10;
@@ -337,6 +339,10 @@
 .markdown-body td {
   padding: 11px 16px;
   border-bottom: 1px solid #ffffff0c;
+}
+.md-table-cell {
+  /* Give short labels their natural width while letting long values wrap. */
+  min-width: calc-size(max-content, min(size, 12ch));
 }
 .markdown-body tr:last-child td {
   border-bottom: 0;
