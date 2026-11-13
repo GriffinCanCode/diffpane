@@ -304,6 +304,28 @@ test('independent app processes can initialize and commit against the same datab
   }
 })
 
+test('closing local state skips optional vacuum while another writer holds the database', async t => {
+  const { filename } = await fixture(t)
+  const state = new LocalState(filename, keyring)
+  try {
+    await state.write(tx => tx.put('ideas', '/project', 'saved', 'committed'))
+    using writer = new DatabaseSync(filename)
+    using contender = new DatabaseSync(filename)
+    writer.exec('BEGIN IMMEDIATE')
+    assert.throws(() => contender.exec('PRAGMA incremental_vacuum(256)'), { errcode: 5 })
+    assert.doesNotThrow(() => state.close())
+    writer.exec('COMMIT')
+  } finally {
+    state.close()
+  }
+  const reopened = new LocalState(filename, keyring)
+  try {
+    assert.equal(await reopened.read(tx => tx.get('ideas', '/project', 'saved')), 'committed')
+  } finally {
+    reopened.close()
+  }
+})
+
 test('an abrupt process exit preserves committed records and rolls back a partial transaction', async t => {
   const { filename } = await fixture(t)
   await assert.rejects(

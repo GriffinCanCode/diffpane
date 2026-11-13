@@ -28,6 +28,15 @@ function hasCode(error: unknown, code: string) {
   return error instanceof Error && 'code' in error && error.code === code
 }
 
+function isBusy(error: unknown) {
+  return (
+    error instanceof Error &&
+    'errcode' in error &&
+    typeof error.errcode === 'number' &&
+    (error.errcode & 255) === SQLITE_BUSY
+  )
+}
+
 function fileIdentity(filename: string, ignoreEmpty = false) {
   try {
     const file = lstatSync(filename, { bigint: true })
@@ -54,11 +63,7 @@ async function retryBusy<T>(run: () => T): Promise<T> {
     try {
       return run()
     } catch (error) {
-      if (
-        !(error instanceof Error && 'errcode' in error && typeof error.errcode === 'number') ||
-        (error.errcode & 255) !== SQLITE_BUSY
-      )
-        throw error
+      if (!isBusy(error)) throw error
       if (performance.now() >= deadline)
         throw new Error('Local storage is busy in another DiffPane process. Try again.', { cause: error })
       // oxlint-disable-next-line eslint/no-await-in-loop -- Retry only after the preceding transaction releases its lock.
@@ -374,6 +379,9 @@ export class LocalState {
     this.records = undefined
     try {
       database.exec('PRAGMA incremental_vacuum(256)')
+    } catch (error) {
+      // Vacuum is optional. Another process can be committing while we close.
+      if (!isBusy(error)) throw error
     } finally {
       database.close()
     }
