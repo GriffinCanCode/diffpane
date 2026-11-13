@@ -10,6 +10,8 @@ import './style.css';
 import { createFilePicker } from './files.ts';
 import { projectIcon } from './icons.ts';
 import { createNavigator } from './navigator.js';
+import { createChangeReview } from './change-review.js';
+import { createReviewFocus } from './review-focus.js';
 import { createAssistant } from './assistant.js';
 import { createLanguageFeatures } from './languages.js';
 import { createHowMany } from './howmany.js';
@@ -84,6 +86,8 @@ const icons = {
   branch:
     '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="4" cy="3" r="1.7" stroke="currentColor"/><circle cx="4" cy="13" r="1.7" stroke="currentColor"/><circle cx="12" cy="3" r="1.7" stroke="currentColor"/><path d="M4 5v6m8-6v1a4 4 0 0 1-4 4H4" stroke="currentColor" stroke-width="1.2"/></svg>',
   down: '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 3v10m-4-4 4 4 4-4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  review:
+    '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m2.5 5 1 1 2-2m-3 6 1 1 2-2M8 5h5.5M8 10h5.5" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   claude:
     '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M5 3.2h6A2.8 2.8 0 0 1 13.8 6v2.6A2.8 2.8 0 0 1 11 11.4H7l-3.2 2v-2.3a2.8 2.8 0 0 1-1.6-2.5V6A2.8 2.8 0 0 1 5 3.2Z" stroke="currentColor" stroke-linejoin="round"/><path d="M5.5 7.3h5" stroke="currentColor" stroke-linecap="round"/></svg>',
   file: '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M9.5 1.8H4a1 1 0 0 0-1 1v10.4a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V5.3l-3.5-3.5Z" stroke="currentColor" stroke-width="1.15"/><path d="M9 2v4h4" stroke="currentColor" stroke-width="1.15"/></svg>',
@@ -99,11 +103,17 @@ app.innerHTML = `
     <span class="title-divider"></span>
     <div class="project"><span id="project-name">Diffpane</span><span id="project-path"></span></div>
     <span class="branch" hidden>${icons.branch}<span id="branch-name"></span></span>
-    <button type="button" id="claude-toggle" aria-controls="claude-panel" aria-expanded="false" aria-keyshortcuts="Meta+Shift+L Control+Shift+L" title="Claude · ⌘⇧L" hidden>${icons.claude}<span>Claude</span></button>
+    <div class="titlebar-actions">
+      <button type="button" id="review-toggle" class="titlebar-button review-toggle" aria-label="Review changes" aria-controls="change-review" aria-pressed="false" aria-keyshortcuts="Meta+Shift+G Control+Shift+G" title="Review changes · ⌘⇧G" hidden>${icons.review}<span>Changes</span><span class="review-count" aria-hidden="true"></span></button>
+      <button type="button" id="claude-toggle" aria-controls="claude-panel" aria-expanded="false" aria-keyshortcuts="Meta+Shift+L Control+Shift+L" title="Claude · ⌘⇧L" hidden>${icons.claude}<span>Claude</span></button>
+    </div>
   </header>
   <div class="workspace" id="workspace">
-    <aside id="navigator" hidden></aside>
-    <div id="navigator-resize" role="separator" aria-label="Explorer width" aria-orientation="vertical" tabindex="0" hidden></div>
+    <div id="sidebar" hidden>
+      <aside id="navigator" hidden></aside>
+      <aside id="change-review" hidden></aside>
+    </div>
+    <div id="navigator-resize" role="separator" aria-label="Sidebar width" aria-orientation="vertical" tabindex="0" hidden></div>
     <section class="workbench">
   <div class="message" id="message" role="status" hidden></div>
   <main class="start-screen" id="start-screen" aria-labelledby="start-title" aria-busy="true">
@@ -119,6 +129,9 @@ app.innerHTML = `
 const ui = Object.fromEntries(
   [
     'workspace',
+    'sidebar',
+    'change-review',
+    'review-toggle',
     'navigator',
     'navigator-resize',
     'claude-panel',
@@ -151,6 +164,8 @@ let closed = false;
 let closingRequested = false;
 let documentFrame = null;
 let navigationVersion = 0;
+let reviewVisible = false;
+let reviewScope = 'focus';
 const savedViews = new Map();
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 let recentVersion = 0;
@@ -181,6 +196,7 @@ const assistant =
         const current = cards.get(path);
         if (current) {
           current.dirty = true;
+          syncReviewState();
           scheduleDocument();
         }
       } finally {
@@ -283,6 +299,7 @@ function syncSaveState() {
   api.setSaveState(
     Boolean(applyingAssistantEdit) || [...cards.values()].some(card => card.autosave?.pending),
   );
+  syncReviewState();
 }
 
 // Coalesce saves per card; a previous file's slow read must not block navigation.
@@ -355,6 +372,7 @@ async function mutateFile(action, pathname, name) {
         ui.feed.replaceChildren();
         ui.empty_state.hidden = false;
         navigator.select(null);
+        syncReviewState();
         document.getElementById('save-state').textContent = 'Autosave on';
         const outline = ui.navigator.querySelector('.navigator-outline .symbol-list');
         if (outline) outline.textContent = 'Open a file to see its outline';
@@ -379,6 +397,41 @@ const navigator = createNavigator(ui.navigator, api, openFile, {
     else list.textContent = 'Open a file to see its outline';
   },
 });
+const reviewBadge = ui.review_toggle.querySelector('.review-count');
+const review = createChangeReview(ui.change_review, {
+  onOpen: file => openFile(file, { compare: true }),
+  onBack: toggleReview,
+  onProgress: ({ pending, total }) => {
+    const complete = total > 0 && pending === 0;
+    reviewBadge.hidden = total === 0;
+    reviewBadge.textContent = complete ? '✓' : pending.toLocaleString();
+    ui.review_toggle.dataset.complete = String(complete);
+    ui.review_toggle.setAttribute(
+      'aria-description',
+      pending
+        ? `${pending.toLocaleString()} ${pending === 1 ? 'file' : 'files'} pending`
+        : complete
+          ? 'All changes reviewed'
+          : 'No changed files',
+    );
+  },
+});
+ui.review_toggle.addEventListener('click', toggleReview);
+
+function syncReviewState() {
+  const card = cards.get(openedFile?.path);
+  const version = card?.document?.reviewVersion ?? null;
+  let state = null;
+  if (card?.comparing) {
+    if (closingRequested) state = 'closing';
+    else if (card.autosave?.pending) state = card.saveError ? 'save-failed' : 'saving';
+    else if (card.loading || card.dirty) state = 'loading';
+    else if (card.documentFailed) state = 'failed';
+    else state = 'ready';
+  }
+  review.setCurrent(card?.file.path ?? null, state, version);
+}
+
 const languageFeatures = createLanguageFeatures(monaco, api, { onState: updateLanguageState });
 const howmany = createHowMany(monaco, api, ui.navigator, document.querySelector('.statusbar-end'));
 function startBackgroundAnalysis() {
@@ -402,20 +455,23 @@ const openFilePicker = createFilePicker(
   },
 );
 
-async function openFile(file) {
+async function openFile(file, { compare = false } = {}) {
+  if (closingRequested || closed) return false;
   const version = ++navigationVersion;
   const current = cards.get(openedFile?.path);
   if (current?.autosave?.pending) {
     try {
       await current.autosave.flush();
     } catch {
-      return;
+      if (version === navigationVersion && !closed) navigator.select(current.file.path);
+      return false;
     }
-    if (version !== navigationVersion || closed) return;
   }
-  if (openedFile?.path === file.path && cards.has(file.path)) {
+  if (version !== navigationVersion || closingRequested || closed) return false;
+  if (openedFile?.path === file.path && current) {
     navigator.select(file.path);
-    return;
+    if (compare) openComparison(current);
+    return true;
   }
   for (const card of cards.values()) {
     deactivate(card);
@@ -437,10 +493,13 @@ async function openFile(file) {
   ui.empty_state.hidden = true;
   document.getElementById('save-state').textContent = 'Autosave on';
   navigator.select(file.path);
+  if (compare) openComparison(card);
+  else syncReviewState();
   const outline = ui.navigator.querySelector('.navigator-outline .symbol-list');
   if (outline)
     outline.textContent = mediaType(file.path) ? 'No outline for media files' : 'Loading symbols…';
   scheduleDocument();
+  return true;
 }
 
 function updateLanguageState(state) {
@@ -528,10 +587,31 @@ function showMarkdownOutline(card, list) {
 
 function toggleNavigator() {
   if (!snapshot) return;
-  navigator.toggle();
-  ui.workspace.classList.toggle('navigator-hidden', ui.navigator.hidden);
+  setSidebarVisible(ui.sidebar.hidden);
 }
-let resizing = false;
+
+function toggleReview() {
+  if (!snapshot) return;
+  reviewVisible = ui.sidebar.hidden || !reviewVisible;
+  setSidebarVisible(true);
+  if (reviewVisible) review.focus();
+  else ui.navigator.querySelector('.navigator-tree').focus();
+}
+
+function setSidebarVisible(visible) {
+  ui.sidebar.hidden = !visible;
+  ui.navigator_resize.hidden = !visible;
+  const showFiles = visible && !reviewVisible;
+  if (showFiles !== !ui.navigator.hidden) navigator.toggle();
+  const showReview = visible && reviewVisible;
+  review.setVisible(showReview);
+  ui.review_toggle.setAttribute('aria-pressed', String(showReview));
+  ui.empty_state.querySelector('h2').textContent = showReview ? 'Open a comparison' : 'Open a file';
+  ui.empty_state.querySelector('p').textContent = showReview
+    ? 'Select a changed file from the review queue.'
+    : 'Select a file in the explorer, or press ⌘P.';
+}
+let resizePointer = null;
 const resizeNavigator = width => {
   const limit = Math.min(440, ui.workspace.clientWidth - 360);
   const next = Math.max(180, Math.min(limit, width));
@@ -539,24 +619,28 @@ const resizeNavigator = width => {
   ui.navigator_resize.setAttribute('aria-valuenow', String(Math.round(next)));
 };
 ui.navigator_resize.addEventListener('pointerdown', event => {
-  resizing = true;
+  if (event.button !== 0 || resizePointer !== null) return;
   ui.navigator_resize.setPointerCapture(event.pointerId);
+  resizePointer = event.pointerId;
   document.body.classList.add('resizing-navigator');
 });
 ui.navigator_resize.addEventListener('pointermove', event => {
-  if (resizing) resizeNavigator(event.clientX - ui.workspace.getBoundingClientRect().left);
+  if (event.pointerId === resizePointer)
+    resizeNavigator(event.clientX - ui.workspace.getBoundingClientRect().left);
 });
-const stopResizing = () => {
-  resizing = false;
+const stopResizing = event => {
+  if (event.pointerId !== resizePointer) return;
+  resizePointer = null;
   document.body.classList.remove('resizing-navigator');
 };
 ui.navigator_resize.addEventListener('pointerup', stopResizing);
+ui.navigator_resize.addEventListener('pointercancel', stopResizing);
 ui.navigator_resize.addEventListener('lostpointercapture', stopResizing);
 ui.navigator_resize.addEventListener('keydown', event => {
   if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
   event.preventDefault();
   resizeNavigator(
-    ui.navigator.getBoundingClientRect().width + (event.key === 'ArrowLeft' ? -16 : 16),
+    ui.sidebar.getBoundingClientRect().width + (event.key === 'ArrowLeft' ? -16 : 16),
   );
 });
 
@@ -565,9 +649,26 @@ function createCard(file) {
   element.className = 'file-card';
   element.dataset.path = file.path;
   element.innerHTML = `<div class="file-header"><span class="file-icon">${icons.file}</span><div class="file-path"><span class="file-directory"></span><strong class="file-name"></strong></div><button class="diff-toggle change-button" type="button" aria-label="Compare whole file" aria-pressed="false" title="Compare whole file · changed functions" disabled><svg viewBox="0 0 18 18" fill="none" aria-hidden="true"><rect x="2.5" y="3" width="13" height="12" rx="1.5" stroke="currentColor" stroke-width="1.2"/><path d="M9 3v12M4.5 7h2M5.5 6v2M11.5 10h2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></button><details class="symbol-outline"><summary title="Document symbols">Symbols</summary><div class="symbol-list"></div></details><button class="change-button" title="Next change" aria-label="Next change in file">${icons.down}</button></div><div class="file-note" hidden></div><div class="editor-host"><div class="editor-placeholder"><span class="placeholder-line"></span><span class="placeholder-line"></span><span class="placeholder-line"></span></div></div><div class="file-footer"><span class="line-count">Loading file…</span><span class="language-meta"><span class="language-state">Syntax</span><span class="file-language"></span></span></div>`;
+  const labels = documentNode('div', 'comparison-labels', '');
+  labels.hidden = true;
+  labels.append(
+    documentNode('span', 'comparison-original', 'HEAD'),
+    documentNode('span', 'comparison-working', 'Working file'),
+    documentNode('span', 'comparison-inline', 'HEAD → Working file · Inline'),
+  );
+  const reviewFocus = createReviewFocus({
+    onScope: scope => {
+      reviewScope = scope;
+      element.dataset.reviewScope = scope;
+    },
+  });
+  element.querySelector('.editor-host').before(labels);
+  labels.before(reviewFocus.bar);
   const card = {
     file,
     element,
+    reviewFocus,
+
     host: element.querySelector('.editor-host'),
     note: element.querySelector('.file-note'),
     lines: element.querySelector('.line-count'),
@@ -584,6 +685,7 @@ function createCard(file) {
     generation: 0,
     changes: [],
     changeIndex: -1,
+    comparing: false,
     textBytes: 0,
   };
   const slash = file.path.lastIndexOf('/');
@@ -611,15 +713,15 @@ function createCard(file) {
       button.type = 'button';
       button.setAttribute('aria-pressed', String(!source));
       button.addEventListener('click', async () => {
-        if (Boolean(card.markdownSource) === source || !card.document) return;
-        try {
-          await card.autosave?.flush();
-        } catch {
-          return;
-        }
-        if (!card.active) return;
-        card.markdownSource = source;
-        renderDocument(card, card.document);
+        await changeDocumentMode(card, () => {
+          if (Boolean(card.markdownSource) === source) return false;
+          card.markdownSource = source;
+          if (!source) {
+            card.comparing = false;
+            card.reviewComparison = false;
+          }
+          return true;
+        });
       });
       modes.append(button);
     }
@@ -654,12 +756,13 @@ function applySnapshot(next) {
   ui.start_screen.hidden = true;
   ui.feed_scroll.hidden = false;
   if (first) {
-    ui.navigator.hidden = false;
-    ui.navigator_resize.hidden = false;
+    setSidebarVisible(true);
+    ui.review_toggle.hidden = false;
     document.querySelector('.branch').hidden = false;
     document.querySelector('.statusbar-end').hidden = false;
   }
   navigator.update(next);
+  review.update(next.files);
   ui.project_name.textContent =
     next.scope?.split('/').filter(Boolean).pop() ||
     next.root?.split('/').filter(Boolean).pop() ||
@@ -675,18 +778,21 @@ function applySnapshot(next) {
     void openFile({ path: next.initialPath || next.files[0].path, submodule: false });
   else {
     const card = cards.get(openedFile?.path);
+    const file = card && next.files.find(file => file.path === card.file.path);
     if (
       card &&
       (allDirty ||
+        file?.reviewVersion !== card.file.reviewVersion ||
         next.changedPaths.some(
           path => card.file.path === path || card.file.path.startsWith(`${path}/`),
         ))
     ) {
-      card.file = next.files.find(file => file.path === card.file.path) ?? { path: card.file.path };
+      card.file = file ?? { path: card.file.path };
       card.dirty = true;
       scheduleDocument();
     }
   }
+  syncReviewState();
   ui.status_text.textContent = `${next.files.length.toLocaleString()} changed ${next.files.length === 1 ? 'file' : 'files'} · ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
 }
 
@@ -694,6 +800,8 @@ async function loadDocument(card) {
   if (card.loading || !card.active || closed || card.autosave?.pending) return;
   card.loading = true;
   card.dirty = false;
+  card.documentFailed = false;
+  syncReviewState();
   const generation = card.generation;
   const editVersion = card.editVersion ?? 0;
   card.element.classList.add('is-loading');
@@ -713,6 +821,7 @@ async function loadDocument(card) {
     renderDocument(card, document);
   } catch (error) {
     if (card.active && generation === card.generation) {
+      card.documentFailed = true;
       if (mediaType(card.file.path)) {
         card.mediaCleanup?.();
         card.mediaCleanup = null;
@@ -727,6 +836,7 @@ async function loadDocument(card) {
   } finally {
     card.loading = false;
     card.element.classList.remove('is-loading');
+    if (card.active) syncReviewState();
     scheduleDocument();
     startBackgroundAnalysis();
   }
@@ -784,23 +894,28 @@ function editorOptions(card) {
 }
 
 function renderDocument(card, document) {
-  if (
-    card.markdownCleanup &&
-    !card.markdownSource &&
-    !document.preview &&
-    document.after === card.markdownText
-  ) {
-    card.document = document;
-    return;
-  }
   card.document = document;
+  const preview = document.preview;
+  const reading = !preview && isMarkdown(card.file.path) && !card.markdownSource;
+  const text = document.after ?? '';
+  const reusableMarkdown = reading && card.markdownCleanup && text === card.markdownText;
+  card.note.textContent =
+    (!preview &&
+      (document.note ||
+        document.diffNote ||
+        (!text && (card.file.worktree === 'D' || card.file.index === 'D')
+          ? 'This file was deleted. There are no current contents.'
+          : ''))) ||
+    '';
+  card.note.hidden = !card.note.textContent;
+  card.note.classList.remove('is-error');
+  card.host.classList.remove('has-error');
+  if (reusableMarkdown) return;
   card.functionEpoch = (card.functionEpoch ?? 0) + 1;
   card.mediaCleanup?.();
   card.mediaCleanup = null;
   card.markdownCleanup?.();
   card.markdownCleanup = null;
-  const preview = document.preview;
-  const reading = !preview && isMarkdown(card.file.path) && !card.markdownSource;
   const modes = card.element.querySelector('.markdown-toggle');
   if (modes) {
     modes.hidden = Boolean(preview);
@@ -810,31 +925,29 @@ function renderDocument(card, document) {
   for (const control of card.element.querySelectorAll('.symbol-outline, .language-state'))
     control.hidden = Boolean(preview) || reading;
   card.element.querySelector('.change-button:not(.diff-toggle)').hidden =
-    Boolean(preview) || reading;
+    Boolean(preview) || reading || Boolean(card.reviewComparison);
+  const button = card.element.querySelector('.diff-toggle');
+  button.disabled = false;
+  button.hidden = false;
+  button.setAttribute('aria-pressed', String(card.comparing));
+  button.setAttribute('aria-label', card.comparing ? 'Show current file' : 'Compare whole file');
+  button.title = card.comparing ? 'Show current file' : 'Compare whole file · changed functions';
+  card.element.dataset.diff = String(card.comparing);
+  card.element.querySelector('.comparison-labels').hidden = !card.comparing || Boolean(preview);
   if (preview) {
     globalThis.document.getElementById('save-state').textContent = 'Read only';
     releaseEditor(card);
     howmany.clearFile(card);
-    card.note.hidden = true;
-    card.note.classList.remove('is-error');
-    card.host.classList.remove('has-error');
+    const outline = ui.navigator.querySelector('.navigator-outline .symbol-list');
+    if (outline) outline.textContent = 'No outline for this file';
     card.lines.textContent = `${preview.after.size.toLocaleString()} bytes`;
     card.language.textContent =
       preview.after.kind === 'binary' ? 'Binary' : preview.after.kind.toUpperCase();
-    const button = card.element.querySelector('.diff-toggle');
-    button.disabled = false;
-    button.hidden = false;
-    button.setAttribute('aria-pressed', String(Boolean(card.previewCompared)));
-    button.setAttribute(
-      'aria-label',
-      card.previewCompared ? 'Show current file' : 'Compare whole file',
-    );
-    card.element.dataset.diff = String(Boolean(card.previewCompared));
     card.mediaCleanup = showDocumentPreview(
       card.host,
       preview,
       card.file.path,
-      card.previewCompared,
+      card.comparing,
       card.currentMedia,
       {
         raw: card.previewRaw,
@@ -850,27 +963,12 @@ function renderDocument(card, document) {
     );
     return;
   }
-  card.previewCompared = false;
-  const text = document.after ?? '';
   const state = card.editor?.saveViewState();
   const lineCount = document.lineCount ?? countLines(text);
-  card.note.textContent =
-    document.note ||
-    document.diffNote ||
-    (!text && (card.file.worktree === 'D' || card.file.index === 'D')
-      ? 'This file was deleted. There are no current contents.'
-      : '');
-  card.note.hidden = !card.note.textContent;
-  card.note.classList.remove('is-error');
-  card.host.classList.remove('has-error');
   if (reading) {
     releaseEditor(card);
     howmany.clearFile(card);
-    const button = card.element.querySelector('.diff-toggle');
-    button.disabled = false;
-    button.setAttribute('aria-pressed', 'false');
-    button.setAttribute('aria-label', 'Compare whole file');
-    card.element.dataset.diff = 'false';
+    globalThis.document.getElementById('save-state').textContent = 'Read only';
     const words = text.trim().split(/\s+/).filter(Boolean).length;
     card.lines.textContent = `${words.toLocaleString()} words · ${Math.max(1, Math.ceil(words / 220))} min read`;
     card.language.textContent = 'Markdown';
@@ -916,33 +1014,27 @@ function renderDocument(card, document) {
     warnings.setAttribute('role', 'status');
     card.host.before(counts, warnings);
   }
-  if (!card.editor) {
-    card.host.replaceChildren();
+  if (!card.model) {
     const root = snapshot.root.replaceAll('\\', '/').replace(/\/$/, '');
     const uri = monaco.Uri.file(`${root}/${card.file.path}`);
     card.model = monaco.editor.createModel(text, undefined, uri);
     monaco.editor.setModelLanguage(card.model, syntax.resolve(card.model, text));
     card.model.detectIndentation(true, 2);
-    card.editor = monaco.editor.create(card.host, editorOptions(card));
     card.autosave = new Autosave(
       text,
       (value, expected) => api.save(card.file.path, value, expected),
       (state, error) => {
-        syncSaveState();
         if (!card.active) return;
+        card.saveStatus = state;
         card.saveError = state === 'error' ? error?.message || String(error) : null;
-        globalThis.document.getElementById('save-state').textContent =
-          state === 'saving'
-            ? 'Saving…'
-            : state === 'error'
-              ? 'Save failed · ⌘S to retry'
-              : 'Saved';
+        updateSaveLabel(card);
         if (state === 'error') showError(error?.message || error);
         if (state === 'saved') {
           if (!snapshot?.watchError) clearError();
           card.dirty = true;
           scheduleDocument();
         }
+        syncSaveState();
       },
     );
     card.contentCleanup = card.model.onDidChangeContent(() => {
@@ -953,11 +1045,7 @@ function renderDocument(card, document) {
       card.autosave.edit(card.text);
       syncSaveState();
     });
-    card.decorationCollection = card.editor.createDecorationsCollection();
-    card.languageCleanup = languageFeatures.attach(card.editor, card.model, card.file.path, {
-      active: true,
-    });
-    if (card.viewState) card.editor.restoreViewState(card.viewState);
+    setCardEditor(card, card.viewState);
   } else if (card.text !== text) {
     const change = minimalChange(card.model.getValue(undefined, true), text);
     const start = card.model.getPositionAt(change.start);
@@ -970,11 +1058,11 @@ function renderDocument(card, document) {
     }
     if (state) card.editor.restoreViewState(state);
   }
+  if (Boolean(card.diffEditor) !== card.comparing) setCardEditor(card, card.editor.saveViewState());
   card.text = text;
   card.autosave.accept(text);
   applyEditorReadOnly(card);
-  if (!document.editable)
-    globalThis.document.getElementById('save-state').textContent = 'Read only';
+  updateSaveLabel(card);
   card.textBytes = text.length * 2 + (card.originalModel ? (document.before?.length ?? 0) * 2 : 0);
   if (card.originalModel && card.originalText !== document.before) {
     const originalState = card.diffEditor.getOriginalEditor().saveViewState();
@@ -982,6 +1070,12 @@ function renderDocument(card, document) {
     card.originalText = document.before;
     if (originalState) card.diffEditor.getOriginalEditor().restoreViewState(originalState);
   }
+  if (card.reviewComparison && card.diffEditor) {
+    if (!card.dirty && card.file.reviewVersion === document.reviewVersion) {
+      card.element.dataset.reviewScope = reviewScope;
+      card.reviewFocus.attach(card.diffEditor, reviewScope);
+    }
+  } else delete card.element.dataset.reviewScope;
   const decorations = [];
   const changeLines = new Set();
   for (const change of document.decorations ?? []) {
@@ -1011,7 +1105,6 @@ function renderDocument(card, document) {
   card.changes = [...changeLines].sort((a, b) => a - b);
   card.element.querySelector('.change-button:not(.diff-toggle)').disabled =
     card.changes.length === 0;
-  card.element.querySelector('.diff-toggle').disabled = false;
   card.lines.textContent = `${lineCount.toLocaleString()} ${lineCount === 1 ? 'line' : 'lines'}`;
   const language = card.model.getLanguageId();
   card.language.textContent =
@@ -1020,32 +1113,68 @@ function renderDocument(card, document) {
   card.editor.render(true);
   howmany.updateFile(card, document);
   if (card.diffEditor) void highlightFunctions(card);
+  else card.changedFunctions = 0;
   if (card.element.querySelector('.symbol-outline').open) void showSymbols(card);
   const outline = ui.navigator.querySelector('.navigator-outline[open] .symbol-list');
   if (outline) void showSymbols(card, outline);
 }
 
-async function toggleDiff(card) {
+function updateSaveLabel(card) {
+  const labels = { saving: 'Saving…', error: 'Save failed · ⌘S to retry', saved: 'Saved' };
+  document.getElementById('save-state').textContent =
+    labels[card.saveStatus] && card.autosave?.pending
+      ? labels[card.saveStatus]
+      : !card.document.editable
+        ? 'Read only'
+        : labels[card.saveStatus] || 'Autosave on';
+}
+
+async function changeDocumentMode(card, change) {
+  const intent = (card.modeVersion ?? 0) + 1;
+  card.modeVersion = intent;
+  if (closingRequested || !card.document) return;
   try {
-    await card.autosave?.flush();
+    if (card.autosave?.pending) await card.autosave.flush();
   } catch {
     return;
   }
-  if (!card.active) return;
-  if (card.markdownCleanup) {
+  if (!card.active || closingRequested || intent !== card.modeVersion || !change()) return;
+  renderDocument(card, card.document);
+  syncReviewState();
+}
+
+function toggleDiff(card) {
+  const comparing = !card.comparing;
+  return changeDocumentMode(card, () => {
+    card.comparing = comparing;
+    if (comparing) card.markdownSource = true;
+    else card.reviewComparison = false;
+    return true;
+  });
+}
+
+function openComparison(card) {
+  card.modeVersion = (card.modeVersion ?? 0) + 1;
+  if (!card.reviewComparison || !card.comparing) {
+    card.reviewComparison = true;
+    card.comparing = true;
     card.markdownSource = true;
-    renderDocument(card, card.document);
+    if (card.document && !card.documentFailed) {
+      renderDocument(card, card.document);
+    }
   }
-  if (card.document?.preview) {
-    card.previewCompared = !card.previewCompared;
-    renderDocument(card, card.document);
-    return;
+  if (card.documentFailed) {
+    card.dirty = true;
+    scheduleDocument();
   }
-  if (!card.model || !card.document) return;
-  const state = card.editor.saveViewState();
+  syncReviewState();
+}
+
+function setCardEditor(card, state) {
   card.languageCleanup?.();
   card.languageCleanup = null;
   if (card.diffEditor) {
+    card.reviewFocus.detach();
     card.diffEditor.setModel(null);
     card.diffEditor.dispose();
     card.diffEditor = null;
@@ -1053,12 +1182,12 @@ async function toggleDiff(card) {
     card.originalModel = null;
     card.originalDecorations = null;
     card.functionDecorations = null;
-    card.host.replaceChildren();
-    card.editor = monaco.editor.create(card.host, editorOptions(card));
-  } else {
+  } else if (card.editor) {
     card.editor.setModel(null);
     card.editor.dispose();
-    card.host.replaceChildren();
+  }
+  card.host.replaceChildren();
+  if (card.comparing) {
     card.originalText = card.document.before ?? '';
     card.originalModel = monaco.editor.createModel(
       card.originalText,
@@ -1068,6 +1197,8 @@ async function toggleDiff(card) {
     card.diffEditor = monaco.editor.createDiffEditor(card.host, {
       ...editorOptions(card),
       model: undefined,
+      originalAriaLabel: `HEAD contents of ${card.file.originalPath || card.file.path}`,
+      modifiedAriaLabel: `Working contents of ${card.file.path}`,
       originalEditable: false,
       renderSideBySide: true,
       useInlineViewWhenSpaceIsLimited: false,
@@ -1082,20 +1213,20 @@ async function toggleDiff(card) {
     });
     card.diffEditor.setModel({ original: card.originalModel, modified: card.model });
     card.editor = card.diffEditor.getModifiedEditor();
-    card.originalDecorations = card.diffEditor.getOriginalEditor().createDecorationsCollection();
+    const originalEditor = card.diffEditor.getOriginalEditor();
+    const labels = card.element.querySelector('.comparison-labels');
+    const syncLabelWidth = ({ width }) =>
+      labels.style.setProperty('--original-width', `${width}px`);
+    syncLabelWidth(originalEditor.getLayoutInfo());
+    originalEditor.onDidLayoutChange(syncLabelWidth);
+    card.originalDecorations = originalEditor.createDecorationsCollection();
     card.functionDecorations = card.editor.createDecorationsCollection();
-  }
+  } else card.editor = monaco.editor.create(card.host, editorOptions(card));
   card.decorationCollection = card.editor.createDecorationsCollection();
   card.languageCleanup = languageFeatures.attach(card.editor, card.model, card.file.path, {
     active: true,
   });
   if (state) card.editor.restoreViewState(state);
-  const button = card.element.querySelector('.diff-toggle');
-  button.setAttribute('aria-pressed', String(Boolean(card.diffEditor)));
-  button.setAttribute('aria-label', card.diffEditor ? 'Show current file' : 'Compare whole file');
-  button.title = card.diffEditor ? 'Show current file' : 'Compare whole file · changed functions';
-  card.element.dataset.diff = String(Boolean(card.diffEditor));
-  renderDocument(card, card.document);
 }
 
 async function highlightFunctions(card) {
@@ -1196,10 +1327,16 @@ function releaseEditor(card) {
   card.languageCleanup?.();
   card.languageCleanup = null;
   card.element.querySelector('.symbol-outline').open = false;
+  card.reviewFocus.detach();
+  delete card.element.dataset.reviewScope;
   if (card.diffEditor) card.diffEditor.dispose();
   else card.editor.dispose();
   card.originalModel?.dispose();
   card.originalModel = null;
+  card.originalText = null;
+  card.originalDecorations = null;
+  card.functionDecorations = null;
+  card.changedFunctions = 0;
   card.diffEditor = null;
   card.functionEpoch = (card.functionEpoch ?? 0) + 1;
   card.model.dispose();
@@ -1208,6 +1345,7 @@ function releaseEditor(card) {
   card.decorationCollection = null;
   card.textBytes = 0;
   card.text = null;
+  card.saveStatus = null;
   card.host.replaceChildren(documentNode('div', 'editor-resting', ''));
 }
 
@@ -1239,6 +1377,11 @@ document.addEventListener('keydown', event => {
       event.preventDefault();
       void openFilePicker();
     }
+    return;
+  }
+  if (event.shiftKey && !event.altKey && event.key.toLowerCase() === 'g' && snapshot) {
+    event.preventDefault();
+    if (!event.repeat) toggleReview();
     return;
   }
   if (event.shiftKey && !event.altKey && event.key.toLowerCase() === 'l' && assistant) {
@@ -1300,11 +1443,13 @@ else {
   const resumeEditing = () => {
     closingRequested = false;
     for (const card of cards.values()) applyEditorReadOnly(card);
+    syncReviewState();
   };
   const unsubscribeResume = api.onResumeEditing(resumeEditing);
   const unsubscribeFlush = api.onFlushSaves(async () => {
     closingRequested = true;
     for (const card of cards.values()) applyEditorReadOnly(card);
+    syncReviewState();
     try {
       await Promise.all([
         ...[...cards.values()].map(card => card.autosave?.flush()),
@@ -1327,6 +1472,7 @@ else {
       )
     ) {
       card.dirty = true;
+      syncReviewState();
       scheduleDocument();
     }
   });
@@ -1360,6 +1506,7 @@ else {
       if (snapshotFrame !== null) cancelAnimationFrame(snapshotFrame);
       if (documentFrame !== null) cancelAnimationFrame(documentFrame);
       navigator.dispose();
+      review.dispose();
       unsubscribePaths();
       unsubscribeFlush();
       unsubscribeResume();

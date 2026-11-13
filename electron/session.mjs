@@ -31,6 +31,8 @@ let catalogLoading;
 let catalogRevision = 0;
 let catalogIndex = new Map();
 let snapshotIndex = new Map();
+let reviewStates = new Map();
+let reviewVersion = 0;
 let requestedDocumentPath;
 let inventoryDirty = false;
 let broadChanges = false;
@@ -45,6 +47,8 @@ let fallbackTimer;
 let fallbackActive = false;
 let polling = false;
 let fallbackState;
+let externalReviewTimer;
+let externalReviewPaths = new Map();
 let shuttingDown = false;
 let directoryChanges = Promise.resolve();
 const changes = new Set();
@@ -60,6 +64,7 @@ const documents = new DocumentCache(async (filePath, comparison) => {
   const changes = await diffs.calculate(contents.before, contents.after);
   return {
     path: filePath,
+    reviewVersion: file.reviewVersion,
     before: contents.before,
     after: contents.after,
     note: contents.note,
@@ -193,6 +198,96 @@ async function pollStamp(filename) {
   }
 }
 
+function syncExternalReviewPaths(states) {
+  externalReviewPaths = new Map(
+    [...states]
+      .filter(([filename]) => {
+        const relative = path.relative(repository.scope, path.join(repository.root, filename));
+        return relative === '..' || relative.startsWith(`..${path.sep}`);
+      })
+      .map(([filename, { stamp }]) => [filename, stamp]),
+  );
+  if (!externalReviewPaths.size || fallbackActive || shuttingDown) {
+    clearTimeout(externalReviewTimer);
+    externalReviewTimer = undefined;
+  } else if (!externalReviewTimer) queueExternalReviewPoll();
+}
+
+function queueExternalReviewPoll() {
+  externalReviewTimer = setTimeout(async () => {
+    try {
+      const livePaths = [];
+      for (const [filename, stamp] of externalReviewPaths) {
+        const current = await pollStamp(filename);
+        if (shuttingDown || fallbackActive) break;
+        if (externalReviewPaths.get(filename) !== stamp || current === stamp) continue;
+        externalReviewPaths.set(filename, current);
+        documents.invalidate([filename]);
+        const absolute = path.join(repository.root, filename);
+        if (changes.size < 4096) changes.add(absolute);
+        else broadChanges = true;
+        if (livePaths.length <= 256) livePaths.push(filename);
+      }
+      if (livePaths.length && !shuttingDown) {
+        parentPort.postMessage({
+          event: 'paths',
+          value: livePaths.length > 256 ? ['*'] : livePaths,
+        });
+        schedule();
+      }
+    } finally {
+      externalReviewTimer = undefined;
+      if (externalReviewPaths.size && !fallbackActive && !shuttingDown) queueExternalReviewPoll();
+    }
+  }, 2000).unref();
+}
+
+async function versionReviewFiles(files, changedPaths, scanAll, stamps = new Map()) {
+  const changed = new Set(changedPaths);
+  const affected = filename => {
+    if (changed.has(filename)) return true;
+    let slash = filename.lastIndexOf('/');
+    while (slash > 0) {
+      if (changed.has(filename.slice(0, slash))) return true;
+      slash = filename.lastIndexOf('/', slash - 1);
+    }
+    return false;
+  };
+  const checks = [];
+  for (const { path, statusKey } of files) {
+    if (stamps.has(path)) continue;
+    const prior = reviewStates.get(path);
+    // A worktree edit can leave the Git status record identical.
+    if (scanAll || !prior || prior.statusKey !== statusKey || affected(path)) checks.push(path);
+  }
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(8, checks.length) }, async () => {
+      while (next < checks.length) {
+        const filename = checks[next++];
+        stamps.set(filename, await pollStamp(filename));
+      }
+    }),
+  );
+  const states = new Map();
+  const index = new Map();
+  const changedVersions = [];
+  for (const { statusKey, ...file } of files) {
+    const prior = reviewStates.get(file.path);
+    const stamp = stamps.get(file.path) ?? prior?.stamp;
+    const state =
+      prior && prior.statusKey === statusKey && prior.stamp === stamp
+        ? prior
+        : { statusKey, stamp, version: ++reviewVersion };
+    if (state !== prior) changedVersions.push(file.path);
+    states.set(file.path, state);
+    index.set(file.path, { ...file, reviewVersion: state.version });
+  }
+  for (const filename of reviewStates.keys())
+    if (!states.has(filename)) changedVersions.push(filename);
+  return { states, index, changedVersions };
+}
+
 function polledPaths(before, after) {
   // A newly selected document or expanded directory is observed for the first
   // time here; adding it to the polling baseline is not a filesystem change.
@@ -261,8 +356,9 @@ async function performRefresh() {
     const start = performance.now();
     const result = await repository.snapshot();
     let changedPaths = paths.map(file => path.relative(repository.root, file));
-    if (fallbackActive && (poll || !fallbackState)) {
-      const observed = await pollState(result);
+    const observed = fallbackActive && (poll || !fallbackState) ? await pollState(result) : null;
+    const review = await versionReviewFiles(result.files, changedPaths, all, observed?.files);
+    if (observed) {
       const documentChanges = await polledDocuments(observed);
       if (documentChanges.length) documents.invalidate(documentChanges);
       changedPaths.push(...documentChanges);
@@ -280,6 +376,7 @@ async function performRefresh() {
           !all &&
           !refreshInventory &&
           !changedPaths.length &&
+          !review.changedVersions.length &&
           !statusChanged &&
           !metadataChanged &&
           !fileChanges.length &&
@@ -309,11 +406,18 @@ async function performRefresh() {
     }
     revision++;
     if (all) changedPaths = ['*'];
+    else if (review.changedVersions.length)
+      changedPaths = [...new Set([...changedPaths, ...review.changedVersions])];
     howmany.changed(changedPaths);
-    snapshotIndex = new Map(result.files.map(file => [file.path, file]));
+    // Reads that raced the Git status scan may still carry the previous comparison version.
+    if (review.changedVersions.length) documents.invalidate(review.changedVersions);
+    reviewStates = review.states;
+    snapshotIndex = review.index;
+    syncExternalReviewPaths(reviewStates);
     if (refreshInventory) invalidateCatalog();
     snapshot = {
       ...result,
+      files: [...snapshotIndex.values()],
       root: repository.root,
       scope: repository.scope,
       initialPath,
@@ -526,6 +630,7 @@ parentPort.on('message', async ({ id, method, args = [] }) => {
       shuttingDown = true;
       clearTimeout(timer);
       clearTimeout(fallbackTimer);
+      clearTimeout(externalReviewTimer);
       documents.dispose();
       // A renderer can request its first snapshot while native subscriptions
       // are still starting. Let that work finish before tearing down its isolate.

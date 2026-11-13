@@ -74,7 +74,7 @@ button svg,
   min-height: 34px;
   padding: 0 26px 0 94px;
   display: grid;
-  grid-template-columns: auto 1px minmax(0, 1fr) auto;
+  grid-template-columns: auto 1px minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 16px;
   border-bottom: 1px solid var(--line);
@@ -139,6 +139,52 @@ button svg,
   height: 14px;
   color: var(--subtle);
 }
+.titlebar-actions {
+  grid-column: -2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.titlebar-button {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+}
+.titlebar-button:hover,
+.titlebar-button[aria-pressed='true'] {
+  background: #242829;
+  border-color: var(--line);
+  color: var(--text);
+}
+.titlebar-button svg {
+  width: 14px;
+  height: 14px;
+}
+#review-toggle[aria-pressed='true'] {
+  border-color: #394b46;
+  background: #26332f;
+  color: #d3e8e0;
+}
+.review-count {
+  min-width: 16px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: #303b37;
+  color: #b9dbcf;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  line-height: 12px;
+  text-align: center;
+}
+.review-toggle[data-complete='true'] .review-count {
+  background: transparent;
+}
 
 .workspace {
   --navigator-width: 300px;
@@ -147,9 +193,15 @@ button svg,
   min-height: 0;
   min-width: 0;
 }
-#navigator {
+#sidebar {
+  display: flex;
   width: var(--navigator-width);
   flex: 0 0 var(--navigator-width);
+  min-height: 0;
+}
+#sidebar > aside {
+  flex: 1;
+  width: 100%;
 }
 .workbench {
   display: flex;
@@ -383,9 +435,6 @@ button svg,
   background: oklch(64% 0.08 255);
   outline: none;
 }
-.navigator-hidden #navigator-resize {
-  display: none;
-}
 .resizing-navigator,
 .resizing-navigator * {
   cursor: col-resize !important;
@@ -479,6 +528,24 @@ button svg,
 }
 .file-note.is-error {
   color: var(--red);
+}
+.comparison-labels {
+  display: grid;
+  grid-template-columns: var(--original-width, 50%) minmax(0, 1fr);
+  flex-shrink: 0;
+  background: #1c1c1c;
+  border-block: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+}
+.comparison-labels span {
+  padding: 4px 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.comparison-labels span + span {
+  border-left: 1px solid var(--line);
 }
 .editor-host {
   flex: 1;

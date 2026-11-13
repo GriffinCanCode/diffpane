@@ -9,7 +9,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
 
-async function fixture(t, { fileCount = 1000, setup = '' } = {}) {
+async function fixture(t, { fileCount = 1000, setup = '', scope = '' } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'diffpane-session-'));
   const git = (...args) =>
     execFileSync('git', ['-C', root, ...args], {
@@ -59,7 +59,7 @@ async function fixture(t, { fileCount = 1000, setup = '' } = {}) {
         )
       : sessionUrl;
   const worker = new Worker(workerUrl, {
-    workerData: { directory: root },
+    workerData: { directory: path.join(root, scope) },
   });
   const pending = new Map();
   const snapshots = [];
@@ -135,6 +135,46 @@ const injectedWatchSetup = `
         if (message.testEvents) callbacks[0](null, message.testEvents);
       });
     `;
+
+test('review versions follow individual working contents and staged blobs', async t => {
+  const repo = await fixture(t, { fileCount: 2, setup: injectedWatchSetup });
+  const selected = 'src/file0.txt';
+  const other = 'src/file1.txt';
+  const entry = (snapshot, filename = selected) =>
+    snapshot.files.find(file => file.path === filename);
+  await repo.write(selected, 'staged baseline\n');
+  repo.git('add', selected);
+  await repo.write(selected, 'working revision\n');
+  await repo.write(other, 'unrelated revision\n');
+  const first = await repo.call('refresh');
+  const initial = entry(first);
+  assert.ok(Number.isSafeInteger(initial.reviewVersion));
+  const cached = await repo.call('document', selected, 'staged');
+  assert.equal(cached.reviewVersion, initial.reviewVersion);
+  assert.equal(cached.after, 'staged baseline\n');
+
+  await repo.write(other, 'another unrelated revision\n');
+  repo.emit([{ path: other, type: 'update' }]);
+  const unrelated = await repo.waitFor(snapshot => snapshot.revision > first.revision);
+  assert.equal(entry(unrelated).reviewVersion, initial.reviewVersion);
+  assert.notEqual(entry(unrelated, other).reviewVersion, entry(first, other).reviewVersion);
+  assert.equal(entry(await repo.call('refresh')).reviewVersion, initial.reviewVersion);
+
+  const blob = repo.git('hash-object', '-w', other).toString('ascii').trim();
+  repo.git('update-index', '--cacheinfo', `100644,${blob},${selected}`);
+  repo.emit([{ path: '.git/index', type: 'update' }]);
+  const staged = await repo.waitFor(
+    snapshot =>
+      snapshot.revision > unrelated.revision &&
+      entry(snapshot)?.reviewVersion > initial.reviewVersion,
+  );
+  assert.equal(entry(staged).index, initial.index);
+  assert.equal(entry(staged).worktree, initial.worktree);
+  assert.equal(entry(staged, other).reviewVersion, entry(unrelated, other).reviewVersion);
+  const latest = await repo.call('document', selected, 'staged');
+  assert.equal(latest.reviewVersion, entry(staged).reviewVersion);
+  assert.equal(latest.after, 'another unrelated revision\n');
+});
 
 test('editor saves invalidate cached text and sync Git status without waiting for the watcher', async t => {
   const repo = await fixture(t);
@@ -364,6 +404,52 @@ const controlledFallbackSetup = `
         testPort.postMessage({ event: notice });
       });
 `;
+
+test('an outbound rename keeps its live comparison without watching outside the opened folder', async t => {
+  const repo = await fixture(t, {
+    fileCount: 2,
+    scope: 'src',
+    setup: `
+      const { workerData } = await import('node:worker_threads');
+      watcher.subscribe = async directory => {
+        const parent = workerData.directory.slice(0, workerData.directory.lastIndexOf('/'));
+        if (directory === parent) throw new Error('Test must not watch the repository root');
+        return { unsubscribe: async () => {} };
+      };
+      const timeout = globalThis.setTimeout;
+      let poll;
+      globalThis.setTimeout = (callback, milliseconds, ...args) => {
+        if (milliseconds !== 2000) return timeout(callback, milliseconds, ...args);
+        const timer = timeout(() => {}, 60000);
+        poll = () => { clearTimeout(timer); void callback(...args); };
+        return timer;
+      };
+      testPort.on('message', message => {
+        if (message.testPoll) poll();
+      });
+    `,
+  });
+  repo.git('mv', 'src/file0.txt', 'outside.txt');
+  const snapshot = await repo.call('refresh');
+  const outbound = snapshot.files.find(file => file.path === 'outside.txt');
+  assert.equal(outbound.originalPath, 'src/file0.txt');
+  assert.equal(snapshot.watchError, undefined);
+  const before = await repo.call('document', 'outside.txt', 'head');
+  assert.equal(before.after, 'baseline 0\n');
+  assert.equal(before.editable, false);
+  await repo.write('outside.txt', 'edited after the move\n');
+  repo.signal({ testPoll: true });
+  await repo.waitFor(next =>
+    next.files.some(
+      file => file.path === outbound.path && file.reviewVersion > outbound.reviewVersion,
+    ),
+  );
+  assert.ok(repo.pathEvents.includes('outside.txt'));
+  assert.equal(
+    (await repo.call('document', 'outside.txt', 'head')).after,
+    'edited after the move\n',
+  );
+});
 
 test('quiet fallback polls retain caches while content, ignored files and inventory changes stay live', async t => {
   const repo = await fixture(t, {

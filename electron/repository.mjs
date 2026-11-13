@@ -652,6 +652,7 @@ function parseStatus(bytes) {
         worktree: '?',
         conflicted: false,
         submodule: false,
+        statusKey: '?',
       };
     } else if (['1', '2', 'u'].includes(record[0])) {
       const count = record[0] === '1' ? 9 : record[0] === '2' ? 10 : 11;
@@ -666,14 +667,21 @@ function parseStatus(bytes) {
         worktree: fields[1][1] === '.' ? ' ' : fields[1][1],
         conflicted: record[0] === 'u',
         submodule: fields[2][0] === 'S',
+        // Modes and blob IDs change even when the displayed status letters stay the same.
+        statusKey: `${fields.slice(0, -1).join(' ')}\0${originalPath ?? ''}`,
       };
     } else throw new Error('Unknown porcelain v2 Git status record.');
     validatePath(file.path);
     const existing = files.get(file.path);
     // A staged deletion recreated in the worktree appears again as untracked.
-    if (existing && file.index === '?') existing.worktree = '?';
-    else {
-      if (existing) file.worktree = '?';
+    if (existing && file.index === '?') {
+      existing.worktree = '?';
+      existing.statusKey += '\0?';
+    } else {
+      if (existing) {
+        file.worktree = '?';
+        file.statusKey += '\0?';
+      }
       files.set(file.path, file);
     }
   }

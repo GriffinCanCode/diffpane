@@ -1,0 +1,179 @@
+.review-hunk-bar {
+  --review-hunk-accent: #a4d0d1;
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  min-height: 42px;
+  padding: 6px 14px;
+  border-top: 1px solid var(--line);
+  background: #1d2020;
+  color: #acb4b4;
+  font-size: 11px;
+  user-select: none;
+}
+
+.review-hunk-summary,
+.review-hunk-navigation,
+.review-hunk-modes {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.review-hunk-summary {
+  gap: 6px;
+}
+
+.review-hunk-summary svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  color: var(--review-hunk-accent);
+}
+
+.review-hunk-position {
+  color: var(--review-hunk-accent);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.review-hunk-caption {
+  color: #acb4b4;
+}
+
+.review-hunk-navigation {
+  gap: 2px;
+}
+
+.review-hunk-modes {
+  gap: 2px;
+  margin-inline-start: auto;
+  padding: 2px;
+  border: 1px solid #343b3b;
+  border-radius: 6px;
+  background: #161818;
+}
+
+.review-hunk-bar button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 22px;
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: #b7c0c0;
+  font-size: inherit;
+  font-weight: 550;
+  line-height: 1.2;
+}
+
+.review-hunk-navigation button {
+  width: 26px;
+  min-height: 26px;
+  padding: 2px;
+}
+
+.review-hunk-navigation button svg {
+  width: 14px;
+  height: 14px;
+}
+
+.review-hunk-bar button:not(:disabled, [aria-disabled='true']):hover {
+  background: #2b3232;
+  color: #eff5f4;
+}
+
+.review-hunk-bar button[aria-pressed='true'] {
+  border-color: #405657;
+  background: #293b3b;
+  color: #d6eeee;
+}
+
+.review-hunk-bar button:focus-visible {
+  outline: 2px solid var(--review-hunk-accent);
+  outline-offset: 1px;
+}
+
+.review-hunk-bar button:is(:disabled, [aria-disabled='true']) {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.comparison-labels .comparison-inline {
+  display: none;
+}
+
+@media (max-width: 800px) {
+  #sidebar:has(.change-review:not([hidden])) {
+    max-width: 36vw;
+  }
+}
+
+.file-card[data-review-scope]:has(.monaco-diff-editor:not(.side-by-side)) .comparison-labels {
+  grid-template-columns: minmax(0, 1fr);
+
+  .comparison-original,
+  .comparison-working {
+    display: none;
+  }
+
+  .comparison-inline {
+    display: block;
+    border-inline-start: 0;
+  }
+}
+
+@container (max-width: 380px) {
+  .review-hunk-bar {
+    gap: 5px 6px;
+    padding-inline: 9px;
+  }
+
+  .review-hunk-summary {
+    gap: 4px;
+  }
+
+  .review-hunk-modes button {
+    padding-inline: 6px;
+  }
+}
+
+@container (max-width: 300px) {
+  .review-hunk-summary svg {
+    display: none;
+  }
+}
+
+.file-card[data-review-scope] .monaco-diff-editor .line-insert {
+  background: #6fb99822 !important;
+}
+
+.file-card[data-review-scope] .monaco-diff-editor .line-delete {
+  background: #cf787624 !important;
+}
+
+.file-card[data-review-scope] .monaco-editor .review-hunk-active {
+  box-shadow: inset 2px 0 #a4d0d1;
+}
+
+.file-card[data-review-scope='focus'] .monaco-editor .diff-hidden-lines .center {
+  background: #222828;
+  color: #a8b8b8;
+  box-shadow:
+    inset 0 1px #89b6b51f,
+    inset 0 -1px #89b6b51f;
+  font-size: 11px;
+}
+
+.file-card[data-review-scope='focus']
+  .monaco-editor
+  .diff-hidden-lines
+  .center:is(:hover, :focus-within) {
+  background: #293333;
+  color: #d5e5e5;
+}

@@ -1,0 +1,1 @@
+Changes opens text comparisons at the first edit and collapses long stretches of unchanged code. Jump between edits or switch to the full file. Narrow windows show removed and added lines together in one column.
