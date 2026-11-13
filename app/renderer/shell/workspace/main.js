@@ -7,6 +7,7 @@ import 'monaco-editor/editor/contrib/contextmenu/browser/contextmenu.js'
 import 'monaco-editor/editor/contrib/hover/browser/hoverContribution.js'
 // oxlint-disable-next-line import/default -- Vite generates the worker constructor for ?worker imports.
 import EditorWorker from 'monaco-editor/editor/editor.worker.js?worker'
+import { colorHex } from '../../../shared/appearance/palette.ts'
 import { mediaType } from '../../../shared/documents/media-types.ts'
 import {
   ariaBinding,
@@ -325,6 +326,12 @@ const appearance = createAppearanceSettings(uiPreferences, (preferences, scheme)
     } else card.editor?.updateOptions(codeAppearance(preferences))
   }
 })
+
+const overviewRulerColors = {
+  added: { color: colorHex('light', 'addedEdge'), darkColor: colorHex('dark', 'addedEdge') },
+  modified: { color: colorHex('light', 'modifiedEdge'), darkColor: colorHex('dark', 'modifiedEdge') },
+  deleted: { color: colorHex('light', 'removedEdge'), darkColor: colorHex('dark', 'removedEdge') },
+}
 
 const settings =
   shortcutApi &&
@@ -1680,7 +1687,9 @@ function renderDocument(card, document) {
   button.hidden = false
   button.setAttribute('aria-pressed', String(card.comparing))
   button.title = card.comparing ? 'Show current file' : 'Compare whole file'
+  button.setAttribute('aria-label', button.title)
   card.element.dataset.diff = String(card.comparing)
+  card.element.dataset.view = preview ? 'document' : reading ? 'markdown' : 'source'
   const labels = requireElement(card.element, '.comparison-labels', HTMLElement)
   labels.hidden = !card.comparing || Boolean(preview)
   for (const label of labels.querySelectorAll('.is-original')) label.textContent = baseline
@@ -1858,7 +1867,7 @@ function renderDocument(card, document) {
         linesDecorationsClassName: `diff-gutter-${kind}`,
         linesDecorationsTooltip: `${kind === 'deleted' ? 'Lines deleted' : kind === 'modified' ? 'Lines modified' : 'Lines added'} compared with ${baseline}`,
         overviewRuler: {
-          color: { deleted: '#ac6266', modified: '#477d92', added: '#52785b' }[kind],
+          ...overviewRulerColors[kind],
           position: monaco.editor.OverviewRulerLane.Left,
         },
         stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
@@ -2344,7 +2353,7 @@ async function highlightFunctions(card) {
       range: new monaco.Range(change.startLine, 1, change.endLine ?? change.startLine, 1),
       options: {
         linesDecorationsClassName: `diff-gutter-${change.kind}`,
-        overviewRuler: { color: '#ac6266', position: monaco.editor.OverviewRulerLane.Left },
+        overviewRuler: { ...overviewRulerColors.deleted, position: monaco.editor.OverviewRulerLane.Left },
       },
     }))
     card.originalDecorations.set([...functionDecorations(original, 'before'), ...markers])

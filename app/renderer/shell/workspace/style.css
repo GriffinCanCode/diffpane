@@ -61,7 +61,7 @@ button svg,
   display: inline-flex;
   width: 22px;
   height: 22px;
-  color: light-dark(#596871, #b8b8b8);
+  color: var(--muted);
 }
 .title-divider {
   width: 1px;
@@ -505,13 +505,6 @@ button svg,
   height: 100%;
 }
 .file-card {
-  --comparison-base: light-dark(#963e3d, #dda49d);
-  --comparison-working: light-dark(#2b6c4f, #a9d4b8);
-  --comparison-base-surface: light-dark(#fbefee, #251e1e);
-  --comparison-working-surface: light-dark(#eaf4ee, #1c241f);
-  --comparison-active-surface: light-dark(#e0efe6, #28342c);
-  --comparison-active-hover: light-dark(#d6e9de, #314036);
-  --comparison-active-text: light-dark(#2b5e49, #d7ebdd);
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -520,31 +513,21 @@ button svg,
 }
 .file-header {
   position: relative;
-  min-height: 36px;
-  padding: 0 15px;
+  min-height: 46px;
+  padding: 5px 12px 4px 15px;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 7px;
   flex-shrink: 0;
-  background: linear-gradient(160deg, var(--surface), var(--workbench-background));
-  box-shadow: inset 0 -1px color-mix(in oklab, var(--line) 70%, transparent);
-}
-.file-card[data-diff='true'] .file-header {
-  min-height: 46px;
-  background: var(--surface);
-  border-bottom: 1px solid var(--line);
-  box-shadow: none;
+  background: var(--workbench-background);
 }
 .file-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  width: 22px;
-  height: 22px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: linear-gradient(150deg, var(--surface-raised), var(--surface));
+  width: 16px;
+  height: 16px;
 }
 .file-icon svg,
 .file-icon img {
@@ -553,9 +536,10 @@ button svg,
 }
 .file-path {
   display: flex;
+  flex-direction: column;
   flex: 1;
   min-width: 0;
-  font-size: 13px;
+  line-height: 1.17;
   white-space: nowrap;
   overflow: hidden;
 }
@@ -565,29 +549,22 @@ button svg,
   text-overflow: ellipsis;
 }
 .file-directory {
-  color: light-dark(#53616d, #909090);
-}
-.file-name {
-  color: light-dark(#2d343c, #e2e0db);
-  font-weight: 550;
-}
-.file-card[data-diff='true'] .file-path {
-  flex-direction: column-reverse;
-  gap: 2px;
-  line-height: 1.15;
-}
-.file-card[data-diff='true'] .file-directory {
-  color: light-dark(#58646c, #a5a39e);
-  font-size: 10px;
+  color: var(--muted);
+  font-size: var(--text-caption);
 }
 .file-directory:empty {
   display: none;
+}
+.file-name {
+  color: var(--text);
+  font-size: var(--text-subheading);
+  font-weight: var(--weight-semibold);
 }
 .file-actions {
   display: flex;
   align-items: center;
   flex: 0 0 auto;
-  gap: 5px;
+  gap: 3px;
 }
 .change-button {
   display: inline-flex;
@@ -595,9 +572,10 @@ button svg,
   justify-content: center;
   border: 0;
   background: none;
-  width: 24px;
-  height: 25px;
-  color: light-dark(#53616d, #a9a8a3);
+  width: 26px;
+  min-height: 26px;
+  padding: 0;
+  color: var(--muted);
   border-radius: 5px;
 }
 .change-button:hover:not(:disabled) {
@@ -609,66 +587,103 @@ button svg,
   height: 14px;
 }
 .diff-toggle {
-  gap: 5px;
+  gap: 4px;
   width: auto;
   padding: 0 7px;
-  border: 1px solid light-dark(#202e4033, #ffffff16);
-  font-size: 11px;
-  font-weight: 550;
+  font-size: var(--text-caption);
+  font-weight: var(--weight-semibold);
+  white-space: nowrap;
 }
 .diff-toggle[aria-pressed='true'] {
-  border-color: color-mix(in srgb, var(--comparison-working) 25%, transparent);
-  background: var(--comparison-active-surface);
-  color: var(--comparison-active-text);
+  background: var(--selection);
+  color: var(--accent);
 }
-.diff-toggle[aria-pressed='true']:hover {
-  background: var(--comparison-active-hover);
-}
-.diff-toggle[aria-pressed='true'] svg {
-  color: var(--comparison-working);
+.file-card[data-view='source'][data-diff='false'] {
+  .file-header {
+    min-height: 36px;
+    padding-block: 2px;
+  }
+
+  .file-path {
+    flex-direction: row;
+    font-size: var(--text-body);
+  }
+
+  .file-directory {
+    flex-shrink: 1;
+    color: var(--editor-chrome);
+    font-size: inherit;
+  }
+
+  .file-name {
+    flex: 0 1 auto;
+    color: var(--editor-text);
+    font-size: inherit;
+    font-weight: var(--weight-regular);
+  }
+
+  .diff-toggle {
+    width: 26px;
+    padding: 0;
+  }
+
+  .diff-toggle span {
+    display: none;
+  }
+
+  .change-button:not(:hover),
+  .symbol-outline:not([open]) summary:not(:hover) {
+    color: var(--editor-chrome-icon);
+  }
+
+  .howmany-counts {
+    color: var(--editor-chrome);
+  }
+
+  .file-footer {
+  border-color: var(--editor-separator);
+  color: var(--editor-chrome);
 }
 .file-note {
   padding: 8px 18px;
   color: var(--muted);
   border-bottom: 1px solid var(--line);
-  font-size: 11px;
+  font-size: var(--text-caption);
   line-height: 1.6;
   flex-shrink: 0;
 }
 .comparison-labels {
-  display: grid;
+  display: none;
   grid-template-columns: var(--original-width, 50%) minmax(0, 1fr);
   flex-shrink: 0;
-  border-bottom: 1px solid var(--line);
-  font-size: 11.5px;
+  font-size: var(--text-caption);
   user-select: none;
 }
+.file-card:has(.monaco-diff-editor.side-by-side) .comparison-labels:not([hidden]) {
+  display: grid;
+}
 .comparison-original,
-.comparison-working,
-.comparison-inline {
+.comparison-working {
   display: flex;
   align-items: center;
   min-width: 0;
-  min-height: 33px;
-  padding: 0 14px;
+  min-height: 22px;
+  padding: 0 12px;
   overflow: hidden;
   white-space: nowrap;
 }
 .comparison-original {
-  background: linear-gradient(112deg, var(--comparison-base-surface), var(--surface));
-  box-shadow: inset 0 1px color-mix(in srgb, var(--comparison-base) 28%, transparent);
+  background: color-mix(in oklab, var(--comparison-base-surface) 65%, var(--workbench-background));
 }
 .comparison-working {
-  border-inline-start: 1px solid var(--line);
-  background: linear-gradient(112deg, var(--comparison-working-surface), var(--surface));
-  box-shadow: inset 0 1px color-mix(in srgb, var(--comparison-working) 28%, transparent);
+  background: color-mix(in oklab, var(--comparison-working-surface) 65%, var(--workbench-background));
 }
 .comparison-version {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 5px;
   color: var(--version-color);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 .comparison-version.is-original {
   --version-color: var(--comparison-base);
@@ -677,49 +692,10 @@ button svg,
   --version-color: var(--comparison-working);
 }
 .comparison-version::before {
-  box-sizing: border-box;
-  display: block;
-  width: 16px;
-  height: 16px;
-  flex: 0 0 auto;
-  border: 1px solid color-mix(in srgb, currentColor 24%, transparent);
-  border-radius: 4px;
-  background: linear-gradient(currentColor, currentColor) center / 8px 1px no-repeat;
-  background-color: color-mix(in srgb, currentColor 8%, transparent);
-  box-shadow: 0 1px 0 color-mix(in oklab, currentColor 15%, transparent);
-  content: '';
+  content: '−' / '';
 }
 .comparison-version.is-working::before {
-  background-image: linear-gradient(currentColor, currentColor), linear-gradient(currentColor, currentColor);
-  background-size:
-    8px 1px,
-    1px 8px;
-}
-.comparison-inline {
-  display: none;
-  gap: 9px;
-  border-top: 1px solid var(--line);
-  background: light-dark(#f4f6f7, #20201f);
-}
-.file-card:has(.monaco-diff-editor:not(.side-by-side)) .comparison-labels {
-  grid-template-columns: minmax(0, 1fr);
-
-  .comparison-original,
-  .comparison-working {
-    display: none;
-  }
-
-  .comparison-inline {
-    display: flex;
-  }
-}
-.comparison-arrow,
-.comparison-layout {
-  color: light-dark(#58646c, #a5a39e);
-}
-.comparison-layout {
-  margin-inline-start: auto;
-  font-size: 10px;
+  content: '+' / '';
 }
 .editor-host {
   flex: 1;
@@ -729,10 +705,10 @@ button svg,
   contain: strict;
 }
 .editor-placeholder {
-  --placeholder-row: var(--editor-line-height, 22px);
+  --placeholder-row: var(--editor-line-height, var(--editor-default-line-height));
   --placeholder-top: calc(14px + (var(--placeholder-row) - 6px) / 2);
-  --loading-track: light-dark(#e9eeee, #242b2b);
-  --loading-highlight: light-dark(#c7dbd9, #39514f);
+  --loading-track: var(--surface-raised);
+  --loading-highlight: var(--accent-surface);
   position: relative;
   max-width: 660px;
   padding: var(--placeholder-top) 16px 0 68px;
@@ -811,7 +787,7 @@ button svg,
   cursor: zoom-in;
 }
 .media-image-toggle:focus-visible .media-content {
-  outline: 2px solid light-dark(#346e97, #748aaf);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 4px;
 }
 .media-actual-size {
@@ -832,10 +808,11 @@ button svg,
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 8px;
   padding: 0 15px;
-  border-top: 1px solid light-dark(#2436470b, #ffffff06);
-  color: light-dark(#58646d, #666);
-  font-size: 10px;
+  border-top: 1px solid var(--line);
+  color: var(--subtle);
+  font-size: var(--text-caption);
 }
 .monaco-editor .diff-gutter-added,
 .monaco-editor .diff-gutter-modified {
@@ -843,10 +820,11 @@ button svg,
   margin-left: 3px;
 }
 .monaco-editor .diff-gutter-added {
-  border-color: light-dark(#4c8d67, oklch(54% 0.055 150));
+  border-color: var(--added-edge);
 }
 .monaco-editor .diff-gutter-modified {
-  border-color: light-dark(#247aa0, #1b81a8);
+  border-color: var(--modified-edge);
+  border-left-style: dashed;
 }
 .monaco-editor .diff-gutter-deleted::before {
   content: '';
@@ -855,13 +833,25 @@ button svg,
   left: 0;
   border-top: 4px solid transparent;
   border-bottom: 4px solid transparent;
-  border-left: 6px solid light-dark(#b53d49, #f14c4c);
+  border-left: 6px solid var(--removed-edge);
+}
+.monaco-diff-editor .insert-sign {
+  color: var(--added);
+}
+.monaco-diff-editor .delete-sign {
+  color: var(--removed);
 }
 .monaco-editor .margin-view-overlays .current-line-margin {
   border: 0;
 }
 .monaco-editor .scroll-decoration {
   box-shadow: none !important;
+}
+.monaco-editor .view-line span.currentFindMatchInline {
+  color: var(--match-text);
+}
+.monaco-editor .view-line span.findMatchInline {
+  color: var(--warning);
 }
 
 .empty-state {
@@ -961,12 +951,12 @@ button svg,
 }
 
 .symbol-outline summary {
-  cursor: pointer;
-  font-size: 10px;
-  color: light-dark(#53616d, #a9a8a3);
-  list-style: none;
   padding: 5px 7px;
   border-radius: 4px;
+  color: var(--muted);
+  font-size: var(--text-caption);
+  list-style: none;
+  cursor: pointer;
 }
 .symbol-outline summary:hover,
 .symbol-outline[open] summary {
@@ -974,9 +964,9 @@ button svg,
   color: var(--text);
 }
 .symbol-outline summary::after {
-  content: '⌄';
-  margin-left: 5px;
+  margin-inline-start: 5px;
   color: var(--subtle);
+  content: '⌄' / '';
 }
 .symbol-list {
   position: absolute;
@@ -987,10 +977,10 @@ button svg,
   max-height: 310px;
   overflow: auto;
   padding: 5px;
-  background: light-dark(#fff, oklch(23% 0.009 265));
-  border: 1px solid light-dark(#202e4030, oklch(100% 0 0 / 0.12));
+  background: var(--surface);
+  border: 1px solid var(--line);
   border-radius: 7px;
-  box-shadow: 0 12px 40px light-dark(#26374738, #0008);
+  box-shadow: 0 12px 40px var(--shadow);
 }
 .symbol-item {
   display: block;
@@ -1000,24 +990,26 @@ button svg,
   background: none;
   padding: 7px 12px;
   border-radius: 4px;
-  font-size: 11px;
+  font-size: var(--text-caption);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .symbol-item:hover {
-  background: light-dark(#edf3f8, oklch(34% 0.025 255));
+  background: var(--hover);
 }
 .symbol-empty {
   display: block;
-  font-size: 11px;
+  font-size: var(--text-caption);
   color: var(--muted);
   padding: 10px;
 }
 .language-meta {
   display: inline-flex;
   align-items: center;
-  gap: 12px;
+  flex-shrink: 0;
+  gap: 8px;
+  white-space: nowrap;
 }
 .language-state {
   color: var(--subtle);
@@ -1026,7 +1018,7 @@ button svg,
   color: var(--muted);
 }
 .language-state[data-status='starting'] {
-  color: light-dark(#7b571b, oklch(72% 0.06 85));
+  color: var(--warning);
 }
 .file-picker {
   padding: 0;
@@ -1364,10 +1356,10 @@ button svg,
 }
 
 .monaco-editor .diff-function-before {
-  background: light-dark(#ba646314, #ac62660c);
+  background: var(--removed-surface);
 }
 .monaco-editor .diff-function-after {
-  background: light-dark(#52946c14, #52785b0c);
+  background: var(--added-surface);
 }
 /* Whole-file comparison keeps syntax colors, with emphasis at function scope only. */
 .monaco-diff-editor.side-by-side :is(.char-insert, .char-delete, .line-insert, .line-delete) {
@@ -1375,14 +1367,14 @@ button svg,
 }
 
 .monaco-diff-editor:not(.side-by-side) .line-insert {
-  background: light-dark(#e6f4ea, #23342a);
+  background: var(--added-surface);
 }
 .monaco-diff-editor:not(.side-by-side) .line-delete {
-  background: light-dark(#faecea, #382626);
+  background: var(--removed-surface);
 }
 .monaco-diff-editor:not(.side-by-side) .char-insert {
-  background: light-dark(#c7e9d1, #34543f);
+  background: var(--added-inline);
 }
 .monaco-diff-editor:not(.side-by-side) .char-delete {
-  background: light-dark(#f1cdc9, #5a3635);
+  background: var(--removed-inline);
 }
