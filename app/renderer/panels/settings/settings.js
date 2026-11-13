@@ -205,6 +205,7 @@ export function createSettings({ appearance, platform, getBindings, setBinding, 
     const reset = createButton('settings-button settings-reset', 'Reset', `Reset ${label} shortcut`)
     change.addEventListener('click', () => record(action))
     reset.addEventListener('click', () => {
+      if (pending) return
       stopRecording()
       runTask('Reset shortcut', () => update(() => setBinding(action, null), `${label} shortcut reset.`))
     })
@@ -245,9 +246,10 @@ export function createSettings({ appearance, platform, getBindings, setBinding, 
     resetAllButton.hidden = Boolean(recording)
   }
 
-  function showStatus(message = '', error = false) {
+  /** @param {string} [message] @param {'info' | 'success' | 'error'} [tone] */
+  function showStatus(message = '', tone = 'info') {
+    status.dataset.tone = tone
     status.textContent = message
-    status.classList.toggle('is-error', error)
   }
 
   /** @param {ShortcutAction} action */
@@ -286,10 +288,10 @@ export function createSettings({ appearance, platform, getBindings, setBinding, 
       const result = await attemptAsync(apply, { operation: 'Save shortcut settings' })
       if (!result.ok) {
         reportError(result.error, { silent: true })
-        if (version === openVersion) showStatus(result.error.message, true)
+        if (version === openVersion) showStatus(result.error.message, 'error')
       } else if (version === openVersion) {
         stopRecording()
-        showStatus(message)
+        showStatus(message, 'success')
       }
     } finally {
       pending = false
@@ -324,7 +326,7 @@ export function createSettings({ appearance, platform, getBindings, setBinding, 
           if (!retried.ok) throw retried.error
         },
       })
-      if (current && active) showStatus(result.error.message, true)
+      if (current && active) showStatus(result.error.message, 'error')
     } else if (version === openVersion && active) {
       captureReady = true
       refresh()
@@ -405,17 +407,17 @@ export function createSettings({ appearance, platform, getBindings, setBinding, 
     if (pending || event.repeat || ['Meta', 'Control', 'Alt', 'AltGraph', 'Shift'].includes(event.key)) return
     const binding = bindingFromEvent(event, isMac)
     if (!binding) {
-      showStatus('Use Command, Control, or Alt with a key, or press a function key.', true)
+      showStatus('Use Command, Control, or Alt with a key, or press a function key.', 'error')
       return
     }
     const action = recording
     if (shortcuts[action].scope === 'native' && !electronAccelerator(binding, isMac)) {
-      showStatus('Choose a different key combination for this menu command.', true)
+      showStatus('Choose a different key combination for this menu command.', 'error')
       return
     }
     const conflict = shortcutConflict(action, binding, getBindings(), platform)
     if (conflict) {
-      showStatus(`${keyNamesFor(binding).join(' + ')} is already used by ${conflict}.`, true)
+      showStatus(`${keyNamesFor(binding).join(' + ')} is already used by ${conflict}.`, 'error')
       return
     }
     runTask('Save shortcut', () =>

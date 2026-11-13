@@ -4,18 +4,18 @@ import {
   minFontSize as MIN_FONT_SIZE,
 } from '../../../electron/persistence/preferences/ui-preferences.ts'
 import type { Appearance } from '../../../electron/persistence/preferences/ui-preferences.ts'
+import type { ColorScheme } from '../../../shared/appearance/palette.ts'
+import { editorDefaultLineHeight, editorDefaultSize, monoFont } from '../../../shared/appearance/typography.ts'
 import { requireElement } from '../../shell/workspace/dom.js'
 import type { UiPreferenceController } from './ui-preferences.ts'
 import './appearance.css'
 
 const FONTS = {
-  system: '"SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+  system: monoFont,
   menlo: 'Menlo, Consolas, monospace',
   monaco: 'Monaco, "Lucida Console", monospace',
   courier: '"Courier New", Courier, monospace',
 }
-
-type ColorScheme = 'light' | 'dark'
 
 function isAppearanceField(value: string): value is keyof Appearance {
   return (
@@ -32,7 +32,7 @@ export function codeAppearance(settings: Appearance, review = false) {
   return {
     fontFamily: FONTS[settings.font],
     fontSize: settings.fontSize,
-    lineHeight: Math.round((settings.fontSize * 22) / 14),
+    lineHeight: Math.round((settings.fontSize * editorDefaultLineHeight) / editorDefaultSize),
     wordWrap:
       settings.wordWrap === 'on' || (settings.wordWrap === 'automatic' && review) ? ('on' as const) : ('off' as const),
     lineNumbers: settings.lineNumbers ? ('on' as const) : ('off' as const),
@@ -66,7 +66,7 @@ const LAYOUT_CHOICES = [
   ['inline', 'Inline', svg('<rect x="2.5" y="4" width="15" height="12" rx="2"/><path d="M5.5 8h6m-6 4h9"/>')],
 ]
 
-function themeArtwork(scheme: string) {
+function themeArtwork(scheme: ColorScheme) {
   return `
       <span class="appearance-theme-artwork" data-scheme="${scheme}">
         <span class="appearance-mini-window">
@@ -78,10 +78,10 @@ function themeArtwork(scheme: string) {
 `
 }
 
-function themeCard(value: string, label: string) {
+function themeCard(value: Appearance['theme'], label: string) {
   return `
   <label class="appearance-theme-choice">
-    <input type="radio" name="theme" value="${value}">
+    <input type="radio" name="theme" value="${value}"${value === 'system' ? ' aria-description="Follows your device appearance."' : ''}>
     <span class="appearance-theme-card">
       <span class="appearance-theme-art" aria-hidden="true">
         ${value === 'system' ? `${themeArtwork('light')}${themeArtwork('dark')}` : themeArtwork(value)}
@@ -153,13 +153,13 @@ export function createAppearanceSettings(
                 <label for="appearance-line-numbers">Line numbers</label>
                 <input class="appearance-switch" type="checkbox" role="switch" name="lineNumbers" id="appearance-line-numbers">
               </div>
-              <figure class="appearance-preview">
-                <figcaption><span>Editor preview</span><span>example.ts</span></figcaption>
+              <figure class="appearance-preview" aria-labelledby="appearance-preview-title">
+                <figcaption><span id="appearance-preview-title">Editor preview</span><span>example.ts</span></figcaption>
                 <div class="appearance-preview-code">
-                  <div class="appearance-preview-row"><span class="appearance-preview-number" aria-hidden="true">1</span><code><b>const</b> title = <em>'Diffpane'</em>;</code></div>
-                  <div class="appearance-preview-row"><span class="appearance-preview-number" aria-hidden="true">2</span><code></code></div>
-                  <div class="appearance-preview-row"><span class="appearance-preview-number" aria-hidden="true">3</span><code><i>// A quiet view of your changes</i></code></div>
-                  <div class="appearance-preview-row"><span class="appearance-preview-number" aria-hidden="true">4</span><code><b>export</b> { title };</code></div>
+                  <div class="appearance-preview-row"><span class="appearance-preview-number" aria-hidden="true">1</span><code><b>const</b> context = <span class="appearance-preview-value">3</span></code></div>
+                  <div class="appearance-preview-row"><span class="appearance-preview-number" aria-hidden="true">2</span><code><b>const</b> title = <em>'Review changes'</em></code></div>
+                  <div class="appearance-preview-row"><span class="appearance-preview-number" aria-hidden="true">3</span><code><i>// Keep nearby lines visible while reviewing changes.</i></code></div>
+                  <div class="appearance-preview-row"><span class="appearance-preview-number" aria-hidden="true">4</span><code><b>export</b> { context, title }</code></div>
                 </div>
               </figure>
             </div>
@@ -194,7 +194,7 @@ export function createAppearanceSettings(
     decrease.disabled = value.fontSize <= MIN_FONT_SIZE
     increase.disabled = value.fontSize >= MAX_FONT_SIZE
     reset.disabled = Object.keys(DEFAULTS).every(field => isAppearanceField(field) && value[field] === DEFAULTS[field])
-    preview.dataset.wrap = value.wordWrap
+    preview.dataset.wrap = codeAppearance(value).wordWrap
     preview.dataset.lineNumbers = String(value.lineNumbers)
   }
 
@@ -242,8 +242,14 @@ export function createAppearanceSettings(
       })
     }
   })
-  decrease.addEventListener('click', () => update({ fontSize: value.fontSize - 1 }))
-  increase.addEventListener('click', () => update({ fontSize: value.fontSize + 1 }))
+  function stepSize(step: -1 | 1, button: HTMLButtonElement) {
+    const fontSize = value.fontSize + step
+    if (document.activeElement === button && (fontSize === MIN_FONT_SIZE || fontSize === MAX_FONT_SIZE)) size.focus()
+    update({ fontSize })
+  }
+
+  decrease.addEventListener('click', () => stepSize(-1, decrease))
+  increase.addEventListener('click', () => stepSize(1, increase))
   reset.addEventListener('click', () => {
     update(DEFAULTS)
     done.focus()

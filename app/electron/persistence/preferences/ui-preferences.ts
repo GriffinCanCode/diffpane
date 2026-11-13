@@ -1,3 +1,5 @@
+import { editorDefaultSize } from '../../../shared/appearance/typography.ts'
+
 const themes = ['dark', 'light', 'system'] as const
 const diffLayouts = ['automatic', 'split', 'inline'] as const
 const wrapModes = ['automatic', 'on', 'off'] as const
@@ -18,7 +20,7 @@ export const defaultAppearance: Appearance = {
   theme: 'dark',
   layout: 'automatic',
   font: 'system',
-  fontSize: 14,
+  fontSize: editorDefaultSize,
   wordWrap: 'automatic',
   lineNumbers: true,
 }
