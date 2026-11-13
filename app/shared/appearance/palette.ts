@@ -10,7 +10,7 @@ export const colorPairs = {
   workbenchBackground: ['oklch(100% 0 0)', 'oklch(20.904% 0 0)'],
   text: ['oklch(23.5% 0.026 255)', 'oklch(93.403% 0 0)'],
   muted: ['oklch(37% 0.035 255)', 'oklch(78.26% 0 0)'],
-  subtle: ['oklch(45.6% 0.034 255)', 'oklch(71.5% 0 0)'],
+  subtle: ['oklch(45.6% 0.034 255)', 'oklch(73% 0 0)'],
   line: ['oklch(88.4% 0.015 255)', 'oklch(34.07% 0 0)'],
   controlBorder: ['oklch(59% 0.031 255)', 'oklch(62% 0 0)'],
   hover: ['oklch(94.3% 0.012 255)', 'oklch(28.908% 0 0)'],

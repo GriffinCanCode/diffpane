@@ -9,6 +9,7 @@ doc_radar:
 
 Electron and the renderer share these contracts and pure operations. The preload uses their types at the IPC boundary, and Node tests exercise the same implementations as the app.
 
+- [Appearance](appearance/README.md) defines the OKLCH palette and typography tokens.
 - [Documents](documents/README.md) defines media types and bounded text operations.
 - [Ideas](ideas/README.md) defines notebook records and edits.
 - [Preferences](preferences/README.md) defines keyboard shortcut bindings.

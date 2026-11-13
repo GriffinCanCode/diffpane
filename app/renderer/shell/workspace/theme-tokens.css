@@ -7,7 +7,7 @@
   --workbench-background: light-dark(oklch(100% 0 0), oklch(20.904% 0 0));
   --text: light-dark(oklch(23.5% 0.026 255), oklch(93.403% 0 0));
   --muted: light-dark(oklch(37% 0.035 255), oklch(78.26% 0 0));
-  --subtle: light-dark(oklch(45.6% 0.034 255), oklch(71.5% 0 0));
+  --subtle: light-dark(oklch(45.6% 0.034 255), oklch(73% 0 0));
   --line: light-dark(oklch(88.4% 0.015 255), oklch(34.07% 0 0));
   --control-border: light-dark(oklch(59% 0.031 255), oklch(62% 0 0));
   --hover: light-dark(oklch(94.3% 0.012 255), oklch(28.908% 0 0));
