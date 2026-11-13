@@ -228,9 +228,11 @@ export function createAppearanceSettings(
   form.addEventListener('change', event => {
     const field = event.target
     if (field === size) {
-      update({
-        fontSize: Number.isFinite(size.valueAsNumber) ? size.valueAsNumber : value.fontSize,
-      })
+      const fontSize = Number.isFinite(size.valueAsNumber)
+        ? Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, Math.round(size.valueAsNumber)))
+        : value.fontSize
+      size.value = String(fontSize)
+      if (fontSize !== value.fontSize) update({ fontSize })
     } else if (
       (field instanceof HTMLInputElement || field instanceof HTMLSelectElement) &&
       isAppearanceField(field.name)
