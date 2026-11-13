@@ -85,7 +85,7 @@ npm run build     # build the renderer
 npm run verify    # check formatting, lint, types, tests, and build
 ```
 
-Run `make -f app/tooling/commands/Makefile <target>` from the repository root to use the Make targets.
+Run `make <target>` from the repository root to use the Make targets.
 
 ## Repository layout
 
