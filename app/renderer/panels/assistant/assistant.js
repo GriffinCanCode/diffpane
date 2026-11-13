@@ -564,6 +564,7 @@ export function createAssistant(
     if (activeSend) {
       for (const paragraph of activeSend.paragraphs.values()) window.clearTimeout(paragraph.frame)
       activeSend = null
+      busy = ''
     }
     pending = null
     promptInput.value = ''
@@ -587,6 +588,7 @@ export function createAssistant(
   async function updateKey(save) {
     if (checking || busy || changingKey || (save ? saveKey.disabled : removeKey.disabled)) return
     const key = keyInput.value.trim()
+    const generation = connectionGeneration
     keyInput.value = ''
     changingKey = true
     showNotice(settingsNotice)
@@ -597,7 +599,7 @@ export function createAssistant(
       })
       if (listeners.signal.aborted) return
       if (result.ok) {
-        connection = result.value
+        if (generation === connectionGeneration) connection = result.value
         settingsNotice.classList.remove('is-error')
         showNotice(settingsNotice, save ? 'API key saved.' : 'API key removed.')
       } else {
@@ -678,15 +680,17 @@ export function createAssistant(
         if (!paragraph.complete) drawReply(paragraph, false)
       }
     } finally {
-      const focused = composer.contains(document.activeElement) || document.activeElement === document.body
-      if (activeSend === state) activeSend = null
-      busy = ''
-      render()
-      resizeDraft()
-      updateScroll()
-      if (!listeners.signal.aborted && focused && !container.hidden && !settings.open) {
-        if (pending && following) pending.card.focus({ preventScroll: true })
-        else if (!pending) focusDraft()
+      if (activeSend === state) {
+        const focused = composer.contains(document.activeElement) || document.activeElement === document.body
+        activeSend = null
+        busy = ''
+        render()
+        resizeDraft()
+        updateScroll()
+        if (!listeners.signal.aborted && focused && !container.hidden && !settings.open) {
+          if (pending && following) pending.card.focus({ preventScroll: true })
+          else if (!pending) focusDraft()
+        }
       }
     }
   }

@@ -200,10 +200,12 @@ function readMessage(value) {
 async function responseMessage(response, onText, signal, timeout) {
   /** @type {Record<string, unknown>[]} */
   const content = []
-  /** @type {Map<number, string>} */
-  const openBlocks = new Map()
+  /** @type {{index: number, input: string} | undefined} */
+  let openBlock
   /** @type {string | undefined} */
   let stopReason
+  /** @type {'awaiting-start' | 'content' | 'message-delta'} */
+  let phase = 'awaiting-start'
   let hasText = false
   for await (const event of responseEvents(response, signal, timeout)) {
     if (!isRecord(event) || typeof event.type !== 'string') throw invalidStream()
@@ -213,11 +215,21 @@ async function responseMessage(response, onText, signal, timeout) {
         overload ? 'Claude is temporarily overloaded. Try again.' : 'Claude interrupted the response. Try again.',
       )
     }
-    if (event.type === 'content_block_start') {
+    if (event.type === 'message_start') {
+      if (phase !== 'awaiting-start') throw invalidStream()
+      phase = 'content'
+    } else if (event.type === 'content_block_start') {
       const { index, content_block: block } = event
-      if (index !== content.length || !isRecord(block) || typeof block.type !== 'string') throw invalidStream()
+      if (
+        phase !== 'content' ||
+        openBlock ||
+        index !== content.length ||
+        !isRecord(block) ||
+        typeof block.type !== 'string'
+      )
+        throw invalidStream()
       content.push(block)
-      openBlocks.set(index, '')
+      openBlock = { index, input: '' }
       if (block.type === 'text') {
         if (typeof block.text !== 'string') throw invalidStream()
         if (hasText) onText('\n\n')
@@ -226,23 +238,22 @@ async function responseMessage(response, onText, signal, timeout) {
       }
     } else if (event.type === 'content_block_delta') {
       const { index, delta } = event
-      if (typeof index !== 'number' || !Number.isSafeInteger(index) || !isRecord(delta)) throw invalidStream()
-      const block = content[index]
-      const input = openBlocks.get(index)
-      if (input === undefined || !block) throw invalidStream()
+      if (!openBlock || index !== openBlock.index || !isRecord(delta)) throw invalidStream()
+      const block = content[openBlock.index]
+      if (!block) throw invalidStream()
       if (block.type === 'text' && delta.type === 'text_delta') {
         if (typeof block.text !== 'string' || typeof delta.text !== 'string') throw invalidStream()
         block.text += delta.text
         onText(delta.text)
       } else if (block.type === 'tool_use' && delta.type === 'input_json_delta') {
         if (typeof delta.partial_json !== 'string') throw invalidStream()
-        openBlocks.set(index, input + delta.partial_json)
+        openBlock.input += delta.partial_json
       }
     } else if (event.type === 'content_block_stop') {
-      if (typeof event.index !== 'number' || !Number.isSafeInteger(event.index)) throw invalidStream()
-      const block = content[event.index]
-      const input = openBlocks.get(event.index)
-      if (!block || input === undefined) throw invalidStream()
+      if (!openBlock || event.index !== openBlock.index) throw invalidStream()
+      const { index, input } = openBlock
+      const block = content[index]
+      if (!block) throw invalidStream()
       if (block.type === 'tool_use' && input) {
         try {
           /** @type {unknown} */
@@ -253,15 +264,16 @@ async function responseMessage(response, onText, signal, timeout) {
           throw invalidStream()
         }
       }
-      openBlocks.delete(event.index)
+      openBlock = undefined
     } else if (event.type === 'message_delta') {
-      if (!isRecord(event.delta)) throw invalidStream()
+      if (phase === 'awaiting-start' || openBlock || !isRecord(event.delta)) throw invalidStream()
+      phase = 'message-delta'
       if (event.delta.stop_reason !== undefined && event.delta.stop_reason !== null) {
         if (typeof event.delta.stop_reason !== 'string') throw invalidStream()
         stopReason = event.delta.stop_reason
       }
     } else if (event.type === 'message_stop') {
-      if (openBlocks.size || typeof stopReason !== 'string') throw invalidStream()
+      if (phase !== 'message-delta' || typeof stopReason !== 'string') throw invalidStream()
       return readMessage({ content, stop_reason: stopReason })
     }
   }

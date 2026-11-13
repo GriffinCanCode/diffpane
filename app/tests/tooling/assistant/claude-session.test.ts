@@ -25,12 +25,15 @@ function toolBlock(index: number, id: string, name: string, ...parts: string[]) 
 }
 
 function stream(stop_reason: 'tool_use' | 'end_turn', blocks: readonly { type: string }[]) {
-  const events = [
+  return eventStream([
     { type: 'message_start', message: { role: 'assistant', content: [] } },
     ...blocks,
     { type: 'message_delta', delta: { stop_reason } },
     { type: 'message_stop' },
-  ]
+  ])
+}
+
+function eventStream(events: readonly ({ type: string } & Record<string, unknown>)[]) {
   const encoded = new TextEncoder().encode(
     events.map(event => `event: ${event.type}\r\ndata: ${JSON.stringify(event)}\r\n\r\n`).join(''),
   )
@@ -46,6 +49,53 @@ function stream(stop_reason: 'tool_use' | 'end_turn', blocks: readonly { type: s
     { headers: { 'Content-Type': 'text/event-stream' } },
   )
 }
+
+const emptyWorkspace = {
+  list: async () => ({ paths: [], truncated: false }),
+  read: async () => '',
+  listIdeas: async () => [],
+  readIdea: async () => undefined,
+} satisfies ClaudeWorkspace
+
+test('reset releases the active turn without letting the old completion unlock its replacement', async t => {
+  const oldKey = Promise.withResolvers<string>()
+  const newKey = Promise.withResolvers<string>()
+  const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(stream('end_turn', textBlock(0, 'New reply')))
+  t.onTestFinished(() => fetch.mockRestore())
+  const session = new ClaudeSession()
+
+  const first = session.send({ prompt: 'First' }, () => oldKey.promise, emptyWorkspace).catch((error: unknown) => error)
+  session.reset()
+  const second = session.send({ prompt: 'Second' }, () => newKey.promise, emptyWorkspace)
+  oldKey.resolve('old-key')
+  expect(await first).toMatchObject({ message: 'Claude request canceled.' })
+  await expect(session.send({ prompt: 'Third' }, key, emptyWorkspace)).rejects.toThrow('Claude is still working')
+  newKey.resolve('new-key')
+
+  expect(await second).toMatchObject({ text: 'New reply' })
+  expect(fetch).toHaveBeenCalledTimes(1)
+  expect(fetch.mock.calls[0]?.[1]?.body).not.toContain('First')
+})
+
+test('a stream cannot run tool calls from content arriving after the message delta', async t => {
+  const fetch = vi
+    .spyOn(globalThis, 'fetch')
+    .mockResolvedValueOnce(
+      eventStream([
+        { type: 'message_start', message: { role: 'assistant', content: [] } },
+        { type: 'message_delta', delta: { stop_reason: 'tool_use' } },
+        ...toolBlock(0, 'file', 'read_file', '{"path":"file.txt"}'),
+        { type: 'message_stop' },
+      ]),
+    )
+  t.onTestFinished(() => fetch.mockRestore())
+  const read = vi.fn<ClaudeWorkspace['read']>(emptyWorkspace.read)
+
+  await expect(new ClaudeSession().send({ prompt: 'Read the file' }, key, { ...emptyWorkspace, read })).rejects.toThrow(
+    'Claude returned an incomplete or invalid response',
+  )
+  expect(read).not.toHaveBeenCalled()
+})
 
 test('streams ordered activity and fetches attached workspace content only when the model asks for it', async t => {
   const source = ['Unselected line', 'Selected line α', 'Selected line β', 'Another unselected line'].join('\n')

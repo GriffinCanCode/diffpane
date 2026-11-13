@@ -340,6 +340,7 @@ export class ClaudeSession {
 
   reset() {
     this.cancel()
+    this.#controller = undefined
     this.#history = []
     this.#proposal = undefined
   }
@@ -397,7 +398,7 @@ export class ClaudeSession {
     let toolResultChars = 0
     /** @param {Activity} activity */
     const emit = activity => {
-      if (typeof requestId === 'string' && requestId.length > 0 && requestId.length <= 128)
+      if (!signal.aborted && typeof requestId === 'string' && requestId.length > 0 && requestId.length <= 128)
         onActivity?.({ requestId, ...activity })
     }
 
@@ -495,6 +496,7 @@ export class ClaudeSession {
 
     /** @param {string} text @param {number} step @param {Proposal} [proposed] */
     const finish = (text, step, proposed) => {
+      signal.throwIfAborted()
       /** @type {HistoryMessage[]} */
       const history = [...this.#history, { role: 'user', content: userText }, { role: 'assistant', content: text }]
       let start = history.length - 2
@@ -580,7 +582,7 @@ export class ClaudeSession {
       if (timeout.aborted) throw new Error('Claude took too long to respond. Try again.', { cause: error })
       throw error
     } finally {
-      this.#controller = undefined
+      if (this.#controller === controller) this.#controller = undefined
     }
   }
 
