@@ -277,11 +277,13 @@ export function mountIdeaBuilder(host: HTMLElement, options: IdeaBuilderOptions)
   host.setAttribute('aria-labelledby', 'idea-panel-title')
   host.innerHTML = `
     <header class="idea-header">
-      <div class="idea-heading">
-        ${icon('notebook')}
-        <h2 id="idea-panel-title">Ideas</h2>
+      <div class="idea-library-header">
+        <div class="idea-heading">
+          ${icon('notebook')}
+          <h2 id="idea-panel-title">Ideas</h2>
+        </div>
+        <div class="idea-library-actions"></div>
       </div>
-      <div class="idea-library-actions"></div>
       <div class="idea-detail-actions" role="group" aria-label="Note actions" hidden></div>
       <div class="idea-header-actions" role="group" aria-label="Notebook view"></div>
     </header>
@@ -298,8 +300,9 @@ export function mountIdeaBuilder(host: HTMLElement, options: IdeaBuilderOptions)
       <div class="idea-stage">
         <div class="idea-empty" hidden>
           <div class="idea-empty-scene" aria-hidden="true">
-            <span class="idea-empty-checklist">${icon('task')}</span>
-            <span class="idea-empty-notebook">${icon('notebook')}</span>
+            <span class="idea-empty-page"></span>
+            <span class="idea-empty-page"></span>
+            <span class="idea-empty-pencil"></span>
           </div>
           <h3 aria-live="polite"></h3>
           <p></p>
@@ -307,7 +310,9 @@ export function mountIdeaBuilder(host: HTMLElement, options: IdeaBuilderOptions)
         </div>
         <section class="idea-detail" aria-label="Selected idea" hidden>
           <div class="idea-page-heading idea-column">
-            <input class="idea-title-input" type="text" placeholder="Untitled idea" aria-label="Idea title" autocomplete="off" maxlength="${MAX_IDEA_TITLE_LENGTH}">
+            <div class="idea-title">
+              <input class="idea-title-input" type="text" placeholder="Untitled idea" aria-label="Idea title" autocomplete="off" maxlength="${MAX_IDEA_TITLE_LENGTH}">
+            </div>
             <div class="idea-page-meta">
               <time class="idea-date"></time>
               <div class="idea-attachments" role="group" aria-label="Linked code" hidden></div>
@@ -347,11 +352,11 @@ export function mountIdeaBuilder(host: HTMLElement, options: IdeaBuilderOptions)
   const add = button('New idea', 'plus')
   const addFirst = button('New idea', 'plus', true)
   const showIndex = button('Show idea index', 'index')
-  const formatText = button('Format text', 'format')
+  const formatText = button('Format', 'format', true)
   const close = button('Close ideas', 'close')
   const dock = button('Dock beside code', 'dock')
   const expand = button('Open Ideas notebook', 'expand')
-  const attachCurrent = button('Link current file or selection', 'link')
+  const attachCurrent = button('Link file', 'link', true)
   const chat = button('Give to the Creature', 'creature')
   const remove = button('Delete idea', 'trash')
   const cancelDelete = button('Cancel')
@@ -363,8 +368,11 @@ export function mountIdeaBuilder(host: HTMLElement, options: IdeaBuilderOptions)
   showIndex.classList.add('idea-index-toggle')
   showIndex.setAttribute('aria-controls', indexSection.id)
   formatText.classList.add('idea-format-toggle')
+  formatText.setAttribute('aria-label', 'Format text')
+  formatText.title = 'Format text'
   formatText.popoverTargetElement = toolbar
   attachCurrent.classList.add('idea-link-current')
+  attachCurrent.setAttribute('aria-label', 'Link current file or selection')
   remove.classList.add('idea-delete')
   dock.classList.add('idea-dock')
   expand.classList.add('idea-expand')
@@ -377,7 +385,7 @@ export function mountIdeaBuilder(host: HTMLElement, options: IdeaBuilderOptions)
   detailActions.append(formatText)
   if (options.draftInChat) detailActions.append(chat)
   detailActions.append(remove)
-  metadata.append(attachCurrent)
+  metadata.insertBefore(attachCurrent, attachments)
   confirmation.append(cancelDelete, confirmDelete)
   statusGroup.append(retrySave)
 
@@ -471,6 +479,8 @@ export function mountIdeaBuilder(host: HTMLElement, options: IdeaBuilderOptions)
       row.type = 'button'
       row.dataset.ideaId = idea.id
       row.setAttribute('aria-pressed', String(idea.id === selected))
+      const page = node('span', 'idea-row-icon')
+      page.innerHTML = icon('file')
       const summary = bodySummary(idea.body)
       const label = idea.title.trim() || summary || 'Untitled idea'
       const content = node('span', 'idea-row-content')
@@ -488,7 +498,7 @@ export function mountIdeaBuilder(host: HTMLElement, options: IdeaBuilderOptions)
         else rowSummary.textContent = description
         content.append(rowSummary)
       }
-      row.append(content)
+      row.append(page, content)
       if (idea.links.length) {
         const count = node('span', 'idea-row-count')
         count.innerHTML = icon('link')
