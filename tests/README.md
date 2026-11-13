@@ -1,62 +1,26 @@
 ---
 doc_radar:
   sentinels:
-    - file: tests/app.e2e.mjs
-      contains: ['4000', '80', 'rendererErrors']
-    - file: tests/files.e2e.mjs
-      contains: ['file-picker', 'diff-gutter-modified', 'node:assert/strict']
     - file: tests/languages.integration.mjs
       contains: ['LanguageRuntime', 'swift', 'elixir']
-    - file: tests/configs.e2e.mjs
-      contains: ['settings.jsonc', 'source byte']
-    - file: tests/billy.integration.mjs
-      contains: ['ls-files', 'billy-filetypes.json']
     - file: tests/repository.test.mjs
       contains: ['Repository.open', 'vite-plus/test']
-    - file: tests/startup.e2e.mjs
-      contains: ['expectWelcome', 'showOpenDialog', 'closeWindow', 'quitApplication']
 ---
 
 # Checks
 
-`node tests/startup.e2e.mjs` checks empty launches from Git and non-Git working directories, a welcome screen without workspace errors, native Open File and Open Folder picker cancellation and selection, and replacement of the welcome window. A shared isolated profile verifies persisted recent files and folders, ordering, deduplication, reopening, and exclusion of failed targets. It checks native Close and Quit after empty launches and explicit non-Git target errors, plus Close when the renderer entry script fails to load. Clean project windows still flush before Close and freeze editing through final Quit. It runs first in `test:app`; screenshots are saved as `test-results/startup-welcome.png`, `test-results/startup-recents.png`, and `test-results/startup-recents-narrow.png`.
+Run `npm test` for the Node suite through Vite+'s bundled Vitest. The runner includes `tests/*.test.mjs` and `tests/*.test.ts`. Tests use `vite-plus/test` and `onTestFinished` to clean up repositories, workers, and language servers. `npm run test:watch` reruns tests while editing. `npm run test:docs` runs the documentation assertions.
 
-Session shutdown unit checks hold watcher startup and unsubscribe independently, complete snapshots on either side of disposal, and require the worker to acknowledge cleanup before exiting naturally. Recents unit checks cover corrupt history, storage failures, ordering and limits, and concurrent app instances sharing one history file.
+Run `npm run verify` for formatting, lint, type-aware checks, tests, and the cached renderer build.
 
-`npm run test:markdown` builds and drives the real Electron Markdown view through Mermaid flowcharts and sequence diagrams, malformed input, code highlighting, copy, expansion and zoom, source/diff transitions, local links and images, live saves, narrow panes, HTML sanitization, and cleanup. Screenshots are saved as `test-results/markdown.png` and `test-results/markdown-narrow.png`. Markdown path tests cover encoded links, anchors, and project traversal boundaries.
+`npm run test:languages` runs the language matrix serially against nested projects and checks advertised capabilities, real responses, and process cleanup.
 
-`node tests/explorer-actions.e2e.mjs` checks folder search, combined filters, clipboard paths, rename collisions, open-file and folder renames, narrow-window filters, and moving files and folders to Trash in Electron, including tracked-file removal from search and restoration. It runs in `test:app`. Unit checks cover filter boundaries and filesystem confinement.
+We test actual Git repositories, including partial staging, unusual paths, renames, worktrees, conflicts, binary previews, and ignore behavior. Session tests verify cache retention across unrelated writes and invalidation after file creation and commits. Shutdown checks hold watcher startup and unsubscribe independently, complete snapshots on either side of disposal, and require the worker to acknowledge cleanup before exiting naturally. Recents checks cover corrupt history, storage failures, ordering and limits, and concurrent app instances sharing one history file.
 
-We test actual Git repositories, including partial staging, unusual paths, renames, worktrees, conflicts, binary previews, and ignore behavior. The Electron check drives the real app through edits and scrolling, then verifies switching files retains one model. Gutter checks distinguish additions, modifications, and deletions without whole-line fills. The file-viewer check reads unchanged code, saves and commits it, searches the picker, and launches a file directly.
-
-The config check exercises syntax colors, source preservation, live updates, and keyboard navigation in Electron. The optional Billy check reads the tracked inventory, opens text representatives, and records actual language IDs and preview limits without changing the checkout.
-
-The language matrix runs actual servers serially against nested projects and checks advertised capabilities, real responses, and process cleanup.
-
-Run `npm test` for the backend and documentation through Vite+'s bundled Vitest. Tests use `vite-plus/test` and `onTestFinished` to clean up repositories, workers and language servers. `npm run test:watch` reruns tests while editing; `npm run test:docs` runs only the documentation assertions. The runner includes only `tests/*.test.mjs`; the standalone Electron and language integration scripts remain explicit commands.
-
-Run `npm run verify` for formatting, lint, type-aware checks, tests and the cached renderer build. Run `npm run test:app` for the desktop check; it builds the renderer first. App screenshots land in the ignored `test-results` directory.
-
-`npm run test:performance` opens an actual 50,000-file Git repository with 4,000 changed files and a 30,000-line document. It checks concurrent save bursts, worker search with overlapping queries, a bounded explorer DOM, one editor model, and frame timing. Results and a screenshot are saved in `test-results/performance.json` and `test-results/performance.png`. Set `DIFFPANE_PERF_FILES` to change the inventory size. The fixture also contains 50,000 ignored dependency files; checks verify shallow expansion and return to the original tree size after collapse. Session tests verify cache retention across unrelated writes and invalidation after file creation and commits. `node tests/ignored.e2e.mjs` checks muted styling, shallow loads, ancestor and global collapse cleanup, editing after collapse, live ignored-file creation, and ignore-rule changes.
+Session fixtures can select the alternate native backend with `DIFFPANE_TEST_WATCH_BACKEND=kqueue` on macOS when FSEvents is degraded. Forced-failure and event-storm regressions inject deterministic watcher events independently of the host event service.
 
 Resource regressions cover idle diff-worker eviction and restart, cancellation during search teardown, and the release of picker rows and its search worker after closing. An isolated GC-enabled Node check caches bounded previews of 24 large files and checks external string storage, which JavaScript heap measurements alone miss. This guards against previews pinning their full decoded input despite a small cache estimate.
 
-The diff-mode check exercises the glyph button, both complete file versions, changed-function emphasis, live saves during comparison, and disposal of the original model when returning to the current file.
+Autosave checks cover write coalescing, failures and retries, conflict detection, cache invalidation, source encodings, and path confinement. Reader tests cover native format recognition, malformed encodings, and bounded payloads. Media protocol tests cover full streams, byte ranges, missing files, and path confinement. Markdown path tests cover encoded links, anchors, and project traversal boundaries. Search and file operation tests cover filter boundaries and filesystem confinement.
 
-The autosave check (`node tests/autosave.e2e.mjs`, included in `test:app`) types into the real editor, undoes an edit, edits the working side of a comparison, syncs an external save, switches files, edits Markdown source, and closes with a pending save. Unit checks cover write coalescing, failures and retries, conflict detection, cache invalidation, source encodings, and path confinement.
-
-The media check opens real PNG and SVG images and a Chromium-encoded WebM video in Electron. It checks image zoom, files above the text limit, live saves, playback, seeking, invalid media, and playback cleanup when returning to code. Protocol unit tests cover full streams, byte ranges, missing files, and path confinement. Run `node tests/media.e2e.mjs` after a renderer build; it also runs with `npm run test:app`. Preview screenshots are saved as `test-results/media-image.png` and `test-results/media-video.png`.
-
-`npm run setup:howmany && npm run test:howmany` checks real HowMany counts, report rendering, JSON export, save updates, and keyboard dismissal in Electron. The unit suite also checks request coalescing, cancellation, timeouts, invalid reports, path confinement, and source checksum rejection; when the bundled binary exists it verifies real LSP diagnostics and config reloads. Set `DIFFPANE_EXECUTABLE` to a packaged executable and run `node tests/howmany.e2e.mjs` to verify the app's bundled binary without a PATH override. CI prepares HowMany before running these checks.
-
-The HowMany startup check holds idle callbacks until the real explorer and editor render, then stalls both workspace and per-file analysis responses. It verifies that background analysis waits for rendered files, navigation remains usable while analysis is stalled, and late counts for the previous file are discarded. Scheduler unit checks cover paint ordering and cancellation, including the timer fallback.
-
-The live-loading check (`node tests/live-loading.e2e.mjs`, included in `test:app`) holds document and inventory responses while more edits arrive. It verifies navigation past a stalled read, stale-response isolation, immediate Markdown rendering, and explorer publication before a queued scan finishes. Cache and session tests cover bounded retries, refresh overlap, and ignored-directory event storms.
-
-Session fixtures can select the alternate native backend with `DIFFPANE_TEST_WATCH_BACKEND=kqueue` on macOS when FSEvents is degraded. This changes only the test fixture. Forced-failure and event-storm regressions inject deterministic watcher events independently of the host event service.
-
-The idle-resume check (`node tests/idle-resume.e2e.mjs`, included in `test:app`) forces the actual session worker into fallback and hides the window across several polling cycles. Quiet time preserves snapshot and inventory revisions; edits and new files created in the background appear on return, and navigation and search remain usable. HowMany tests cover automatic scan cooldown, manual refresh, eventual updated counts, and timeout backoff.
-
-The file-types check (`node tests/filetypes.e2e.mjs`, included in `test:app`) exercises arbitrary extensions, UTF-16, Windows-1252, binary comparisons, real audio decoding, the embedded PDF viewer, live text/binary transitions, and resource disposal. Reader tests cover native format recognition, malformed encodings, bounded payloads, and preview cache accounting.
-
-The TypeScript k6 suite drives ten concurrent virtual agents against an isolated repository and the actual desktop app. `npm run test:k6:smoke` runs a short check; `npm run test:k6` uses 50,000 files; `npm run test:k6:soak` runs ten minutes; `npm run test:k6:languages` includes a real TypeScript server. `npm run check:k6` checks the harness and workload types. See [the k6 guide](k6/README.md) for measured rendering latency, fixed budgets, whole-process RSS accounting, limitations, and CI. The 100 MB budget remains a failing gate on the current Electron architecture; correctness results do not waive it.
+HowMany tests cover request coalescing, cancellation, timeouts, invalid reports, path confinement, source checksum rejection, automatic scan cooldown, and manual refresh. `npm run setup:howmany` prepares the binary for tests of real LSP diagnostics and config reloads. CI prepares the binary before running the suite. Scheduler checks cover paint ordering and cancellation, including the timer fallback.

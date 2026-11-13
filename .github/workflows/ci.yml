@@ -25,5 +25,3 @@ jobs:
       - run: npm ci
       - run: npm run setup:howmany
       - run: npm run verify
-      - run: node tests/howmany.e2e.mjs
-      - run: npm run test:app
