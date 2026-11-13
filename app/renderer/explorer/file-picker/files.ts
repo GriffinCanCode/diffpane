@@ -89,11 +89,13 @@ export function createFilePicker(
   function filter(keepSelection: boolean | undefined = false) {
     const selectedPath = keepSelection ? matches[selected]?.file.path : null
     const generation = ++filterGeneration
+    clear.hidden = !input.value
     const results = search.search(input.value)
     if (results instanceof Promise) {
       summary.textContent = 'Searching project files…'
       showLoadingStatus(true)
       if (!selectedPath) matches = []
+      empty.hidden = true
       render()
       runTask('Search files', async () => {
         const result = await attemptAsync(() => results, { operation: 'Search files' })
@@ -310,6 +312,8 @@ export function createFilePicker(
     } else {
       reportError(result.error, { silent: true })
       failure = result.error.message
+      inventory = []
+      search.setFiles(inventory)
     }
     filter(refresh)
   }
