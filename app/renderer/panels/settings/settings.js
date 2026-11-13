@@ -319,7 +319,7 @@ export function createSettings({ appearance, platform, getBindings, setBinding, 
       reportError(result.error, {
         silent: !current || active,
         retry: async () => {
-          if (version !== openVersion) return
+          if (dialog.open && !shortcutsPage.hidden) return
           const retried = await changeCapture(false)
           if (!retried.ok) throw retried.error
         },
