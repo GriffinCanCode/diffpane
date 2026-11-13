@@ -116,3 +116,20 @@ test('bounds matching lines and cancels an in-flight scan', async () => {
   cancellation.abort()
   assert.equal(await pending, null)
 })
+
+test('a cancelled search cannot complete successfully with an empty inventory', async () => {
+  const cancellation = new AbortController()
+  /** @type {PromiseWithResolvers<{ paths: string[]; truncated: boolean }>} */
+  const inventory = Promise.withResolvers()
+  const repository = {
+    contentSearchPaths: () => inventory.promise,
+    contentSearchFile: async () => {
+      throw new Error('An empty inventory should never start a file read')
+    },
+  }
+  const request = { query: 'a', scope: 'workspace', matchCase: true }
+  const pending = searchRepositoryContent(repository, request, cancellation.signal)
+  cancellation.abort()
+  inventory.resolve({ paths: [], truncated: false })
+  assert.equal(await pending, null)
+})

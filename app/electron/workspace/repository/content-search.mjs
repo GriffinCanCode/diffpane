@@ -38,6 +38,7 @@ export async function searchRepositoryContent(repository, request, cancellation)
     typeof matchCase !== 'boolean'
   )
     throw new Error('Invalid project search request.')
+  if (cancellation.aborted) return null
   if (!query) return { matches: [], truncated: false }
 
   const timeout = AbortSignal.timeout(SEARCH_TIMEOUT_MS)
@@ -48,8 +49,8 @@ export async function searchRepositoryContent(repository, request, cancellation)
   let scannedBytes = 0
   try {
     const { paths, truncated } = await repository.contentSearchPaths(scope === 'changed', signal)
+    signal.throwIfAborted()
     for (let start = 0; start < paths.length; start += READ_CONCURRENCY) {
-      signal.throwIfAborted()
       const batch = paths.slice(start, start + READ_CONCURRENCY)
       // oxlint-disable-next-line eslint/no-await-in-loop -- Finish each bounded batch before opening another group of files.
       const files = await Promise.all(
