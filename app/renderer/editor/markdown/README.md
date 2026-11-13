@@ -11,6 +11,7 @@ The workspace swaps the Monaco editor for this preview when it opens Markdown in
 Syntax highlights and Mermaid diagrams use the selected appearance palette and update when it changes.
 
 - [`markdown-preview.ts`](markdown-preview.ts) — Renders sanitized Markdown, code blocks, metadata, and lazy Mermaid diagrams.
+- [`markdown-document.ts`](markdown-document.ts) — Parses source, extracts frontmatter, and counts words before the preview builds its DOM.
 - [`markdown-paths.ts`](markdown-paths.ts) — Resolves relative project paths and heading anchors.
 - [`markdown-preview.css`](markdown-preview.css) — Styles the reading view and its code, tables, and diagrams.
 

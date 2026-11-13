@@ -1,7 +1,8 @@
 const CALLABLE_KINDS = new Set([5, 8, 11]) // Monaco Method, Constructor, Function.
 const CONTROLS = new Set(['if', 'for', 'while', 'switch', 'catch', 'with', 'match'])
 const DECLARATION = /\b(?:function\s*\*?\s*|defp?\s+|defmacro\s+|fn\s+|func\s+|fun\s+)([\w$!?]+)/
-const ARROW = /\b(?:const|let|var)\s+([\w$]+)\s*=.*=>/
+const ASSIGNMENT = /\b(?:const|let|var)\s+([\w$]+)\s*=/
+const MULTILINE_ARROW = /\b(?:const|let|var)\s+([\w$]+)\s*=.*=>/
 const METHOD =
   /^\s*(?:(?:public|private|protected|static|async|override|export)\s+)*([\w$]+)\s*\([^;]*\)\s*(?::[^=]+)?\s*\{/
 
@@ -21,12 +22,26 @@ interface OutlineSymbol {
   children?: OutlineSymbol[]
 }
 
+function arrowName(line: string) {
+  const arrow = line.lastIndexOf('=>')
+  if (arrow < 0) return undefined
+  const prefix = line.slice(0, arrow)
+  // The scanner splits on LF. Preserve matching across files with other line separators.
+  return /[\r\u2028\u2029]/.test(prefix) ? MULTILINE_ARROW.exec(line)?.[1] : ASSIGNMENT.exec(prefix)?.[1]
+}
+
 /** Prefer language-server ranges; a bounded lexical fallback also works before a server starts. */
 export function changedFunctionRanges(
   text: string,
   changes: readonly LineChange[],
   symbols: readonly OutlineSymbol[] = [],
 ) {
+  if (!changes.length) return []
+  return changedSymbolRanges(changes, symbols) ?? intersectChanges(lexicalFunctions(text), changes)
+}
+
+export function changedSymbolRanges(changes: readonly LineChange[], symbols: readonly OutlineSymbol[]) {
+  if (!changes.length) return []
   const functions: FunctionRange[] = []
   const visit = (items: readonly OutlineSymbol[]) => {
     for (const symbol of items) {
@@ -36,11 +51,15 @@ export function changedFunctionRanges(
           endLine: symbol.range.endLineNumber,
           name: symbol.name,
         })
-      visit(symbol.children ?? [])
+      if (symbol.children?.length) visit(symbol.children)
     }
   }
   visit(symbols)
-  if (!functions.length) functions.push(...lexicalFunctions(text))
+  return functions.length ? intersectChanges(functions, changes) : undefined
+}
+
+function intersectChanges(functions: FunctionRange[], changes: readonly LineChange[]) {
+  if (!functions.length) return functions
   const intervals = changes
     .map(change => ({ start: change.startLine, end: change.endLine ?? change.startLine }))
     .toSorted((a, b) => a.start - b.start)
@@ -109,7 +128,7 @@ function lexicalFunctions(text: string) {
   }
   const functions: FunctionRange[] = []
   for (const [index, { text: line, indent }] of clean.entries()) {
-    const name = line.match(DECLARATION)?.[1] ?? line.match(ARROW)?.[1] ?? line.match(METHOD)?.[1]
+    const name = DECLARATION.exec(line)?.[1] ?? arrowName(line) ?? METHOD.exec(line)?.[1]
     if (!name || CONTROLS.has(name)) continue
     let end = index
     if (/\bdef\s/.test(line) && /:\s*$/.test(line)) {
@@ -125,7 +144,7 @@ function lexicalFunctions(text: string) {
     } else {
       for (let body = index; body < Math.min(lines.length, index + 12); body++) {
         const candidate = clean[body]
-        if (!candidate || (body > index && (DECLARATION.test(candidate.text) || ARROW.test(candidate.text)))) break
+        if (!candidate || (body > index && (DECLARATION.test(candidate.text) || arrowName(candidate.text)))) break
         if (candidate.text.includes('{')) {
           end = body
           let current = candidate

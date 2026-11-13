@@ -116,3 +116,39 @@ test('undoing a failed save clears the retry latch and future edits autosave', a
   await save.flush()
   assert.equal(save.pending, false)
 })
+
+test('editor snapshots are read only for the text used by each coalesced write', async () => {
+  /** @type {(() => void) | undefined} */
+  let complete
+  /** @type {string[]} */
+  const writes = []
+  let reads = 0
+  let text = 'first'
+  const snapshot = () => {
+    reads++
+    return text
+  }
+  const save = new Autosave(
+    'original',
+    async value => {
+      writes.push(value)
+      if (writes.length === 1)
+        await new Promise(resolve => {
+          complete = () => resolve(undefined)
+        })
+    },
+    () => {},
+  )
+  save.edit(snapshot)
+  await Promise.resolve()
+  assert.ok(complete)
+  text = 'second'
+  save.edit(snapshot)
+  text = 'last'
+  save.edit(snapshot)
+  assert.equal(reads, 1)
+  complete()
+  await save.flush()
+  assert.equal(reads, 2)
+  assert.deepEqual(writes, ['first', 'last'])
+})

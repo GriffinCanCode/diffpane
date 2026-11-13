@@ -32,24 +32,22 @@ function markLine(marker, line, end) {
 export function createReviewFocus({ onScope }) {
   const bar = document.createElement('div')
   bar.className = 'review-hunk-bar'
+  bar.setAttribute('role', 'group')
+  bar.setAttribute('aria-label', 'Changes in this file')
   bar.hidden = true
   bar.innerHTML = `
-    <div class="review-hunk-navigation" role="group" aria-label="Changes in this file">
-      <button type="button" class="review-hunk-prev" aria-label="Previous change in file" title="Previous change in file">${chevron('up')}</button>
-      <div class="review-hunk-summary" role="status"><span class="review-hunk-caption">Change</span> <span class="review-hunk-position"></span></div>
-      <button type="button" class="review-hunk-next" aria-label="Next change in file" title="Next change in file">${chevron('down')}</button>
-    </div>
-    <div class="review-hunk-modes" role="group" aria-label="Comparison context">
-      <button type="button" class="review-focus-mode" aria-pressed="true" title="Collapse long stretches of unchanged lines">Focus changes</button>
-      <button type="button" class="review-full-mode" aria-pressed="false" title="Show the entire file">Full file</button>
-    </div>`
+    <button type="button" class="review-hunk-prev" aria-label="Previous change in file" title="Previous change in file">${chevron('up')}</button>
+    <span class="review-hunk-position" aria-hidden="true"></span>
+    <span class="review-hunk-announcement" role="status"></span>
+    <button type="button" class="review-hunk-next" aria-label="Next change in file" title="Next change in file">${chevron('down')}</button>`
 
   const position = requireElement(bar, '.review-hunk-position', HTMLSpanElement)
-  const caption = requireElement(bar, '.review-hunk-caption', HTMLSpanElement)
+  const announcement = requireElement(bar, '.review-hunk-announcement', HTMLSpanElement)
   const previous = requireElement(bar, '.review-hunk-prev', HTMLButtonElement)
   const next = requireElement(bar, '.review-hunk-next', HTMLButtonElement)
-  const focus = requireElement(bar, '.review-focus-mode', HTMLButtonElement)
-  const full = requireElement(bar, '.review-full-mode', HTMLButtonElement)
+  const scopeControl = document.createElement('button')
+  scopeControl.type = 'button'
+  scopeControl.hidden = true
   /** @type {import('monaco-editor').editor.IDiffEditor | null} */
   let editor = null
   /** @type {{ originalAriaLabel?: string, modifiedAriaLabel?: string }} */
@@ -66,16 +64,21 @@ export function createReviewFocus({ onScope }) {
   let hunks = []
   let index = 0
   let collapsed = false
+  let revealOnFirstDiff = false
   /** @type {number | null} */
   let frame = null
 
-  function paint(label = `${(index + 1).toLocaleString()} of ${hunks.length.toLocaleString()}`) {
+  function paint(message = '') {
+    const current = (index + 1).toLocaleString()
+    const total = hunks.length.toLocaleString()
+    const label = message || `${current}/${total}`
+    const spoken = message || `Change ${current} of ${total}`
     if (position.textContent !== label) position.textContent = label
-    caption.hidden = hunks.length === 0
+    if (announcement.textContent !== spoken) announcement.textContent = spoken
+    previous.hidden = next.hidden = hunks.length === 0
     previous.disabled = next.disabled = hunks.length < 2
-    focus.disabled = full.disabled = hunks.length === 0
-    focus.setAttribute('aria-pressed', String(scope === 'focus'))
-    full.setAttribute('aria-pressed', String(scope === 'full'))
+    scopeControl.hidden = hunks.length === 0
+    scopeControl.textContent = scope === 'focus' ? 'Show unchanged lines' : 'Hide unchanged lines'
     const hunk = hunks[index]
     markLine(originalMarker, hunk?.originalStartLineNumber, hunk?.originalEndLineNumber)
     markLine(workingMarker, hunk?.modifiedStartLineNumber, hunk?.modifiedEndLineNumber)
@@ -132,7 +135,10 @@ export function createReviewFocus({ onScope }) {
     setCollapsed(scope === 'focus' && hunks.length > 0)
     if (hunks.length) paint()
     else paint('No text changes')
-    if (anchor === undefined && hunks.length) reveal()
+    if (hunks.length && revealOnFirstDiff) {
+      revealOnFirstDiff = false
+      reveal()
+    }
   }
 
   /** @param {-1 | 1} direction */
@@ -155,8 +161,7 @@ export function createReviewFocus({ onScope }) {
 
   previous.addEventListener('click', () => step(-1))
   next.addEventListener('click', () => step(1))
-  focus.addEventListener('click', () => chooseScope('focus'))
-  full.addEventListener('click', () => chooseScope('full'))
+  scopeControl.addEventListener('click', () => chooseScope(scope === 'focus' ? 'full' : 'focus'))
 
   function detach() {
     if (frame !== null) cancelAnimationFrame(frame)
@@ -170,22 +175,27 @@ export function createReviewFocus({ onScope }) {
     hunks = []
     index = 0
     collapsed = false
+    revealOnFirstDiff = false
     bar.hidden = true
+    scopeControl.hidden = true
   }
 
   return {
     bar,
+    scopeControl,
     /**
      * @param {import('monaco-editor').editor.IDiffEditor} diffEditor
      * @param {ReviewScope} initialScope
      * @param {typeof labels} ariaLabels
+     * @param {boolean} [revealInitial]
      */
-    attach(diffEditor, initialScope, ariaLabels) {
+    attach(diffEditor, initialScope, ariaLabels, revealInitial = true) {
       if (editor === diffEditor) return
       detach()
       editor = diffEditor
       labels = ariaLabels
       scope = initialScope
+      revealOnFirstDiff = revealInitial
       bar.hidden = false
       originalMarker = editor.getOriginalEditor().createDecorationsCollection()
       workingMarker = editor.getModifiedEditor().createDecorationsCollection()

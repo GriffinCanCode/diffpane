@@ -22,6 +22,7 @@ interface MonacoApi {
 }
 
 const MAX_FORMAT_LENGTH = 65_536
+const STRUCTURED_PREFIX = /^\s*([[{<])/
 const CONFIG_KEY = String.raw`[\w-]+(?:\s*\.\s*[\w-]+)*`
 const CONFIG_TABLE = new RegExp(String.raw`^(?:\[\s*${CONFIG_KEY}\s*\]|\[\[\s*${CONFIG_KEY}\s*\]\])\s*(?:#.*)?$`)
 const CONFIG_ASSIGNMENT = new RegExp(String.raw`^${CONFIG_KEY}\s*=\s*(.+)$`)
@@ -64,19 +65,21 @@ function looksLikeToml(text: string) {
 
 function resolve(model: MonacoModel, text: string) {
   let language = model.getLanguageId()
-  if (!['plaintext', 'ini', 'xml', 'openstep-property-list', 'haproxy'].includes(language) || !text.trim())
-    return language
-  try {
-    const value: unknown = JSON.parse(text)
-    if (value && typeof value === 'object') return 'json'
-  } catch {
-    /* Another structured format or ordinary text. */
+  if (!['plaintext', 'ini', 'xml', 'openstep-property-list', 'haproxy'].includes(language)) return language
+  const prefix = STRUCTURED_PREFIX.exec(text)?.[1]
+  if (prefix === '{' || prefix === '[') {
+    try {
+      JSON.parse(text)
+      return 'json'
+    } catch {
+      /* Another structured format or ordinary text. */
+    }
   }
-  if (text.trimStart().startsWith('<')) {
+  if (prefix === '<') {
     const document = new DOMParser().parseFromString(text, 'application/xml')
     if (!document.querySelector('parsererror')) return 'xml'
   }
-  if (text.length <= MAX_FORMAT_LENGTH) {
+  if (text.length <= MAX_FORMAT_LENGTH && text.trim()) {
     const filename = model.uri.path.slice(model.uri.path.lastIndexOf('/') + 1)
     if (language === 'plaintext' && filename && !filename.includes('.') && looksLikeToml(text)) return 'toml'
     try {

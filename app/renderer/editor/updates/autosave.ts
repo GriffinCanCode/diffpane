@@ -6,7 +6,7 @@ import { reportError } from '../../shell/recovery/errors.ts'
 /** Serialize writes and coalesce typing while a write is in flight. */
 export class Autosave {
   private saved: string
-  private latest: string
+  private latest: string | (() => string)
   private running: Promise<Result<void>> | null = null
   private failed = false
   private readonly write: (text: string, expected: string) => Promise<unknown>
@@ -30,12 +30,12 @@ export class Autosave {
     if (!this.pending) this.saved = this.latest = text
   }
 
-  edit(text: string) {
+  edit(text: string | (() => string)) {
     this.latest = text
     // A failed save retains the buffer until an explicit retry.
     if (!this.failed) {
       this.start()?.catch((cause: unknown) => reportError(cause, { operation: 'Save file' }))
-    } else if (this.latest === this.saved) {
+    } else if (this.readLatest() === this.saved) {
       this.failed = false
       this.changed('saved')
     }
@@ -56,10 +56,14 @@ export class Autosave {
     return running
   }
 
+  private readLatest() {
+    // Read the editor buffer only when a write can use it.
+    return (this.latest = typeof this.latest === 'function' ? this.latest() : this.latest)
+  }
+
   private async persist(): Promise<Result<void>> {
     try {
-      while (this.latest !== this.saved) {
-        const text = this.latest
+      for (let text = this.readLatest(); text !== this.saved; text = this.readLatest()) {
         const startedAt = performance.now()
         // oxlint-disable-next-line eslint/no-await-in-loop -- The next save uses this write's text as its precondition.
         const result = await attemptAsync(() => this.write(text, this.saved), {
@@ -67,7 +71,7 @@ export class Autosave {
         })
         rendererDiagnostics.measure('renderer.autosave-write', startedAt, result)
         if (!result.ok) {
-          this.failed = this.latest !== this.saved
+          this.failed = this.readLatest() !== this.saved
           if (!this.failed) break
           this.changed('error', result.error)
           return result

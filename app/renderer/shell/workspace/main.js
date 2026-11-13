@@ -23,6 +23,7 @@ import './style.css'
 import '../recovery/loading.css'
 import { captureReviewLines, locateReviewLines } from '../../../shared/review/review-notes.ts'
 import { showDocumentPreview } from '../../editor/documents/document-preview.ts'
+import { createDocumentProcessor } from '../../editor/documents/document-runtime.ts'
 import { editorThemeName } from '../../editor/highlighting/editor-themes.ts'
 import { configureSyntax } from '../../editor/highlighting/syntax.ts'
 import { createLanguageFeatures } from '../../editor/languages/languages.js'
@@ -41,7 +42,7 @@ import { mountIdeaBuilder } from '../../panels/ideas/ideas.ts'
 import { createSettings } from '../../panels/settings/settings.js'
 import '../../editor/documents/document-preview.css'
 import '../../explorer/tree/navigator.css'
-import { changedFunctionRanges } from '../../review/comparison/function-ranges.ts'
+import { changedSymbolRanges } from '../../review/comparison/function-ranges.ts'
 import { createReviewFocus } from '../../review/comparison/review-focus.js'
 import { createReviewNotes } from '../../review/notes/review-notes.ts'
 import { createChangeReview } from '../../review/queue/change-review.js'
@@ -58,6 +59,7 @@ import { getWorkspacePreferences } from './preferences.ts'
 /** @import { ReviewAnchor } from '../../../shared/review/review-notes.ts' */
 /** @import { ShortcutAction, ShortcutOverrides } from '../../../shared/preferences/shortcuts.ts' */
 /** @import { ContentMatch } from '../../explorer/project-search/content-search.ts' */
+/** @import { FunctionRange } from '../../review/comparison/function-ranges.ts' */
 /** @import { ReviewScope } from '../../review/comparison/review-focus.js' */
 /** @typedef {import('monaco-editor/editor/editor.api.js').editor.IStandaloneCodeEditor} CodeEditor */
 /** @typedef {import('monaco-editor/editor/editor.api.js').editor.ITextModel} TextModel */
@@ -99,6 +101,7 @@ import { getWorkspacePreferences } from './preferences.ts'
  * @property {WorkspaceDocument | null} [document]
  * @property {WorkspaceComparison} [renderedComparison]
  * @property {boolean} [reviewComparison]
+ * @property {ReviewScope} [fileDiffScope]
  * @property {boolean} [documentFailed]
  * @property {boolean} [anchorFromIdea]
  * @property {FileAnchor | null} [pendingReviewAnchor]
@@ -106,7 +109,7 @@ import { getWorkspacePreferences } from './preferences.ts'
  * @property {{type: string, url: string} | null} [currentMedia]
  * @property {boolean} [previewRaw]
  * @property {(() => void) | null} [mediaCleanup]
- * @property {(() => void) | null} [markdownCleanup]
+ * @property {ReturnType<typeof showMarkdownPreview> | null} [markdownPreview]
  * @property {string | null} [markdownAnchor]
  * @property {string} [markdownText]
  * @property {number} [markdownScroll]
@@ -115,7 +118,7 @@ import { getWorkspacePreferences } from './preferences.ts'
  * @property {boolean} [applyingDocument]
  * @property {boolean} [restoreErrorFocus]
  * @property {HTMLElement | null} [errorBoundary]
- * @property {number} [functionEpoch]
+ * @property {AbortController} [documentWork]
  * @property {number} [changedFunctions]
  * @property {number} [modeVersion]
  * @property {number} [editVersion]
@@ -123,6 +126,7 @@ import { getWorkspacePreferences } from './preferences.ts'
  * @property {TextModel | null} [originalModel]
  * @property {string | null} [originalText]
  * @property {EditorDecorations | null} [originalDecorations]
+ * @property {EditorDecorations | null} [originalFunctionDecorations]
  * @property {EditorDecorations | null} [functionDecorations]
  * @property {import('monaco-editor/editor/editor.api.js').editor.IStandaloneDiffEditor | null} [diffEditor]
  * @property {import('monaco-editor/editor/editor.api.js').editor.IContextKey<boolean> | null} [headContext]
@@ -138,12 +142,14 @@ import { getWorkspacePreferences } from './preferences.ts'
 globalThis.MonacoEnvironment = { getWorker: () => new EditorWorker() }
 
 const syntax = configureSyntax(monaco)
+const documentProcessor = createDocumentProcessor()
 
 const icons = {
   mark: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3.5" fill="currentColor" opacity=".06"/><path d="M12 4v16" stroke="currentColor" opacity=".2"/><rect x="3" y="4" width="18" height="16" rx="3.5" stroke="currentColor" stroke-width="1.2" opacity=".5"/><path d="M6 9h3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity=".55"/><path d="M15 15h3m-1.5-1.5v3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>',
   branch:
     '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="4" cy="3" r="1.7" stroke="currentColor"/><circle cx="4" cy="13" r="1.7" stroke="currentColor"/><circle cx="12" cy="3" r="1.7" stroke="currentColor"/><path d="M4 5v6m8-6v1a4 4 0 0 1-4 4H4" stroke="currentColor" stroke-width="1.2"/></svg>',
   down: '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 3v10m-4-4 4 4 4-4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  more: '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="3.5" cy="8" r="1"/><circle cx="8" cy="8" r="1"/><circle cx="12.5" cy="8" r="1"/></svg>',
   search:
     '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="7" cy="7" r="4.2" stroke="currentColor" stroke-width="1.35"/><path d="m10 10 3.5 3.5" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/></svg>',
   review:
@@ -185,9 +191,16 @@ app.innerHTML = `
   <main class="start-screen" id="start-screen" aria-labelledby="start-title" aria-busy="true">
     <div class="start-content">
       <span class="workspace-art start-mark" aria-hidden="true">
-        <span class="workspace-art__tile workspace-art__tile--left">${icons.folder}</span>
-        <span class="workspace-art__tile workspace-art__tile--right">${icons.file}</span>
-        <span class="workspace-art__tile workspace-art__tile--main">${icons.mark}</span>
+        <svg viewBox="0 0 152 78" fill="none" stroke-linecap="round" stroke-linejoin="round">
+          <path class="workspace-art-guide" d="M12 17h128M12 39h128M12 61h128" stroke-dasharray="1 5"/>
+          <path class="workspace-art-branch" d="M15 39h37c17 0 24-22 42-22h43" stroke="var(--added-edge)"/>
+          <path class="workspace-art-branch" d="M52 39c17 0 24 22 42 22h43" stroke="var(--removed-edge)"/>
+          <path d="M15 39h37m45 0h40" stroke="var(--accent)" stroke-width="2.5"/>
+          <circle cx="52" cy="39" r="4.5" fill="var(--workbench-background)" stroke="var(--accent)" stroke-width="2"/>
+          <path d="M115 13v8m-4-4h8m-8 44h8" stroke="var(--workbench-background)" stroke-width="7"/>
+          <path d="M115 13v8m-4-4h8" stroke="var(--added)" stroke-width="1.8"/>
+          <path d="M111 61h8" stroke="var(--removed)" stroke-width="1.8"/>
+        </svg>
       </span>
       <h1 id="start-title">Welcome to Diffpane</h1>
       <p id="start-description">Open a file or folder in a Git working tree to get started.</p>
@@ -207,8 +220,12 @@ app.innerHTML = `
     <div class="feed" id="feed"></div>
     <div class="empty-state" id="empty-state">
       <span class="workspace-art empty-symbol" aria-hidden="true">
-        <span class="workspace-art__tile workspace-art__tile--right">${icons.mark}</span>
-        <span class="workspace-art__tile workspace-art__tile--main">${icons.file}</span>
+        <svg viewBox="0 0 138 78" fill="none" stroke-linecap="round" stroke-linejoin="round">
+          <path class="workspace-art-guide" d="M13 31h27m-20 10h20m-13 10h13m59-20h26m-26 10h19m-19 10h12"/>
+          <path d="M50 19v37a5 5 0 0 0 5 5h29a5 5 0 0 0 5-5V28L77 16H53a3 3 0 0 0-3 3Z" fill="var(--accent-surface)" stroke="var(--accent)" stroke-width="1.5"/>
+          <path d="M77 16v12h12M59 36h18m-18 8h13" stroke="var(--accent)" stroke-width="1.5"/>
+          <path d="M59 52h14" stroke="var(--added-edge)" stroke-width="2"/>
+        </svg>
       </span>
       <h2>Open a file</h2>
       <p>Select a file in the explorer.</p>
@@ -333,10 +350,7 @@ const appearance = createAppearanceSettings(uiPreferences, (preferences, scheme)
 
 const overviewRulerColors = {
   added: { color: colorHex('light', 'addedEdge'), darkColor: colorHex('dark', 'addedEdge') },
-  modified: {
-    color: colorHex('light', 'modifiedEdge'),
-    darkColor: colorHex('dark', 'modifiedEdge'),
-  },
+  modified: { color: colorHex('light', 'modifiedEdge'), darkColor: colorHex('dark', 'modifiedEdge') },
   deleted: { color: colorHex('light', 'removedEdge'), darkColor: colorHex('dark', 'removedEdge') },
 }
 
@@ -735,7 +749,7 @@ const navigator = createNavigator(ui.navigator, api, openFile, {
   onFolder: () => openTarget('folder'),
   onOutline: list => {
     const card = openedFile ? cards.get(openedFile.path) : undefined
-    if (card?.markdownCleanup) showMarkdownOutline(card, list)
+    if (card?.markdownPreview) showMarkdownOutline(card, list)
     else if (card?.editor) runTask('Load file outline', () => showSymbols(card, list))
     else if (card?.documentFailed) list.textContent = 'Symbols unavailable'
     else if (!card) list.textContent = 'Open a file to see its outline'
@@ -1106,9 +1120,9 @@ async function openFile(
         scheduleDocument()
       }
       syncReviewState()
-    } else if (ideaLink && file.anchor && current.document && current.markdownCleanup) {
+    } else if (ideaLink && file.anchor && isMarkdown(file.path) && !current.markdownSource) {
       current.markdownAnchor = file.anchor
-      renderCurrentDocument(current)
+      if (current.markdownPreview && current.markdownText === current.document?.after) renderCurrentDocument(current)
     }
     return true
   }
@@ -1211,8 +1225,8 @@ async function showSymbols(card, list = card.element.querySelector('.symbol-list
             lineNumber: symbol.selectionRange.startLineNumber,
             column: symbol.selectionRange.startColumn,
           })
-          editor.focus()
           requireElement(card.element, '.symbol-outline', HTMLDetailsElement).open = false
+          editor.focus()
         })
         nodes.push(button)
         append(symbol.children ?? [], depth + 1)
@@ -1313,33 +1327,43 @@ function createCard(file, openedAt) {
       <span class="file-icon">${icons.file}</span>
       <div class="file-path"><span class="file-directory"></span><strong class="file-name"></strong></div>
       <div class="file-actions">
-        <button class="diff-toggle change-button" type="button" aria-label="Compare whole file" aria-pressed="false" title="Compare whole file" disabled>
+        <button class="diff-toggle change-button" type="button" aria-pressed="false" title="Compare with Git HEAD" disabled>
           <svg viewBox="0 0 18 18" fill="none" aria-hidden="true"><rect x="1.75" y="3" width="14.5" height="12" rx="2" stroke="currentColor" stroke-width="1.2"/><path d="M9 3v12m-5.5-6H7m4 0h3.5m-1.75-1.75v3.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
-          <span>Compare</span>
+          <span>Diff</span><span class="file-diff-baseline" hidden></span>
         </button>
-        <details class="symbol-outline"><summary title="Document symbols">Symbols</summary><div class="symbol-list"></div></details>
-        <button class="change-button" type="button" title="Next change" aria-label="Next change in file">${icons.down}</button>
+        <details class="symbol-outline" hidden><summary title="Document symbols">Symbols</summary><div class="symbol-list"></div></details>
+        <button class="file-next-change change-button" type="button" title="Next change" aria-label="Next change in file" disabled>${icons.down}</button>
+        <button class="file-action-toggle change-button" type="button" aria-label="File actions" title="File actions">${icons.more}</button>
+        <div class="file-action-popover" role="group" aria-label="File actions" popover></div>
       </div>
     </div>
     <div class="file-note" hidden></div>
     <div class="file-errors"></div>
+    <div class="howmany-counts" hidden></div>
+    <div class="howmany-warnings" role="status" hidden></div>
     <div class="comparison-labels" hidden>
       <div class="comparison-original"><span class="comparison-version is-original">HEAD</span></div>
       <div class="comparison-working"><span class="comparison-version is-working">Working file</span></div>
-      <div class="comparison-inline">
-        <span class="comparison-version is-original">HEAD</span><span class="comparison-arrow">→</span><span class="comparison-version is-working">Working file</span>
-        <span class="comparison-layout">Inline</span>
-      </div>
     </div>
     <div class="editor-host"><div class="editor-placeholder" aria-hidden="true"><span class="placeholder-line"></span><span class="placeholder-line"></span><span class="placeholder-line"></span><span class="placeholder-line"></span><span class="placeholder-line"></span></div></div>
-    <div class="file-footer"><span class="line-count">Loading file…</span><span class="language-meta"><span class="language-state">Syntax</span><span class="file-language"></span></span></div>`
+    <div class="file-footer">
+      <span class="line-count">Loading file…</span>
+      <span class="language-meta"><span class="language-state">Syntax</span><span class="file-language"></span></span>
+    </div>`
   const reviewFocus = createReviewFocus({
     onScope: scope => {
-      reviewScope = scope
+      if (card.reviewComparison) reviewScope = scope
+      else card.fileDiffScope = scope
       element.dataset.reviewScope = scope
     },
   })
-  requireElement(element, '.comparison-labels', HTMLElement).before(reviewFocus.bar)
+  const actionToggle = requireElement(element, '.file-action-toggle', HTMLButtonElement)
+  const actions = requireElement(element, '.file-action-popover', HTMLElement)
+  actionToggle.before(reviewFocus.bar)
+  actionToggle.popoverTargetElement = actions
+  reviewFocus.scopeControl.classList.add('file-action-item')
+  reviewFocus.scopeControl.addEventListener('click', () => actions.hidePopover())
+  actions.prepend(reviewFocus.scopeControl)
   const reviewNotice = documentNode('div', 'file-note', '')
   reviewNotice.hidden = true
   reviewNotice.setAttribute('role', 'status')
@@ -1354,7 +1378,7 @@ function createCard(file, openedAt) {
     host: requireElement(element, '.editor-host', HTMLElement),
     note: requireElement(element, '.file-note', HTMLElement),
     errors: requireElement(element, '.file-errors', HTMLElement),
-    nextChange: requireElement(element, '[aria-label="Next change in file"]', HTMLButtonElement),
+    nextChange: requireElement(element, '.file-next-change', HTMLButtonElement),
     lines: requireElement(element, '.line-count', HTMLElement),
     language: requireElement(element, '.file-language', HTMLElement),
     languageCleanup: null,
@@ -1377,26 +1401,28 @@ function createCard(file, openedAt) {
   requireElement(element, '.file-directory', HTMLElement).textContent = file.path.slice(0, slash + 1)
   requireElement(element, '.file-name', HTMLElement).textContent = file.path.slice(slash + 1)
   requireElement(element, '.file-path', HTMLElement).title = file.path
-  if (ideas) {
-    const ideaButton = documentNode('button', 'change-button file-idea-link', '')
-    ideaButton.type = 'button'
-    ideaButton.title = 'Attach selection or visible lines to an idea'
-    ideaButton.setAttribute('aria-label', 'Attach current view to an idea')
-    ideaButton.innerHTML = icons.idea
-    ideaButton.addEventListener('click', () => attachIdeaLink(captureIdeaLink(card)))
-    requireElement(element, '.diff-toggle', HTMLButtonElement).after(ideaButton)
+  /** @param {string} label @param {string} icon @param {() => void} run */
+  function addFileAction(label, icon, run) {
+    const button = documentNode('button', 'file-action-item', label)
+    button.type = 'button'
+    button.insertAdjacentHTML('afterbegin', icon)
+    button.addEventListener('click', () => {
+      actions.hidePopover()
+      run()
+    })
+    actions.append(button)
   }
   if (reviewNotes) {
-    const noteButton = documentNode('button', 'change-button file-review-note', '')
-    noteButton.type = 'button'
-    noteButton.title = 'Add file review note'
-    noteButton.setAttribute('aria-label', 'Add review note for this file')
-    noteButton.innerHTML = icons.note
-    noteButton.addEventListener('click', () => {
+    addFileAction('Add file review note', icons.note, () => {
       if (!closingRequested) reviewNotes.openComposer(captureReviewAnchor(card, 'working', false))
     })
-    requireElement(element, '.diff-toggle', HTMLButtonElement).after(noteButton)
   }
+  if (ideas) addFileAction('Link to an idea', icons.idea, () => attachIdeaLink(captureIdeaLink(card)))
+  if (assistant) addFileAction('Ask The Creature about this file', creatureGlyph, () => assistant.toggle(true))
+  addFileAction('Reveal in Files', icons.file, () => {
+    showFileExplorer()
+    navigator.select(card.file.path)
+  })
   card.nextChange.addEventListener('click', () => {
     if (!card.editor || card.changes.length === 0) return
     card.changeIndex = (card.changeIndex + 1) % card.changes.length
@@ -1422,6 +1448,7 @@ function createCard(file, openedAt) {
     for (const [label, source] of markdownModes) {
       const button = documentNode('button', '', label)
       button.type = 'button'
+      button.disabled = true
       button.setAttribute('aria-pressed', String(!source))
       button.addEventListener('click', () => {
         runTask('Switch Markdown view', () =>
@@ -1578,7 +1605,9 @@ async function loadDocument(card, retry = false) {
       card.renderedComparison = comparison
       card.noteSide = card.ideaSide = 'working'
     }
-    renderDocument(card, document)
+    const rendered = renderDocument(card, document)
+    if (rendered) await rendered
+    if (!card.active || generation !== card.generation) return
     clearDocumentFailure(card)
     initialDocumentReady = true
     rendererDiagnostics.measure('renderer.document-load', startedAt)
@@ -1621,7 +1650,7 @@ function clearDocumentFailure(card) {
 /** @param {Card} card @param {unknown} cause */
 function showDocumentFailure(card, cause) {
   card.documentFailed = true
-  const hasView = Boolean(card.editor ?? card.mediaCleanup ?? card.markdownCleanup)
+  const hasView = Boolean(card.editor ?? card.mediaCleanup ?? card.markdownPreview)
   const error = reportError(cause, { operation: 'Load file', silent: true })
   if (!hasView) {
     if (!card.errorBoundary?.isConnected) card.host.replaceChildren()
@@ -1689,7 +1718,7 @@ function editorOptions(card) {
   }
 }
 
-/** @param {Card} card @param {WorkspaceDocument} document */
+/** @param {Card} card @param {WorkspaceDocument} document @returns {void | Promise<void>} */
 function renderDocument(card, document) {
   card.restoreErrorFocus = Boolean(card.errorBoundary?.contains(globalThis.document.activeElement))
   card.document = document
@@ -1697,7 +1726,7 @@ function renderDocument(card, document) {
   const preview = document.preview
   const reading = !preview && isMarkdown(card.file.path) && !card.markdownSource
   const text = document.after
-  const reusableMarkdown = reading && card.markdownCleanup && text === card.markdownText && !card.markdownAnchor
+  const previousMarkdown = reading && text === card.markdownText ? card.markdownPreview : null
   card.note.textContent = preview
     ? ''
     : document.note?.length
@@ -1708,31 +1737,44 @@ function renderDocument(card, document) {
           ? 'This file was deleted. There are no current contents.'
           : ''
   card.note.hidden = !card.note.textContent
-  if (reusableMarkdown) {
+  card.documentWork?.abort()
+  if (previousMarkdown) {
+    if (card.markdownAnchor) {
+      previousMarkdown.scrollToAnchor(card.markdownAnchor)
+      card.markdownAnchor = null
+    }
     revealReviewAnchor(card)
-    return
+    return undefined
   }
-  card.functionEpoch = (card.functionEpoch ?? 0) + 1
+  const { signal } = (card.documentWork = new AbortController())
   card.mediaCleanup?.()
   card.mediaCleanup = null
-  card.markdownCleanup?.()
-  card.markdownCleanup = null
+  if (!reading) {
+    card.markdownPreview?.dispose()
+    card.markdownPreview = null
+  }
   const modes = card.element.querySelector('.markdown-toggle')
   if (modes instanceof HTMLElement) {
     modes.hidden = Boolean(preview)
-    for (const button of modes.querySelectorAll('button'))
+    for (const button of modes.querySelectorAll('button')) {
+      button.disabled = false
       button.setAttribute('aria-pressed', String((button.textContent === 'Preview') === reading))
+    }
   }
   for (const control of card.element.querySelectorAll('.symbol-outline, .language-state')) {
     if (control instanceof HTMLElement) control.hidden = Boolean(preview) || reading
   }
-  card.nextChange.hidden = Boolean(preview) || reading || Boolean(card.reviewComparison)
+  card.nextChange.hidden = Boolean(preview) || reading || card.comparing
   const button = requireElement(card.element, '.diff-toggle', HTMLButtonElement)
   button.disabled = false
   button.hidden = false
   button.setAttribute('aria-pressed', String(card.comparing))
-  button.title = card.comparing ? 'Show current file' : 'Compare whole file'
-  button.setAttribute('aria-label', button.title)
+  const baselineText = baseline === 'HEAD' ? 'Git HEAD' : baseline
+  button.title = card.comparing ? 'Show working file' : 'Compare with Git HEAD'
+  button.setAttribute('aria-label', card.comparing ? `Diff against ${baselineText}, show working file` : 'Diff')
+  const baselineBadge = requireElement(button, '.file-diff-baseline', HTMLElement)
+  baselineBadge.hidden = !card.comparing
+  baselineBadge.textContent = baselineText
   card.element.dataset.diff = String(card.comparing)
   card.element.dataset.view = preview ? 'document' : reading ? 'markdown' : 'source'
   const labels = requireElement(card.element, '.comparison-labels', HTMLElement)
@@ -1772,44 +1814,41 @@ function renderDocument(card, document) {
       return sum + (data + (side.hex?.length ?? 0) + value) * 2
     }, 0)
     revealReviewAnchor(card)
-    return
+    return undefined
   }
-  const viewState = card.editor?.saveViewState()
   if (reading) {
     releaseEditor(card)
     howmany?.clearFile(card)
     setSaveLabel('Read only')
-    const words = text.trim().split(/\s+/).filter(Boolean).length
-    card.lines.textContent = `${words.toLocaleString()} words · ${Math.max(1, Math.ceil(words / 220))} min read`
     card.language.textContent = 'Markdown'
     card.textBytes = text.length * 2
-    card.markdownCleanup = showMarkdownPreview(card.host, text, {
-      filename: card.file.path,
-      scrollTop: card.markdownScroll,
-      diagramHeights: (card.markdownDiagramHeights ??= []),
-      anchor: card.markdownAnchor ?? undefined,
-      onScroll: top => {
-        card.markdownScroll = top
-      },
-      media: api.media,
-      openExternal: api.openExternal,
-      onOpenFile: openFile,
-      colorize: colorizeMarkdown,
+    return documentProcessor.run({ kind: 'markdown', source: text }, signal).then(result => {
+      if (result?.kind !== 'markdown' || signal.aborted) return undefined
+      const { markdown } = result
+      const { words } = markdown
+      card.markdownPreview?.dispose()
+      card.markdownPreview = null
+      card.lines.textContent = `${words.toLocaleString()} words · ${Math.max(1, Math.ceil(words / 220))} min read`
+      card.markdownPreview = showMarkdownPreview(card.host, markdown, {
+        filename: card.file.path,
+        scrollTop: card.markdownScroll,
+        diagramHeights: (card.markdownDiagramHeights ??= []),
+        anchor: card.markdownAnchor ?? undefined,
+        onScroll: top => {
+          card.markdownScroll = top
+        },
+        media: api.media,
+        openExternal: api.openExternal,
+        onOpenFile: openFile,
+        colorize: colorizeMarkdown,
+      })
+      card.markdownAnchor = null
+      card.markdownText = text
+      const outline = ui.navigator.querySelector('.navigator-outline .symbol-list')
+      if (outline) showMarkdownOutline(card, outline)
+      revealReviewAnchor(card)
+      return undefined
     })
-    card.markdownAnchor = null
-    card.markdownText = text
-    const outline = ui.navigator.querySelector('.navigator-outline .symbol-list')
-    if (outline) showMarkdownOutline(card, outline)
-    revealReviewAnchor(card)
-    return
-  }
-  if (!card.element.querySelector('.howmany-counts')) {
-    const counts = documentNode('div', 'howmany-counts', '')
-    const warnings = documentNode('div', 'howmany-warnings', '')
-    counts.hidden = true
-    warnings.hidden = true
-    warnings.setAttribute('role', 'status')
-    card.reviewFocus.bar.before(counts, warnings)
   }
   if (!card.model) {
     if (!snapshot) throw new Error('The workspace closed before its file could be rendered.')
@@ -1854,16 +1893,21 @@ function renderDocument(card, document) {
       },
     )
     card.autosave = autosave
+    const readBuffer = () => {
+      const value = model.getValue(undefined, true)
+      card.text = value
+      if (card.document) card.document = { ...card.document, after: value }
+      return value
+    }
     card.contentCleanup = model.onDidChangeContent(() => {
       const displayed = card.document
       if (card.applyingDocument || !displayed?.editable || card.model !== model) return
       card.editVersion = (card.editVersion ?? 0) + 1
-      card.text = model.getValue(undefined, true)
-      card.document = { ...displayed, after: card.text }
-      autosave.edit(card.text)
+      autosave.edit(readBuffer)
       syncSaveState()
     })
   } else if (card.editor && card.text !== text) {
+    const viewState = card.editor.saveViewState()
     applyDiskText(card, text)
     if (viewState) card.editor.restoreViewState(viewState)
   }
@@ -1889,19 +1933,19 @@ function renderDocument(card, document) {
     card.originalText = document.before
     if (originalState) originalEditor.restoreViewState(originalState)
   }
-  if (card.reviewComparison && diffEditor) {
-    if (!card.dirty && card.file.reviewVersion === document.reviewVersion) {
-      card.element.dataset.reviewScope = reviewScope
-      card.reviewFocus.attach(diffEditor, reviewScope, comparisonAriaLabels(card))
-    }
+  if (diffEditor && (!card.reviewComparison || (!card.dirty && card.file.reviewVersion === document.reviewVersion))) {
+    const scope = card.reviewComparison ? reviewScope : (card.fileDiffScope ?? 'full')
+    card.element.dataset.reviewScope = scope
+    card.reviewFocus.attach(diffEditor, scope, comparisonAriaLabels(card), Boolean(card.reviewComparison))
   } else delete card.element.dataset.reviewScope
   /** @type {monaco.editor.IModelDeltaDecoration[]} */
   const decorations = []
   /** @type {Set<number>} */
   const changeLines = new Set()
+  const lineCount = model.getLineCount()
   for (const change of document.decorations) {
-    const start = Math.max(1, Math.min(model.getLineCount(), change.startLine))
-    const end = Math.max(start, Math.min(model.getLineCount(), change.endLine))
+    const start = Math.max(1, Math.min(lineCount, change.startLine))
+    const end = Math.max(start, Math.min(lineCount, change.endLine))
     changeLines.add(start)
     const deleted = change.kind === 'deleted'
     const kind = deleted ? 'deleted' : change.kind === 'modified' ? 'modified' : 'added'
@@ -1922,6 +1966,7 @@ function renderDocument(card, document) {
   decorationCollection.set(decorations)
   card.changes = Array.from(changeLines).toSorted((a, b) => a - b)
   card.nextChange.disabled = card.changes.length === 0
+  card.nextChange.hidden ||= card.nextChange.disabled
   card.lines.textContent = `${document.lineCount.toLocaleString()} ${document.lineCount === 1 ? 'line' : 'lines'}`
   const language = model.getLanguageId()
   card.language.textContent =
@@ -1933,12 +1978,13 @@ function renderDocument(card, document) {
   revealReviewAnchor(card)
   if (document.workingMissing) howmany?.clearFile(card)
   else howmany?.updateFile(card, document)
-  if (diffEditor) runTask('Highlight changed functions', () => highlightFunctions(card))
+  if (diffEditor) runTask('Highlight changed functions', () => highlightFunctions(card, signal))
   else card.changedFunctions = 0
   if (requireElement(card.element, '.symbol-outline', HTMLDetailsElement).open)
     runTask('Load file outline', () => showSymbols(card))
   const outline = ui.navigator.querySelector('.navigator-outline[open] .symbol-list')
   if (outline) runTask('Load file outline', () => showSymbols(card, outline))
+  return undefined
 }
 
 /** @param {monaco.Selection} selection */
@@ -2150,8 +2196,10 @@ async function changeDocumentMode(card, change) {
 function renderCurrentDocument(card) {
   const document = card.document
   if (!document) return
-  const result = attempt(() => renderDocument(card, document))
-  if (!result.ok) showDocumentFailure(card, result.error)
+  runTask('Render file', async () => {
+    const result = await attemptAsync(() => renderDocument(card, document))
+    if (!result.ok && card.active && card.document === document) showDocumentFailure(card, result.error)
+  })
 }
 
 /** @param {Card} card */
@@ -2162,8 +2210,10 @@ function toggleDiff(card) {
     card.pendingMatch = null
     card.pendingReviewAnchor = null
     card.comparing = comparing
-    if (comparing) card.markdownSource = true
-    else {
+    if (comparing) {
+      card.markdownSource = true
+      card.fileDiffScope ??= 'focus'
+    } else {
       card.reviewComparison = false
       setDocumentComparison(card, 'head')
     }
@@ -2174,6 +2224,7 @@ function toggleDiff(card) {
 /** @param {Card} card @param {WorkspaceComparison} comparison */
 function setDocumentComparison(card, comparison) {
   if (card.comparison === comparison) return false
+  card.documentWork?.abort()
   card.comparison = comparison
   card.generation++
   card.dirty = true
@@ -2193,6 +2244,8 @@ function openComparison(card, comparison, file) {
   const reloading = setDocumentComparison(card, comparison)
   if (file) card.file = file
   if (!card.reviewComparison || !card.comparing || reloading) {
+    card.reviewFocus.detach()
+    card.diffEditor?.updateOptions({ hideUnchangedRegions: { enabled: false } })
     card.reviewComparison = true
     card.diffEditor?.updateOptions({
       ...diffAppearance(appearance.value, true),
@@ -2255,6 +2308,7 @@ function setCardEditor(card, state) {
   card.originalModel?.dispose()
   card.originalModel = null
   card.originalDecorations = null
+  card.originalFunctionDecorations = null
   card.functionDecorations = null
   card.host.replaceChildren()
   if (card.comparing) {
@@ -2287,6 +2341,7 @@ function setCardEditor(card, state) {
     syncLabelWidth(originalEditor.getLayoutInfo())
     originalEditor.onDidLayoutChange(syncLabelWidth)
     card.originalDecorations = originalEditor.createDecorationsCollection()
+    card.originalFunctionDecorations = originalEditor.createDecorationsCollection()
     card.functionDecorations = card.editor.createDecorationsCollection()
   } else card.editor = monaco.editor.create(card.host, { ...editorOptions(card), model })
   card.noteSide = 'working'
@@ -2361,13 +2416,10 @@ function syncLanguageAttachment(card) {
   if (document.workingMissing) {
     card.languageCleanup?.()
     card.languageCleanup = null
-  } else
-    card.languageCleanup ??= languageFeatures.attach(editor, model, card.file.path, {
-      active: true,
-    })
+  } else card.languageCleanup ??= languageFeatures.attach(editor, model, card.file.path, { active: true })
 }
 
-/** @param {ReturnType<typeof changedFunctionRanges>} functions @param {'before' | 'after'} kind */
+/** @param {FunctionRange[]} functions @param {'before' | 'after'} kind */
 function functionDecorations(functions, kind) {
   return functions.map(fn => ({
     range: new monaco.Range(fn.startLine, 1, fn.endLine, 1),
@@ -2379,42 +2431,47 @@ function functionDecorations(functions, kind) {
   }))
 }
 
-/** @param {Card} card */
-async function highlightFunctions(card) {
-  const epoch = card.functionEpoch
-  const document = card.document
-  if (!document) return
-  /** @param {Awaited<ReturnType<typeof languageFeatures.symbols>>} [symbols] */
-  const paint = (symbols = []) => {
-    if (
-      !card.diffEditor ||
-      !card.functionDecorations ||
-      !card.originalDecorations ||
-      epoch !== card.functionEpoch ||
-      !card.active
-    )
-      return
-    const modified = changedFunctionRanges(document.after ?? '', document.decorations ?? [], symbols)
-    const original = changedFunctionRanges(document.before ?? '', document.beforeDecorations ?? [])
-    card.functionDecorations.set(functionDecorations(modified, 'after'))
-    const markers = (document.beforeDecorations ?? []).map(change => ({
-      range: new monaco.Range(change.startLine, 1, change.endLine ?? change.startLine, 1),
-      options: {
-        linesDecorationsClassName: `diff-gutter-${change.kind}`,
-        overviewRuler: {
-          ...overviewRulerColors.deleted,
-          position: monaco.editor.OverviewRulerLane.Left,
-        },
-      },
-    }))
-    card.originalDecorations.set([...functionDecorations(original, 'before'), ...markers])
-    card.changedFunctions = modified.length
+/** @param {Card} card @param {AbortSignal} signal */
+async function highlightFunctions(card, signal) {
+  const { document, functionDecorations: modifiedDecorations, originalDecorations, originalFunctionDecorations } = card
+  if (!document || !modifiedDecorations || !originalDecorations || !originalFunctionDecorations) return
+  const { decorations, beforeDecorations } = document
+  const markers = beforeDecorations.map(change => ({
+    range: new monaco.Range(change.startLine, 1, change.endLine ?? change.startLine, 1),
+    options: {
+      linesDecorationsClassName: `diff-gutter-${change.kind}`,
+      overviewRuler: { ...overviewRulerColors[change.kind], position: monaco.editor.OverviewRulerLane.Left },
+    },
+  }))
+  originalDecorations.set(markers)
+  if (!beforeDecorations.length) originalFunctionDecorations.clear()
+  if (!decorations.length) {
+    modifiedDecorations.clear()
+    card.changedFunctions = 0
   }
-  paint()
-  try {
-    paint(await languageFeatures.symbols(card.file.path))
-  } catch {
-    /* Lexical ranges stay visible when a server is unavailable. */
+  if (!decorations.length && !beforeDecorations.length) return
+  const symbols = decorations.length ? attemptAsync(() => languageFeatures.symbols(card.file.path)) : null
+  const ranges = await documentProcessor.run(
+    {
+      kind: 'functions',
+      before: beforeDecorations.length ? document.before : '',
+      after: decorations.length ? document.after : '',
+      original: beforeDecorations,
+      modified: decorations,
+    },
+    signal,
+  )
+  if (ranges?.kind !== 'functions' || signal.aborted) return
+  originalFunctionDecorations.set(functionDecorations(ranges.before, 'before'))
+  modifiedDecorations.set(functionDecorations(ranges.after, 'after'))
+  card.changedFunctions = ranges.after.length
+  const outline = await symbols
+  if (outline?.ok && outline.value.length && !signal.aborted) {
+    const modified = changedSymbolRanges(decorations, outline.value)
+    if (modified) {
+      modifiedDecorations.set(functionDecorations(modified, 'after'))
+      card.changedFunctions = modified.length
+    }
   }
 }
 
@@ -2454,13 +2511,16 @@ function documentNode(tag, className, text) {
 /** @param {Card} card */
 function deactivate(card) {
   howmany?.clearFile(card)
+  const actions = card.element.querySelector('.file-action-popover:popover-open')
+  if (actions instanceof HTMLElement) actions.hidePopover()
   card.active = false
+  card.documentWork?.abort()
   card.generation++
   card.dirty = true
   card.mediaCleanup?.()
   card.mediaCleanup = null
-  card.markdownCleanup?.()
-  card.markdownCleanup = null
+  card.markdownPreview?.dispose()
+  card.markdownPreview = null
   releaseEditor(card)
   card.document = null
   card.currentMedia = null
@@ -2491,10 +2551,10 @@ function releaseEditor(card) {
   card.originalModel = null
   card.originalText = null
   card.originalDecorations = null
+  card.originalFunctionDecorations = null
   card.functionDecorations = null
   card.changedFunctions = 0
   card.diffEditor = null
-  card.functionEpoch = (card.functionEpoch ?? 0) + 1
   card.model?.dispose()
   card.editor = null
   card.model = null
@@ -2817,6 +2877,7 @@ Object.assign(window, {
       if (typeof unsubscribe === 'function') unsubscribe()
       if (typeof unsubscribeErrors === 'function') unsubscribeErrors()
       for (const card of cards.values()) deactivate(card)
+      documentProcessor.dispose()
       languageWidgets.remove()
     },
     { once: true },

@@ -1,11 +1,11 @@
 import DOMPurify from 'dompurify'
-import { marked } from 'marked'
 import type { Mermaid } from 'mermaid'
 import { colorHex } from '../../../shared/appearance/palette.ts'
 import type { ColorRole, ColorScheme } from '../../../shared/appearance/palette.ts'
 import { appError, attemptAsync } from '../../../shared/recovery/app-errors.ts'
 import { reportError, runTask } from '../../shell/recovery/errors.ts'
 import { requireElement } from '../../shell/workspace/dom.js'
+import type { parseMarkdown } from './markdown-document.ts'
 import { markdownTarget } from './markdown-paths.ts'
 import './markdown-preview.css'
 
@@ -152,7 +152,11 @@ function copyButton(source: string, signal: AbortSignal) {
 }
 
 /** Owns the rendered document and all asynchronous diagram work for one file. */
-export function showMarkdownPreview(host: ParentNode, source: string, options: MarkdownOptions) {
+export function showMarkdownPreview(
+  host: ParentNode,
+  markdown: ReturnType<typeof parseMarkdown>,
+  options: MarkdownOptions,
+) {
   const lifetime = new AbortController()
   const events = { signal: lifetime.signal }
   let expanded: ReturnType<typeof expandDiagram> | null = null
@@ -181,17 +185,18 @@ export function showMarkdownPreview(host: ParentNode, source: string, options: M
   root.tabIndex = 0
   root.setAttribute('aria-label', 'Markdown preview')
   const article = node('article', 'markdown-body')
-  const frontmatter = source.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/)
-  const body = frontmatter ? source.slice(frontmatter[0].length) : source
-  article.innerHTML = DOMPurify.sanitize(marked.parse(body, { gfm: true, async: false }), {
-    USE_PROFILES: { html: true },
-    FORBID_TAGS: ['style', 'form', 'button', 'textarea', 'select', 'video', 'audio'],
-    FORBID_ATTR: ['style', 'srcset', 'id', 'name', 'autofocus'],
-  })
-  if (frontmatter) {
+  article.append(
+    DOMPurify.sanitize(markdown.html, {
+      RETURN_DOM_FRAGMENT: true,
+      USE_PROFILES: { html: true },
+      FORBID_TAGS: ['style', 'form', 'button', 'textarea', 'select', 'video', 'audio'],
+      FORBID_ATTR: ['style', 'srcset', 'id', 'name', 'autofocus'],
+    }),
+  )
+  if (markdown.metadata !== undefined) {
     const metadata = node('details', 'md-frontmatter')
     const pre = node('pre', '')
-    pre.append(node('code', 'language-yaml', frontmatter[1]))
+    pre.append(node('code', 'language-yaml', markdown.metadata))
     metadata.append(node('summary', '', 'Document metadata'), pre)
     article.append(metadata)
   }
@@ -442,22 +447,25 @@ export function showMarkdownPreview(host: ParentNode, source: string, options: M
   }
   root.scrollTop = options.scrollTop ?? 0
   if (options.anchor) scrollToAnchor(options.anchor)
-  return () => {
-    if (lifetime.signal.aborted) return
-    lifetime.abort()
-    mountedPreviews.delete(recolor)
-    try {
-      options.onScroll?.(root.scrollTop)
-      if (options.diagramHeights)
-        options.diagramHeights.splice(
-          0,
-          options.diagramHeights.length,
-          ...diagrams.map(canvas => canvas.getBoundingClientRect().height),
-        )
-    } finally {
-      root.remove()
-      expanded?.close()
-    }
+  return {
+    scrollToAnchor,
+    dispose() {
+      if (lifetime.signal.aborted) return
+      lifetime.abort()
+      mountedPreviews.delete(recolor)
+      try {
+        options.onScroll?.(root.scrollTop)
+        if (options.diagramHeights)
+          options.diagramHeights.splice(
+            0,
+            options.diagramHeights.length,
+            ...diagrams.map(canvas => canvas.getBoundingClientRect().height),
+          )
+      } finally {
+        root.remove()
+        expanded?.close()
+      }
+    },
   }
 }
 
