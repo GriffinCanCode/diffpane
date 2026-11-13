@@ -2,6 +2,7 @@ import { attemptAsync } from '../../../shared/recovery/app-errors.ts'
 import { showErrorBoundary } from '../../shell/recovery/error-boundary.ts'
 import { reportError, runTask } from '../../shell/recovery/errors.ts'
 import { requireElement } from '../../shell/workspace/dom.js'
+import '../search-dialog.css'
 import '../search-illustration.css'
 import './content-search.css'
 
@@ -38,17 +39,17 @@ function node(tag: string, className: string, text = '') {
 export function createContentSearch(api: SearchApi, onSelect: (match: ContentMatch) => unknown) {
   const dialog = document.createElement('dialog')
   dialog.id = 'content-search'
-  dialog.className = 'content-search'
+  dialog.className = 'content-search search-dialog'
   dialog.setAttribute('aria-labelledby', 'content-search-title')
   dialog.innerHTML = `
-    <header class="content-search-heading">
-      <div><h2 id="content-search-title">Search in project</h2><p class="content-search-context"></p></div>
-      <button type="button" class="content-search-close" aria-label="Close project search" title="Close · Escape">×</button>
+    <header class="content-search-heading search-dialog-heading">
+      <div><h2 id="content-search-title">Search in project</h2><p class="content-search-context search-dialog-context"></p></div>
+      <button type="button" class="content-search-close search-dialog-close" aria-label="Close project search" title="Close · Escape">×</button>
     </header>
-    <div class="content-search-field">
+    <div class="content-search-field search-dialog-field">
       <svg viewBox="0 0 18 18" fill="none" aria-hidden="true"><circle cx="7.8" cy="7.8" r="4.6" stroke="currentColor" stroke-width="1.4"/><path d="m11.3 11.3 3.3 3.3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
       <input aria-label="Search file contents" placeholder="Find text in files…" role="combobox" aria-controls="content-search-results" aria-expanded="false" aria-autocomplete="list" autocomplete="off" spellcheck="false" maxlength="${MAX_QUERY_LENGTH}" autofocus>
-      <button type="button" class="content-search-clear" aria-label="Clear search" hidden>Clear</button>
+      <button type="button" class="content-search-clear search-dialog-clear" aria-label="Clear search" hidden>Clear</button>
     </div>
     <div class="content-search-toolbar">
       <div class="content-search-scopes" role="group" aria-label="Search scope">
@@ -57,10 +58,10 @@ export function createContentSearch(api: SearchApi, onSelect: (match: ContentMat
       </div>
       <button type="button" class="content-search-case" aria-pressed="false">Match case</button>
     </div>
-    <p class="content-search-summary" role="status"></p>
-    <div class="content-search-body">
-      <div class="content-search-results" id="content-search-results" role="listbox" aria-label="Matching lines" hidden></div>
-      <div class="content-search-empty" hidden>
+    <p class="content-search-summary search-dialog-summary" role="status"></p>
+    <div class="content-search-body search-dialog-results">
+      <div class="content-search-results search-dialog-list" id="content-search-results" role="listbox" aria-label="Matching lines" hidden></div>
+      <div class="content-search-empty search-dialog-empty" hidden>
         <span class="search-illustration" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round"><path d="M10 5H4m8 5H4m4 5H4"/><circle cx="15.5" cy="13.5" r="4.5"/><path d="m19 17 3 3"/></svg>
         </span>
@@ -68,11 +69,12 @@ export function createContentSearch(api: SearchApi, onSelect: (match: ContentMat
       </div>
       <div class="content-search-error" hidden></div>
     </div>
-    <footer class="content-search-footer"><span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span><span><kbd>↵</kbd> Open match</span></footer>`
+    <footer class="content-search-footer search-dialog-footer"><span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span><span><kbd>↵</kbd> Open match</span><span><kbd>Esc</kbd> Close</span></footer>`
   document.body.append(dialog)
 
   const input = requireElement(dialog, 'input', HTMLInputElement)
   const results = requireElement(dialog, '.content-search-results', HTMLElement)
+  const footer = requireElement(dialog, 'footer', HTMLElement)
   const summary = requireElement(dialog, '.content-search-summary', HTMLElement)
   const empty = requireElement(dialog, '.content-search-empty', HTMLElement)
   const emptyMessage = requireElement(empty, 'p', HTMLParagraphElement)
@@ -122,14 +124,16 @@ export function createContentSearch(api: SearchApi, onSelect: (match: ContentMat
         list.append(file)
         lastPath = hit.path
       }
-      const row = node('div', 'content-search-hit')
+      const row = node('div', 'content-search-hit search-dialog-option')
       row.id = `content-search-hit-${index}`
       row.dataset.index = String(index)
       row.setAttribute('role', 'option')
       row.setAttribute('aria-selected', 'false')
       row.setAttribute('aria-label', `${hit.path}:${hit.line} ${hit.before}${hit.match}${hit.after}`)
       const snippet = node('code', 'content-search-snippet')
-      snippet.append(hit.before, node('mark', '', hit.match), hit.after)
+      if (hit.before) snippet.append(node('span', 'content-search-before', hit.before))
+      snippet.append(node('mark', '', hit.match))
+      if (hit.after) snippet.append(node('span', '', hit.after))
       row.append(node('span', 'content-search-line', String(hit.line)), snippet)
       file.append(row)
       options.push(row)
@@ -137,6 +141,7 @@ export function createContentSearch(api: SearchApi, onSelect: (match: ContentMat
     results.replaceChildren(list)
     results.hidden = !matches.length
     input.setAttribute('aria-expanded', String(!results.hidden))
+    footer.dataset.results = String(!results.hidden)
     empty.hidden = !detail
     emptyMessage.textContent = detail
     summary.textContent = status
@@ -148,7 +153,10 @@ export function createContentSearch(api: SearchApi, onSelect: (match: ContentMat
   async function search(preserve: boolean) {
     const request = generation
     inFlight = true
-    if (!preserve) summary.setAttribute('data-loading-status', '')
+    if (!preserve) {
+      summary.setAttribute('data-loading-status', '')
+      results.setAttribute('aria-busy', 'true')
+    }
     try {
       const result = await attemptAsync(() => api.contentSearch({ query: input.value, scope, matchCase }), {
         operation: 'Search project contents',
@@ -156,6 +164,7 @@ export function createContentSearch(api: SearchApi, onSelect: (match: ContentMat
       if (request !== generation || !dialog.open) return
       if (!result.ok) {
         reportError(result.error, { silent: true })
+        summary.dataset.state = 'error'
         render([], 'Search failed')
         failure.hidden = false
         showErrorBoundary(failure, {
@@ -172,6 +181,7 @@ export function createContentSearch(api: SearchApi, onSelect: (match: ContentMat
       }
       if (!result.value) return
       clearFailure()
+      delete summary.dataset.state
       const { matches: found, truncated } = result.value
       const lines = found.length
       const files = new Set(found.map(hit => hit.path)).size
@@ -192,6 +202,7 @@ export function createContentSearch(api: SearchApi, onSelect: (match: ContentMat
       if (request === generation) {
         inFlight = false
         summary.removeAttribute('data-loading-status')
+        results.removeAttribute('aria-busy')
         if (refreshPending) refresh()
       }
     }
@@ -203,6 +214,7 @@ export function createContentSearch(api: SearchApi, onSelect: (match: ContentMat
     timer = undefined
     refreshPending = false
     summary.removeAttribute('data-loading-status')
+    results.removeAttribute('aria-busy')
     if (inFlight) runTask('Cancel project search', () => api.cancelContentSearch(), { silent: true })
     inFlight = false
   }
@@ -223,6 +235,7 @@ export function createContentSearch(api: SearchApi, onSelect: (match: ContentMat
     stop()
     clear.hidden = !input.value
     clearFailure()
+    delete summary.dataset.state
     if (input.value) {
       render([], 'Searching…')
       queue(SEARCH_DELAY, false)
@@ -249,7 +262,7 @@ export function createContentSearch(api: SearchApi, onSelect: (match: ContentMat
 
   input.addEventListener('input', start)
   input.addEventListener('keydown', event => {
-    if (event.isComposing || event.metaKey || event.ctrlKey || event.altKey) return
+    if (event.isComposing || event.metaKey || event.ctrlKey || event.altKey || !options.length) return
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault()
       select(selected + (event.key === 'ArrowDown' ? 1 : -1), true)
@@ -282,13 +295,11 @@ export function createContentSearch(api: SearchApi, onSelect: (match: ContentMat
         for (const item of scopes) item.setAttribute('aria-pressed', String(item === button))
         start()
       }
-      input.focus()
     })
   matchCaseButton.addEventListener('click', () => {
     matchCase = !matchCase
     matchCaseButton.setAttribute('aria-pressed', String(matchCase))
     start()
-    input.focus()
   })
   clear.addEventListener('click', () => {
     input.value = ''

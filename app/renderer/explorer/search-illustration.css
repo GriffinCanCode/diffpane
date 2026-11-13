@@ -55,30 +55,3 @@
     transform: translateY(5px) rotate(-14deg) scale(0.9);
   }
 }
-
-dialog:is(.file-picker, .content-search) {
-  --search-illustration-tint: var(--accent-surface);
-  background:
-    radial-gradient(
-      ellipse at 16% 0,
-      color-mix(in oklab, var(--search-illustration-tint) 70%, transparent),
-      transparent 56%
-    ),
-    var(--surface);
-  box-shadow:
-    inset 0 1px color-mix(in oklab, var(--text) 9%, transparent),
-    0 24px 80px var(--shadow);
-}
-
-.content-search {
-  --search-illustration-tint: var(--modified-surface);
-}
-
-.content-search .search-illustration {
-  --illustration-ink: var(--modified);
-  --illustration-fill: var(--modified-surface);
-}
-
-:is(.picker-file, .content-search-hit)[aria-selected='true'] {
-  box-shadow: inset 2px 0 var(--accent);
-}
