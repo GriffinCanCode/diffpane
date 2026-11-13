@@ -365,6 +365,7 @@ export function mountIdeaBuilder(host: HTMLElement, options: IdeaBuilderOptions)
   let bufferedChanges: IdeaChange[] = []
   let deferredLinks: IdeaLink[] = []
   let generation = 0
+  let editVersion = 0
   let readOnly = false
   let confirming = false
   let browsing = false
@@ -666,6 +667,7 @@ export function mountIdeaBuilder(host: HTMLElement, options: IdeaBuilderOptions)
   }
 
   function queueChange(id: string, idea: Idea | null) {
+    editVersion++
     changes.set(id, idea)
     if (!saveError && !writing && timer === undefined) {
       timer = setTimeout(() => runTask('Save ideas', startFlush), 250)
@@ -755,8 +757,9 @@ export function mountIdeaBuilder(host: HTMLElement, options: IdeaBuilderOptions)
 
   async function reconcileRemote(version: number, retrying = false) {
     if (generation !== version || changes.size || !pendingRemote.size) return
+    const startedAtEdit = editVersion
     const result = await attemptAsync(options.load, { operation: 'Sync ideas' })
-    if (generation !== version || changes.size) return
+    if (generation !== version || startedAtEdit !== editVersion) return
     if (!result.ok) {
       if (retrying) throw result.error
       reportError(result.error, { retry: () => reconcileRemote(version, true) })
