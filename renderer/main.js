@@ -5,6 +5,8 @@ import 'monaco-editor/editor/contrib/clipboard/browser/clipboard.js';
 import 'monaco-editor/editor/contrib/contextmenu/browser/contextmenu.js';
 import 'monaco-editor/editor/contrib/hover/browser/hoverContribution.js';
 import { configureSyntax } from './syntax.ts';
+import { editorThemeName } from './editor-themes.ts';
+import { codeAppearance, createAppearanceSettings, diffAppearance } from './appearance.ts';
 import EditorWorker from 'monaco-editor/editor/editor.worker.js?worker';
 import './style.css';
 import { createFilePicker } from './files.ts';
@@ -21,67 +23,17 @@ import { changedFunctionRanges } from './function-ranges.ts';
 import { mediaType } from '../media-types.ts';
 import { showDocumentPreview } from './document-preview.ts';
 import { isMarkdown } from './markdown-paths.ts';
-import { showMarkdownPreview } from './markdown-preview.ts';
+import { recolorMarkdownPreviews, showMarkdownPreview } from './markdown-preview.ts';
 import './document-preview.css';
 import './navigator.css';
 import { LivePathBatch, subscribeLivePaths } from './live-updates.ts';
 import { Autosave } from './autosave.ts';
 import { countLines } from '../text-lines.ts';
+import { createSettings } from './settings.js';
 
 globalThis.MonacoEnvironment = { getWorker: () => new EditorWorker() };
 
-const theme = {
-  base: 'vs-dark',
-  inherit: true,
-  rules: [
-    { token: 'comment', foreground: '808080', fontStyle: 'italic' },
-    { token: 'keyword', foreground: '80CBC4' },
-    { token: 'string', foreground: 'D994D3' },
-    { token: 'string.key.json', foreground: 'CCCCCC' },
-    { token: 'number', foreground: 'C4A7E7' },
-    { token: 'type.identifier', foreground: 'EFAB74' },
-    ...['class', 'struct', 'interface', 'type', 'typeParameter'].map(token => ({
-      token,
-      foreground: 'EFAB74',
-    })),
-    ...['function', 'method', 'macro', 'member'].map(token => ({ token, foreground: 'EFAB74' })),
-    ...['variable', 'parameter', 'property'].map(token => ({ token, foreground: 'CCCCCC' })),
-    ...['enumMember', 'variable.readonly', 'property.readonly'].map(token => ({
-      token,
-      foreground: 'C4A7E7',
-    })),
-  ],
-  colors: {
-    'editor.background': '#181818',
-    'editor.foreground': '#d4d4d4',
-    'editorLineNumber.foreground': '#5c6068',
-    'editorLineNumber.activeForeground': '#c6c9d0',
-    'editorGutter.background': '#181818',
-    'editor.selectionBackground': '#35415c',
-    'editor.inactiveSelectionBackground': '#303844',
-    'editor.lineHighlightBackground': '#ffffff04',
-    'editorCursor.foreground': '#b8c3d7',
-    'editorIndentGuide.background1': '#ffffff0c',
-    'editorIndentGuide.activeBackground1': '#ffffff20',
-    'editorOverviewRuler.border': '#00000000',
-    'scrollbar.shadow': '#00000000',
-    'scrollbarSlider.background': '#ffffff12',
-    'scrollbarSlider.hoverBackground': '#ffffff24',
-    'scrollbarSlider.activeBackground': '#ffffff30',
-    'diffEditor.insertedTextBackground': '#00000000',
-    'diffEditor.removedTextBackground': '#00000000',
-    'diffEditor.insertedLineBackground': '#00000000',
-    'diffEditor.removedLineBackground': '#00000000',
-    'diffEditor.diagonalFill': '#00000000',
-    'editorWidget.background': '#22242a',
-    'editorWidget.border': '#383b43',
-    'editor.findMatchBackground': '#7e622b',
-    'editor.findMatchHighlightBackground': '#7e622b70',
-    focusBorder: '#748aaf',
-  },
-};
-monaco.editor.defineTheme('diffpane', theme);
-const syntax = configureSyntax(monaco, theme);
+const syntax = configureSyntax(monaco);
 
 const icons = {
   mark: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3.5" fill="currentColor" opacity=".06"/><path d="M12 4v16" stroke="currentColor" opacity=".2"/><rect x="3" y="4" width="18" height="16" rx="3.5" stroke="currentColor" stroke-width="1.2" opacity=".5"/><path d="M6 9h3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity=".55"/><path d="M15 15h3m-1.5-1.5v3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>',
@@ -91,6 +43,8 @@ const icons = {
   review:
     '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m2.5 5 1 1 2-2m-3 6 1 1 2-2M8 5h5.5M8 10h5.5" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   note: '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3.5 2.5h9a1 1 0 0 1 1 1v6L9.5 13.5h-6a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1Z" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round"/><path d="M9.5 13.5v-3a1 1 0 0 1 1-1h3M5 5.5h6M5 8h3" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"/></svg>',
+  settings:
+    '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" aria-hidden="true"><path d="m6.5 1.5-.3 1.7-1.1.6-1.6-.6-1.5 2.6 1.3 1.1v1.2L2 9.2l1.5 2.6 1.6-.6 1.1.6.3 1.7h3l.3-1.7 1.1-.6 1.6.6L14 9.2l-1.3-1.1V6.9L14 5.8l-1.5-2.6-1.6.6-1.1-.6-.3-1.7z"/><circle cx="8" cy="7.5" r="2"/></svg>',
   claude:
     '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M5 3.2h6A2.8 2.8 0 0 1 13.8 6v2.6A2.8 2.8 0 0 1 11 11.4H7l-3.2 2v-2.3a2.8 2.8 0 0 1-1.6-2.5V6A2.8 2.8 0 0 1 5 3.2Z" stroke="currentColor" stroke-linejoin="round"/><path d="M5.5 7.3h5" stroke="currentColor" stroke-linecap="round"/></svg>',
   file: '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M9.5 1.8H4a1 1 0 0 0-1 1v10.4a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V5.3l-3.5-3.5Z" stroke="currentColor" stroke-width="1.15"/><path d="M9 2v4h4" stroke="currentColor" stroke-width="1.15"/></svg>',
@@ -110,6 +64,7 @@ app.innerHTML = `
       <button type="button" id="review-toggle" class="titlebar-button review-toggle" aria-label="Review changes" aria-controls="change-review" aria-pressed="false" aria-keyshortcuts="Meta+Shift+G Control+Shift+G" title="Review changes · ⌘⇧G" hidden>${icons.review}<span>Changes</span><span class="review-count" aria-hidden="true"></span></button>
       <button type="button" id="review-notes-toggle" class="titlebar-button" aria-label="Review notes" aria-controls="review-notes-panel" aria-expanded="false" aria-keyshortcuts="Meta+Shift+J Control+Shift+J" title="Review notes · ⌘⇧J" hidden>${icons.note}<span>Notes</span><span class="review-notes-count" aria-hidden="true" hidden></span></button>
       <button type="button" id="claude-toggle" aria-controls="claude-panel" aria-expanded="false" aria-keyshortcuts="Meta+Shift+L Control+Shift+L" title="Claude · ⌘⇧L" hidden>${icons.claude}<span>Claude</span></button>
+      <button type="button" id="settings-toggle" class="titlebar-button" aria-label="Settings" aria-haspopup="dialog" aria-controls="app-settings" title="Settings · ⌘," aria-keyshortcuts="Meta+, Control+,">${icons.settings}</button>
     </div>
   </header>
   <div class="workspace" id="workspace">
@@ -143,6 +98,7 @@ const ui = Object.fromEntries(
     'navigator-resize',
     'claude-panel',
     'claude-toggle',
+    'settings-toggle',
     'project-name',
     'project-path',
     'branch-name',
@@ -164,7 +120,6 @@ const ui = Object.fromEntries(
 );
 const api = window.diffpane;
 const cards = new Map();
-const LINE_HEIGHT = 22;
 let snapshot = null;
 let openedFile = null;
 let closed = false;
@@ -180,6 +135,30 @@ let recentVersion = 0;
 let recentSignature = '';
 let applyingAssistantPath = null;
 let applyingAssistantEdit = null;
+
+let activeScheme;
+const appearance = createAppearanceSettings((preferences, scheme) => {
+  const themeChanged = activeScheme !== scheme;
+  if (themeChanged) {
+    activeScheme = scheme;
+    syntax.setTheme(editorThemeName(scheme));
+    recolorMarkdownPreviews();
+  }
+  for (const card of cards.values()) {
+    if (card.diffEditor)
+      card.diffEditor.updateOptions({
+        ...diffAppearance(preferences, Boolean(card.reviewComparison)),
+        ...comparisonAriaLabels(card),
+      });
+    else card.editor?.updateOptions(codeAppearance(preferences));
+  }
+});
+
+const settings = createSettings(appearance);
+const openSettings = () => {
+  if (!closingRequested) settings.open();
+};
+ui.settings_toggle.addEventListener('click', openSettings);
 
 const assistant =
   api?.claude &&
@@ -519,9 +498,8 @@ async function openFile(file, { compare = false, anchor = null } = {}) {
       if (current.reviewComparison && comparing && current.diffEditor) {
         current.reviewFocus.detach();
         current.diffEditor.updateOptions({
-          useInlineViewWhenSpaceIsLimited: false,
-          renderIndicators: false,
-          diffWordWrap: 'off',
+          ...diffAppearance(appearance.value, false),
+          ...comparisonAriaLabels(current),
           hideUnchangedRegions: { enabled: false },
         });
       }
@@ -935,14 +913,10 @@ function editorOptions(card) {
   const readOnly = editorReadOnly(card);
   return {
     model: card.model,
-    theme: 'diffpane',
+    ...codeAppearance(appearance.value),
     readOnly,
     domReadOnly: readOnly,
-    fontFamily: '"SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
-    fontSize: 14,
-    lineHeight: LINE_HEIGHT,
     fontLigatures: false,
-    lineNumbers: 'on',
     lineNumbersMinChars: 4,
     glyphMargin: false,
     lineDecorationsWidth: 10,
@@ -957,7 +931,6 @@ function editorOptions(card) {
       alwaysConsumeMouseWheel: false,
       useShadows: false,
     },
-    wordWrap: 'off',
     renderLineHighlight: 'none',
     renderWhitespace: 'selection',
     renderValidationDecorations: 'on',
@@ -1090,7 +1063,7 @@ function renderDocument(card, document) {
           yml: 'yaml',
           py: 'python',
         };
-        return monaco.editor.colorize(code, aliases[language] ?? language, { theme: 'diffpane' });
+        return monaco.editor.colorize(code, aliases[language] ?? language, {});
       },
     });
     card.markdownAnchor = null;
@@ -1167,7 +1140,7 @@ function renderDocument(card, document) {
   if (card.reviewComparison && card.diffEditor) {
     if (!card.dirty && card.file.reviewVersion === document.reviewVersion) {
       card.element.dataset.reviewScope = reviewScope;
-      card.reviewFocus.attach(card.diffEditor, reviewScope);
+      card.reviewFocus.attach(card.diffEditor, reviewScope, comparisonAriaLabels(card));
     }
   } else delete card.element.dataset.reviewScope;
   const decorations = [];
@@ -1331,6 +1304,10 @@ function openComparison(card) {
   card.modeVersion = (card.modeVersion ?? 0) + 1;
   if (!card.reviewComparison || !card.comparing) {
     card.reviewComparison = true;
+    card.diffEditor?.updateOptions({
+      ...diffAppearance(appearance.value, true),
+      ...comparisonAriaLabels(card),
+    });
     card.comparing = true;
     card.markdownSource = true;
     if (card.document && !card.documentFailed) {
@@ -1342,6 +1319,13 @@ function openComparison(card) {
     scheduleDocument();
   }
   syncReviewState();
+}
+
+function comparisonAriaLabels(card) {
+  return {
+    originalAriaLabel: `HEAD contents of ${card.file.originalPath || card.file.path}`,
+    modifiedAriaLabel: `Working contents of ${card.file.path}`,
+  };
 }
 
 function setCardEditor(card, state) {
@@ -1371,24 +1355,21 @@ function setCardEditor(card, state) {
     );
     card.diffEditor = monaco.editor.createDiffEditor(card.host, {
       ...editorOptions(card),
+      ...diffAppearance(appearance.value, Boolean(card.reviewComparison)),
+      ...comparisonAriaLabels(card),
       model: undefined,
-      originalAriaLabel: `HEAD contents of ${card.file.originalPath || card.file.path}`,
-      modifiedAriaLabel: `Working contents of ${card.file.path}`,
       originalEditable: false,
-      renderSideBySide: true,
-      useInlineViewWhenSpaceIsLimited: false,
-      renderIndicators: false,
       renderMarginRevertIcon: false,
       renderGutterMenu: false,
       hideUnchangedRegions: { enabled: false },
       maxComputationTime: 150,
       maxFileSize: 2,
-      diffWordWrap: 'off',
       enableSplitViewResizing: true,
     });
     card.diffEditor.setModel({ original: card.originalModel, modified: card.model });
     card.editor = card.diffEditor.getModifiedEditor();
     const originalEditor = card.diffEditor.getOriginalEditor();
+    card.diffEditor.updateOptions(comparisonAriaLabels(card));
     const labels = card.element.querySelector('.comparison-labels');
     const syncLabelWidth = ({ width }) =>
       labels.style.setProperty('--original-width', `${width}px`);
@@ -1571,7 +1552,7 @@ async function refresh() {
 
 document.addEventListener('keydown', event => {
   if (!(event.metaKey || event.ctrlKey)) return;
-  if (document.querySelector('#claude-settings')?.open) return;
+  if (settings.isOpen || document.querySelector('#claude-settings')?.open) return;
   if (document.querySelector('#file-picker')?.open) {
     if (event.key.toLowerCase() === 'p') {
       event.preventDefault();
@@ -1645,6 +1626,8 @@ window.__diffpane = {
   }),
 };
 
+const unsubscribeSettings = api?.onOpenSettings(openSettings);
+
 if (!api) showError('The desktop connection is unavailable. Reopen diffpane from your terminal.');
 else {
   const resumeEditing = () => {
@@ -1716,6 +1699,8 @@ else {
       navigator.dispose();
       review.dispose();
       unsubscribePaths();
+      appearance.dispose();
+      unsubscribeSettings?.();
       unsubscribeFlush();
       unsubscribeResume();
       languageFeatures.dispose();

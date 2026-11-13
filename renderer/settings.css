@@ -1,0 +1,38 @@
+.settings-close {
+  position: absolute;
+  z-index: 2;
+  top: 22px;
+  right: 24px;
+  display: grid;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid var(--settings-border);
+  border-radius: 6px;
+  background: var(--settings-raised);
+  color: var(--settings-muted);
+}
+
+.settings-close:hover {
+  background: var(--settings-hover);
+  color: var(--settings-text);
+}
+
+.settings-close svg {
+  width: 16px;
+  height: 16px;
+}
+
+@media (max-width: 700px) {
+  .settings-close {
+    right: 20px;
+  }
+}
+
+@media (max-width: 575px) {
+  .settings-close {
+    top: 12px;
+    right: 12px;
+  }
+}

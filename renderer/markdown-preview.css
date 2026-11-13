@@ -3,33 +3,33 @@
   display: flex;
   gap: 2px;
   padding: 3px;
-  background: #ffffff05;
-  border: 1px solid #ffffff0b;
+  background: light-dark(#2436470b, #ffffff05);
+  border: 1px solid light-dark(#24364714, #ffffff0b);
   border-radius: 6px;
 }
 .markdown-toggle button {
   border: 0;
   border-radius: 3px;
   background: transparent;
-  color: #8c9299;
+  color: light-dark(#586671, #8c9299);
   font-size: 11px;
   padding: 3px 10px;
 }
 .markdown-toggle button[aria-pressed='true'] {
-  color: #dde8e6;
-  background: #ffffff0e;
-  box-shadow: 0 1px 2px #0003;
+  color: light-dark(#315e57, #dde8e6);
+  background: light-dark(#e6efed, #ffffff0e);
+  box-shadow: 0 1px 2px light-dark(#26374720, #0003);
 }
 .markdown-preview {
   height: 100%;
   overflow: auto;
-  scrollbar-color: #ffffff20 transparent;
+  scrollbar-color: light-dark(#24364738, #ffffff20) transparent;
   scrollbar-gutter: stable both-edges;
-  background: #181818;
+  background: var(--workbench-background);
   outline: none;
 }
 .markdown-preview:focus-visible {
-  box-shadow: inset 0 0 0 1px #80cbc450;
+  box-shadow: inset 0 0 0 1px light-dark(#276f6755, #80cbc450);
 }
 .markdown-body {
   max-width: 860px;
@@ -37,7 +37,7 @@
   padding: 42px 48px 100px;
   font-size: 15px;
   line-height: 1.8;
-  color: #c6c9ce;
+  color: light-dark(#343f49, #c6c9ce);
   overflow-wrap: anywhere;
   -webkit-user-select: text;
   user-select: text;
@@ -52,7 +52,7 @@
 .markdown-body h5,
 .markdown-body h6 {
   position: relative;
-  color: #edf0f3;
+  color: light-dark(#252b33, #edf0f3);
   line-height: 1.3;
   font-weight: 600;
   letter-spacing: -0.025em;
@@ -68,7 +68,7 @@
 .markdown-body h2 {
   font-size: 23px;
   padding-bottom: 12px;
-  border-bottom: 1px solid #ffffff0d;
+  border-bottom: 1px solid light-dark(#24364724, #ffffff0d);
 }
 .markdown-body h3 {
   font-size: 18px;
@@ -81,7 +81,7 @@
   font-size: 14px;
 }
 .markdown-body h6 {
-  color: #9ba2ac;
+  color: light-dark(#576470, #9ba2ac);
 }
 .markdown-body p,
 .markdown-body ul,
@@ -89,28 +89,28 @@
   margin: 0 0 1.15em;
 }
 .markdown-body strong {
-  color: #e1e4e8;
+  color: light-dark(#29343e, #e1e4e8);
   font-weight: 600;
 }
 .markdown-body a {
-  color: #91ccc6;
+  color: light-dark(#246e66, #91ccc6);
   text-decoration: underline;
-  text-decoration-color: #91ccc64d;
+  text-decoration-color: light-dark(#246e6660, #91ccc64d);
   text-underline-offset: 4px;
 }
 .markdown-body a:hover {
-  color: #c2ece7;
+  color: light-dark(#194e49, #c2ece7);
   text-decoration-color: currentColor;
 }
 .markdown-body a:focus-visible {
-  outline: 2px solid #80cbc4;
+  outline: 2px solid var(--accent);
   outline-offset: 3px;
   border-radius: 2px;
 }
 .markdown-body .md-heading-anchor {
   font-size: 0.7em;
   margin-left: 10px;
-  color: #80cbc4;
+  color: var(--accent);
   text-decoration: none;
   opacity: 0;
   transition: opacity 120ms;
@@ -128,7 +128,7 @@
   margin: 0.35em 0;
 }
 .markdown-body li::marker {
-  color: #6b8583;
+  color: light-dark(#547a76, #6b8583);
 }
 .markdown-body li > :last-child {
   margin-bottom: 0;
@@ -146,36 +146,36 @@
   left: -1.6em;
   top: 0.5em;
   margin: 0;
-  accent-color: #80cbc4;
+  accent-color: var(--accent);
 }
 .markdown-body blockquote {
   margin: 24px 0;
   padding: 4px 0 4px 20px;
-  border-left: 3px solid #597975;
-  color: #9ba7ad;
+  border-left: 3px solid light-dark(#7fa8a3, #597975);
+  color: light-dark(#4b626b, #9ba7ad);
 }
 .markdown-body blockquote > :last-child {
   margin-bottom: 0;
 }
 .markdown-body .md-callout {
-  --callout-color: #86b9d4;
+  --callout-color: light-dark(#336786, #86b9d4);
   border-left-color: var(--callout-color);
   padding: 16px 20px;
   border-radius: 0 7px 7px 0;
-  background: #ffffff03;
+  background: light-dark(#f4f7f9, #ffffff03);
   font-size: 14px;
 }
 .md-callout[data-tone='tip'] {
-  --callout-color: #91c6a3;
+  --callout-color: light-dark(#367054, #91c6a3);
 }
 .md-callout[data-tone='important'] {
-  --callout-color: #b4a1d9;
+  --callout-color: light-dark(#715495, #b4a1d9);
 }
 .md-callout[data-tone='warning'] {
-  --callout-color: #d3b97c;
+  --callout-color: light-dark(#79571c, #d3b97c);
 }
 .md-callout[data-tone='caution'] {
-  --callout-color: #d69595;
+  --callout-color: light-dark(#a2494b, #d69595);
 }
 .md-callout-label {
   color: var(--callout-color);
@@ -186,7 +186,7 @@
 .markdown-body hr {
   border: 0;
   height: 1px;
-  background: #ffffff12;
+  background: light-dark(#24364724, #ffffff12);
   margin: 36px 0;
 }
 .markdown-body code,
@@ -196,25 +196,25 @@
   font-size: 0.85em;
 }
 .markdown-body :not(pre) > code {
-  color: #dfc2df;
-  background: #ffffff07;
-  border: 1px solid #ffffff08;
+  color: light-dark(#844670, #dfc2df);
+  background: light-dark(#f3eef4, #ffffff07);
+  border: 1px solid light-dark(#d9ccdc, #ffffff08);
   border-radius: 4px;
   padding: 0.15em 0.4em;
   box-decoration-break: clone;
 }
 .markdown-body kbd {
   padding: 2px 6px;
-  border: 1px solid #ffffff20;
+  border: 1px solid light-dark(#24364738, #ffffff20);
   border-bottom-width: 2px;
   border-radius: 4px;
 }
 .md-block {
   margin: 24px 0;
-  border: 1px solid #ffffff10;
+  border: 1px solid light-dark(#dce3e9, #ffffff10);
   border-radius: 10px;
   overflow: hidden;
-  background: #1c1e21;
+  background: light-dark(#f5f7f9, #1c1e21);
 }
 .md-block-toolbar {
   display: flex;
@@ -222,12 +222,12 @@
   justify-content: space-between;
   min-height: 40px;
   padding: 6px 12px 6px 16px;
-  border-bottom: 1px solid #ffffff0a;
-  background: #ffffff02;
+  border-bottom: 1px solid light-dark(#2436471c, #ffffff0a);
+  background: light-dark(#24364706, #ffffff02);
   gap: 16px;
 }
 .md-block-label {
-  color: #858f9a;
+  color: light-dark(#526471, #858f9a);
   font:
     11px 'SFMono-Regular',
     Consolas,
@@ -235,7 +235,7 @@
   letter-spacing: 0.02em;
 }
 .md-diagram .md-block-label {
-  color: #8eaaa7;
+  color: light-dark(#3d6c67, #8eaaa7);
 }
 .md-diagram .md-block-label::before {
   content: '';
@@ -244,7 +244,7 @@
   height: 5px;
   margin-right: 8px;
   border-radius: 50%;
-  background: #80cbc4;
+  background: var(--accent);
   vertical-align: 2px;
 }
 .md-block-actions {
@@ -261,16 +261,16 @@
   padding: 5px 7px;
   min-height: 26px;
   background: transparent;
-  color: #8d969f;
+  color: light-dark(#566873, #8d969f);
   font-size: 11px;
   line-height: 1;
 }
 .md-action:hover {
-  background: #ffffff0b;
-  color: #e1e7ec;
+  background: light-dark(#24364714, #ffffff0b);
+  color: light-dark(#34404a, #e1e7ec);
 }
 .md-action[data-copied='true'] {
-  color: #80cbc4;
+  color: var(--accent);
 }
 .md-action svg {
   width: 16px;
@@ -281,9 +281,9 @@
   padding: 18px 20px;
   line-height: 1.75;
   overflow: auto;
-  scrollbar-color: #ffffff20 transparent;
+  scrollbar-color: light-dark(#24364738, #ffffff20) transparent;
   tab-size: 2;
-  color: #d4d4d4;
+  color: light-dark(#303841, #d4d4d4);
 }
 .markdown-body pre code {
   font-size: inherit;
@@ -301,12 +301,16 @@
   width: 100%;
   height: auto;
 }
+/* Mermaid supplies its own colors for nodes, lines, and labels. */
+:root[data-theme='light'] :is(.md-diagram-canvas:has(> svg), .md-diagram-viewport) {
+  background: #1c1e21;
+}
 .md-diagram-status {
   font-size: 12px;
-  color: #858f9a;
+  color: light-dark(#526471, #858f9a);
 }
 .md-diagram-error .md-diagram-status {
-  color: #d3b97c;
+  color: light-dark(#79571c, #d3b97c);
 }
 .md-render-scratch {
   position: fixed;
@@ -319,9 +323,9 @@
   max-width: 100%;
   overflow: auto;
   margin: 24px 0;
-  border: 1px solid #ffffff10;
+  border: 1px solid light-dark(#dce3e9, #ffffff10);
   border-radius: 8px;
-  scrollbar-color: #ffffff20 transparent;
+  scrollbar-color: light-dark(#24364738, #ffffff20) transparent;
 }
 .markdown-body table {
   border-collapse: collapse;
@@ -331,14 +335,14 @@
 }
 .markdown-body th {
   text-align: left;
-  background: #ffffff04;
-  color: #dce1e5;
+  background: light-dark(#eff3f6, #ffffff04);
+  color: light-dark(#333f49, #dce1e5);
   font-weight: 550;
 }
 .markdown-body th,
 .markdown-body td {
   padding: 11px 16px;
-  border-bottom: 1px solid #ffffff0c;
+  border-bottom: 1px solid light-dark(#dce3e9, #ffffff0c);
 }
 .md-table-cell {
   /* Give short labels their natural width while letting long values wrap. */
@@ -348,7 +352,7 @@
   border-bottom: 0;
 }
 .markdown-body tbody tr:hover {
-  background: #ffffff02;
+  background: light-dark(#24364706, #ffffff02);
 }
 .markdown-body img {
   display: block;
@@ -359,36 +363,35 @@
 }
 .markdown-body .md-image-missing {
   min-height: 40px;
-  color: #858f9a;
-  border: 1px dashed #ffffff20;
+  color: light-dark(#526471, #858f9a);
+  border: 1px dashed light-dark(#24364738, #ffffff20);
   padding: 12px;
   font-size: 12px;
 }
 .markdown-body details {
-  border: 1px solid #ffffff12;
+  border: 1px solid light-dark(#24364724, #ffffff12);
   padding: 12px 16px;
   border-radius: 8px;
   margin: 24px 0;
 }
 .markdown-body summary {
-  color: #dce1e5;
+  color: light-dark(#333f49, #dce1e5);
   cursor: pointer;
 }
 .markdown-body details[open] summary {
   margin-bottom: 16px;
 }
 .md-diagram-dialog {
-  color-scheme: dark;
   padding: 0;
   width: min(1400px, 94vw);
   height: 90vh;
   max-width: 94vw;
   max-height: 90vh;
-  border: 1px solid #ffffff20;
+  border: 1px solid light-dark(#24364738, #ffffff20);
   border-radius: 12px;
-  background: #1c1e21;
-  color: #d4d4d4;
-  box-shadow: 0 24px 100px #0008;
+  background: light-dark(#f5f7f9, #1c1e21);
+  color: light-dark(#303841, #d4d4d4);
+  box-shadow: 0 24px 100px light-dark(#26374744, #0008);
   overflow: hidden;
 }
 .md-diagram-dialog[open] {
@@ -396,7 +399,7 @@
   flex-direction: column;
 }
 .md-diagram-dialog::backdrop {
-  background: #080b10b3;
+  background: light-dark(#26374765, #080b10b3);
   backdrop-filter: blur(5px);
 }
 .md-diagram-dialog .md-block-toolbar {

@@ -1,67 +1,73 @@
 import { createHighlighterCore } from '@shikijs/core';
+import type { ThemeRegistration } from '@shikijs/core';
 import { createOnigurumaEngine } from '@shikijs/engine-oniguruma';
 import { shikiToMonaco } from '@shikijs/monaco';
 import dark from '@shikijs/themes/dark-plus';
+import light from '@shikijs/themes/light-plus';
+import { editorThemeName, editorThemes, syntaxColors } from './editor-themes.ts';
+import type { EditorThemeName } from './editor-themes.ts';
+import type { editor, languages } from 'monaco-editor';
 import type { SyntaxCatalogEntry, SyntaxGrammar } from 'virtual:syntax-catalog';
 
-type ViewerTheme = {
-  base: string;
-  inherit: boolean;
-  rules: { token: string; foreground?: string; fontStyle?: string }[];
-  colors: Record<string, string>;
+type MonacoHost = {
+  languages: Pick<typeof languages, 'getLanguages' | 'setTokensProvider'>;
+  editor: Pick<typeof editor, 'defineTheme'>;
 };
 
-type MonacoHost = {
-  languages: object;
-  editor: {
-    defineTheme: (
-      name: string,
-      theme: { rules: ViewerTheme['rules'] } & Record<string, unknown>,
-    ) => void;
-  };
+export type SyntaxRuntime = {
+  load: (scope: string) => Promise<string[]>;
+  setTheme: (name: EditorThemeName) => void;
 };
+
+function syntaxTheme(base: ThemeRegistration, name: EditorThemeName) {
+  const { comment, keyword, string, number, symbol, variable } = syntaxColors[name];
+  return {
+    ...base,
+    name,
+    tokenColors: [
+      ...(base.tokenColors ?? []),
+      { scope: 'comment', settings: { foreground: `#${comment}`, fontStyle: 'italic' } },
+      {
+        scope: ['keyword', 'storage.type', 'storage.modifier'],
+        settings: { foreground: `#${keyword}` },
+      },
+      { scope: 'string', settings: { foreground: `#${string}` } },
+      { scope: 'constant.numeric', settings: { foreground: `#${number}` } },
+      {
+        scope: [
+          'entity.name.type',
+          'support.type',
+          'entity.name.function',
+          'support.function',
+          'constant.language',
+        ],
+        settings: { foreground: `#${symbol}` },
+      },
+      { scope: ['variable', 'variable.parameter'], settings: { foreground: `#${variable}` } },
+    ],
+  };
+}
 
 /** Mature TextMate grammars fill Monaco's config gaps without a language server. */
 export async function createSyntaxRuntime(
   monaco: MonacoHost,
-  theme: ViewerTheme,
   catalog: readonly SyntaxCatalogEntry[],
-) {
+  currentTheme: () => EditorThemeName,
+): Promise<SyntaxRuntime> {
   const highlighter = await createHighlighterCore({
     engine: createOnigurumaEngine(import('@shikijs/engine-oniguruma/wasm-inlined')),
     themes: [
-      {
-        ...dark,
-        name: 'diffpane',
-        tokenColors: [
-          ...dark.tokenColors!,
-          { scope: 'comment', settings: { foreground: '#808080', fontStyle: 'italic' } },
-          {
-            scope: ['keyword', 'storage.type', 'storage.modifier'],
-            settings: { foreground: '#80CBC4' },
-          },
-          { scope: 'string', settings: { foreground: '#D994D3' } },
-          { scope: 'constant.numeric', settings: { foreground: '#C4A7E7' } },
-          {
-            scope: [
-              'entity.name.type',
-              'support.type',
-              'entity.name.function',
-              'support.function',
-              'constant.language',
-            ],
-            settings: { foreground: '#EFAB74' },
-          },
-          { scope: ['variable', 'variable.parameter'], settings: { foreground: '#CCCCCC' } },
-        ],
-      },
+      syntaxTheme(dark, editorThemeName('dark')),
+      syntaxTheme(light, editorThemeName('light')),
     ],
     langs: [],
   });
   const scopes = new Map(catalog.map(entry => [entry.scope, entry]));
   const loaded = new Set<string>();
+  const themeSetters: Array<typeof editor.setTheme> = [];
+  let themesDefined = false;
   let queue: Promise<unknown> = Promise.resolve();
-  return (scope: string) => {
+  function load(scope: string) {
     const loading = queue.then(async () => {
       if (loaded.has(scope)) return highlighter.getLoadedLanguages();
       const entries = new Map<string, SyntaxCatalogEntry>();
@@ -83,24 +89,47 @@ export async function createSyntaxRuntime(
       );
       await highlighter.loadLanguage(...(grammars as never[]));
       for (const name of entries.keys()) loaded.add(name);
-      // Keep the viewer's native and semantic colors, and isolate the adapter's theme hooks.
-      shikiToMonaco(highlighter, {
-        languages: monaco.languages,
-        editor: {
-          ...monaco.editor,
-          defineTheme(name: string, syntax: { rules: ViewerTheme['rules'] }) {
-            monaco.editor.defineTheme(name, {
-              ...syntax,
-              ...theme,
-              rules: [...syntax.rules, ...theme.rules],
-            });
-          },
+      const adapterEditor: Pick<typeof editor, 'defineTheme' | 'setTheme'> = {
+        defineTheme(name, syntax) {
+          if (themesDefined) return;
+          const theme = editorThemes[name as EditorThemeName];
+          monaco.editor.defineTheme(name, { ...theme, rules: [...syntax.rules, ...theme.rules] });
         },
-      } as Parameters<typeof shikiToMonaco>[1]);
+        setTheme() {},
+      };
+      const active = currentTheme();
+      // The adapter starts with the first theme and mutates its editor facade. Keep
+      // those mutations local and install only the token providers added by this load.
+      const newLanguages = new Set([...entries.values()].map(entry => entry.id));
+      shikiToMonaco(
+        {
+          ...highlighter,
+          getLoadedThemes: () => [
+            active,
+            ...highlighter.getLoadedThemes().filter(name => name !== active),
+          ],
+        },
+        {
+          languages: {
+            ...monaco.languages,
+            getLanguages: () =>
+              monaco.languages.getLanguages().filter(({ id }) => newLanguages.has(id)),
+          },
+          editor: adapterEditor,
+        } as Parameters<typeof shikiToMonaco>[1],
+      );
+      themesDefined = true;
+      themeSetters.push(adapterEditor.setTheme);
       return highlighter.getLoadedLanguages();
     });
     queue = loading.catch(() => undefined);
     return loading;
+  }
+  return {
+    load,
+    setTheme(name) {
+      for (const setTheme of themeSetters) setTheme(name);
+    },
   };
 }
 

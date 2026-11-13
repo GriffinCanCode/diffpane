@@ -1,45 +1,30 @@
 import sourceCatalog from 'virtual:syntax-catalog';
 import { parseDocument, isMap, isSeq } from 'yaml';
+import { editorThemes } from './editor-themes.ts';
+import type { EditorThemeName } from './editor-themes.ts';
+import type { SyntaxRuntime } from './grammars.ts';
 import type { SyntaxCatalogEntry } from 'virtual:syntax-catalog';
-
-type MonacoLanguage = {
-  id: string;
-  extensions?: string[];
-  filenames?: string[];
-  filenamePatterns?: string[];
-  firstLine?: string;
-  aliases?: string[];
-};
+import type { editor, languages } from 'monaco-editor';
 
 type MonacoModel = { getLanguageId: () => string };
 
-type ViewerTheme = {
-  base: string;
-  inherit: boolean;
-  rules: { token: string; foreground?: string; fontStyle?: string }[];
-  colors: Record<string, string>;
-};
-
 type MonacoApi = {
-  languages: {
-    getLanguages: () => MonacoLanguage[];
-    register: (language: MonacoLanguage) => void;
-    onLanguage: (id: string, callback: () => void) => void;
+  languages: Pick<
+    typeof languages,
+    'getLanguages' | 'register' | 'onLanguage' | 'setTokensProvider'
+  > & {
     registerTokensProviderFactory: (
       id: string,
       provider: { create: () => Promise<unknown> },
     ) => void;
   };
-  editor: {
-    defineTheme: (
-      name: string,
-      theme: { rules: ViewerTheme['rules'] } & Record<string, unknown>,
-    ) => void;
-  };
+  editor: Pick<typeof editor, 'defineTheme' | 'setTheme'>;
 };
 
 /** Supplement Monaco from upstream associations without stealing existing language IDs. */
-export function configureSyntax(monaco: MonacoApi, theme: ViewerTheme) {
+export function configureSyntax(monaco: MonacoApi) {
+  for (const [name, theme] of Object.entries(editorThemes)) monaco.editor.defineTheme(name, theme);
+  let themeName: EditorThemeName = 'diffpane';
   const native = monaco.languages.getLanguages();
   const claimed = new Set(
     native.flatMap(language => [...(language.extensions ?? []), ...(language.filenames ?? [])]),
@@ -53,7 +38,8 @@ export function configureSyntax(monaco: MonacoApi, theme: ViewerTheme) {
   const loaded = new Set<string>();
   const pending = new Set<string>();
   const errors = new Map<string, string>();
-  let runtime: Promise<(scope: string) => Promise<string[]>> | undefined;
+  let runtime: SyntaxRuntime | undefined;
+  let loadingRuntime: Promise<SyntaxRuntime> | undefined;
   for (const entry of catalog) {
     const extensions = entry.extensions.filter(
       extension => entry.priority || !claimed.has(extension) || react.has(entry.id),
@@ -72,11 +58,11 @@ export function configureSyntax(monaco: MonacoApi, theme: ViewerTheme) {
     if (ids.has(entry.id)) continue;
     monaco.languages.onLanguage(entry.id, () => {
       pending.add(entry.id);
-      runtime ??= import('./grammars.ts').then(module =>
-        module.createSyntaxRuntime(monaco, theme, catalog),
-      );
-      void runtime
-        .then(loader => loader(entry.scope))
+      loadingRuntime ??= import('./grammars.ts')
+        .then(module => module.createSyntaxRuntime(monaco, catalog, () => themeName))
+        .then(loaded => (runtime = loaded));
+      void loadingRuntime
+        .then(runtime => runtime.load(entry.scope))
         .then(languages => {
           for (const language of languages) loaded.add(language);
         })
@@ -169,6 +155,11 @@ export function configureSyntax(monaco: MonacoApi, theme: ViewerTheme) {
   }
   return {
     resolve,
+    setTheme(name: EditorThemeName) {
+      themeName = name;
+      runtime?.setTheme(name);
+      monaco.editor.setTheme(name);
+    },
     stats: () => ({
       loaded: [...loaded],
       pending: [...pending],

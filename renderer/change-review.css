@@ -1,11 +1,11 @@
 .change-review {
   --queue-inset: 12px;
-  --queue-bg: #151617;
-  --queue-surface: #1a1c1d;
-  --queue-line: #2b2e30;
-  --queue-text: #e5e8e7;
-  --queue-muted: #a0a7a6;
-  --queue-accent: #a9d4c6;
+  --queue-bg: light-dark(#f4f6f7, #151617);
+  --queue-surface: light-dark(#edf1f2, #1a1c1d);
+  --queue-line: light-dark(#d6dfe0, #2b2e30);
+  --queue-text: light-dark(#252b33, #e5e8e7);
+  --queue-muted: light-dark(#525e66, #a0a7a6);
+  --queue-accent: light-dark(#286347, #a9d4c6);
   container: review-queue / inline-size;
   display: flex;
   flex: 1 1 auto;
@@ -60,7 +60,7 @@
 
 .change-review-back:hover,
 .change-review-empty-action:hover {
-  background: #242929;
+  background: light-dark(#e6ede9, #242929);
   color: var(--queue-text);
 }
 
@@ -97,13 +97,13 @@
   appearance: none;
   border: 0;
   border-radius: 999px;
-  background: #2a2f30;
+  background: light-dark(#d4ded9, #2a2f30);
   color: var(--queue-accent);
 }
 
 .change-review-progress progress::-webkit-progress-bar {
   border-radius: inherit;
-  background: #2a2f30;
+  background: light-dark(#d4ded9, #2a2f30);
 }
 
 .change-review-progress progress::-webkit-progress-value {
@@ -120,7 +120,7 @@
   padding: 2px;
   border: 1px solid var(--queue-line);
   border-radius: 7px;
-  background: #111213;
+  background: light-dark(#edf1f2, #111213);
 }
 
 .change-review-filters button {
@@ -141,13 +141,13 @@
 }
 
 .change-review-filters button:hover {
-  background: #1c1f20;
+  background: light-dark(#e6ede9, #1c1f20);
   color: var(--queue-text);
 }
 
 .change-review-filters button[aria-pressed='true'] {
-  border-color: #363d3d;
-  background: #272c2c;
+  border-color: light-dark(#a9bfb4, #363d3d);
+  background: light-dark(#e1ebe6, #272c2c);
   color: var(--queue-text);
 }
 
@@ -156,7 +156,7 @@
   overflow: hidden;
   padding: 1px 4px;
   border-radius: 4px;
-  background: #232728;
+  background: light-dark(#e6ebec, #232728);
   color: var(--queue-muted);
   font-size: 10px;
   font-variant-numeric: tabular-nums;
@@ -166,8 +166,8 @@
 }
 
 .change-review-filters button[aria-pressed='true'] span {
-  background: #374241;
-  color: #d6e9e2;
+  background: light-dark(#cfe3da, #374241);
+  color: light-dark(#286347, #d6e9e2);
 }
 
 .change-review-body {
@@ -183,7 +183,7 @@
   overflow: auto;
   outline: none;
   scrollbar-width: thin;
-  scrollbar-color: #3c4243 transparent;
+  scrollbar-color: light-dark(#a7b4ac, #3c4243) transparent;
   overscroll-behavior: contain;
   overflow-anchor: none;
 }
@@ -193,7 +193,7 @@
 }
 
 .change-review-row {
-  --queue-status: #b0bec3;
+  --queue-status: light-dark(#525e66, #b0bec3);
   position: absolute;
   inset-inline: 8px;
   display: flex;
@@ -209,12 +209,12 @@
 }
 
 .change-review-row:hover {
-  background: #202425;
+  background: light-dark(#e9efec, #202425);
 }
 
 .change-review-row[aria-selected='true'] {
-  border-color: #344a44;
-  background: #222e2b;
+  border-color: light-dark(#a9bfb4, #344a44);
+  background: light-dark(#e2eee6, #222e2b);
 }
 
 .change-review-row[aria-selected='true']::before {
@@ -302,24 +302,24 @@
 }
 
 .change-review-row:is([data-status='A'], [data-status='U']) {
-  --queue-status: #a9cfae;
+  --queue-status: light-dark(#286347, #a9cfae);
 }
 
 .change-review-row:is([data-status='C'], [data-status='R'], [data-status='T']) {
-  --queue-status: #a8bfdc;
+  --queue-status: light-dark(#3d638a, #a8bfdc);
 }
 
 .change-review-row[data-status='D'] {
-  --queue-status: #e6a4a0;
+  --queue-status: light-dark(#963f37, #e6a4a0);
 }
 
 .change-review-row[data-status='!'] {
-  --queue-status: #e4bb86;
+  --queue-status: light-dark(#805716, #e4bb86);
 }
 
 .change-review-row[data-loading='true'] {
   --queue-status: var(--queue-accent);
-  border-color: #344a44;
+  border-color: light-dark(#a9bfb4, #344a44);
 }
 
 .change-review-row[data-loading='true'] .change-review-status {
@@ -335,7 +335,7 @@
   position: absolute;
   width: 12px;
   height: 12px;
-  border: 1px solid #496259;
+  border: 1px solid light-dark(#a5bbaa, #496259);
   border-top-color: var(--queue-accent);
   border-radius: 50%;
   animation: change-review-spin 0.8s linear infinite;
@@ -372,9 +372,9 @@
   height: 36px;
   margin-bottom: 10px;
   place-items: center;
-  border: 1px solid #343d3c;
+  border: 1px solid light-dark(#b5c6b9, #343d3c);
   border-radius: 9px;
-  background: #202626;
+  background: light-dark(#e2eee6, #202626);
   color: var(--queue-accent);
 }
 
@@ -402,7 +402,7 @@
 .change-review-empty-action {
   margin-top: 10px;
   padding-inline: 8px;
-  border-color: #384542;
+  border-color: light-dark(#b5c6b9, #384542);
   color: var(--queue-accent);
 }
 
@@ -418,10 +418,10 @@
 .change-review-error {
   margin: 0;
   padding: 7px 8px;
-  border: 1px solid #533b39;
+  border: 1px solid light-dark(#dbb8b2, #533b39);
   border-radius: 5px;
-  background: #2b2221;
-  color: #edb4af;
+  background: light-dark(#f9edea, #2b2221);
+  color: light-dark(#963f37, #edb4af);
   font-size: 11px;
   line-height: 1.4;
   overflow-wrap: anywhere;
@@ -442,9 +442,9 @@
   display: flex;
   flex: 0 0 auto;
   padding: 2px;
-  border: 1px solid #333738;
+  border: 1px solid light-dark(#d6dfe0, #333738);
   border-radius: 6px;
-  background: #151718;
+  background: light-dark(#f7f9fa, #151718);
 }
 
 .change-review-nav button {
@@ -464,12 +464,12 @@
 }
 
 .change-review-nav button:not(:disabled):hover {
-  background: #2b3131;
+  background: light-dark(#e1ebe4, #2b3131);
   color: var(--queue-text);
 }
 
 .change-review-nav button:disabled {
-  color: #6f7877;
+  color: light-dark(#6c7874, #6f7877);
   opacity: 1;
 }
 
@@ -489,7 +489,7 @@
   border: 1px solid var(--queue-accent);
   border-radius: 6px;
   background: var(--queue-accent);
-  color: #192824;
+  color: light-dark(#fff, #192824);
   font-size: 12px;
   font-weight: 650;
   line-height: 1.2;
@@ -506,14 +506,14 @@
 }
 
 .change-review-mark:hover:not([aria-disabled='true']) {
-  border-color: #bfebdc;
-  background: #bfebdc;
+  border-color: light-dark(#1f543a, #bfebdc);
+  background: light-dark(#1f543a, #bfebdc);
 }
 
 .change-review-mark[aria-disabled='true'] {
-  border-color: #3a4241;
-  background: #272d2d;
-  color: #a0aaa8;
+  border-color: light-dark(#d3ddda, #3a4241);
+  background: light-dark(#e7ece9, #272d2d);
+  color: light-dark(#525e66, #a0aaa8);
   cursor: default;
 }
 

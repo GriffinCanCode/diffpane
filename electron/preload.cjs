@@ -5,6 +5,7 @@ const listen = (channel, callback) => {
   return () => electron_1.ipcRenderer.removeListener(channel, listener);
 };
 electron_1.contextBridge.exposeInMainWorld('diffpane', {
+  onOpenSettings: callback => listen('open-settings', callback),
   reviewNotes: {
     list: () => electron_1.ipcRenderer.invoke('review-notes-list'),
     change: change => electron_1.ipcRenderer.invoke('review-notes-change', change),

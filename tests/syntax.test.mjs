@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createHighlighterCore } from '@shikijs/core';
 import { createOnigurumaEngine } from '@shikijs/engine-oniguruma';
 import dark from '@shikijs/themes/dark-plus';
+import { createSyntaxRuntime } from '../renderer/grammars.ts';
 import { catalog, grammarBytes } from '../syntax.ts';
 
 test('every grammar dependency exists in the pinned lazy catalog', () => {
@@ -66,4 +67,55 @@ test('real grammars color custom formats and preserve source characters exactly'
   } finally {
     highlighter.dispose();
   }
+});
+
+test('late TextMate grammars use the active editor theme and respond to changes', async () => {
+  let themeName = 'diffpane';
+  const definitions = new Map();
+  const tokenizers = new Map();
+  const entries = catalog
+    .filter(entry => ['directives', 'metrics'].includes(entry.id))
+    .map(entry => ({ ...entry, load: () => grammarBytes(entry) }));
+  const runtime = await createSyntaxRuntime(
+    {
+      languages: {
+        getLanguages: () => entries,
+        setTokensProvider: (id, tokenizer) => tokenizers.set(id, tokenizer),
+      },
+      editor: {
+        defineTheme: (name, theme) => definitions.set(name, theme),
+        setTheme: name => assert.fail(`Grammar load changed the active editor to ${name}`),
+      },
+    },
+    entries,
+    () => themeName,
+  );
+  function colors(id, source) {
+    const tokenizer = tokenizers.get(id);
+    const rules = definitions.get(themeName).rules;
+    return tokenizer
+      .tokenize(source, tokenizer.getInitialState())
+      .tokens.map(({ scopes }) =>
+        rules.findLast(rule => rule.token === scopes)?.foreground?.toLowerCase(),
+      );
+  }
+
+  const loading = runtime.load('source.directives');
+  themeName = 'diffpane-light';
+  runtime.setTheme(themeName);
+  await loading;
+  assert.ok(colors('directives', '# Configuration').includes('59666c'));
+  assert.equal(definitions.get('diffpane-light').base, 'vs');
+
+  await runtime.load('source.metrics');
+  assert.ok(colors('metrics', '# HELP requests Request count').includes('59666c'));
+  themeName = 'diffpane';
+  runtime.setTheme(themeName);
+  assert.ok(colors('directives', '# Configuration').includes('808080'));
+  assert.ok(colors('metrics', '# HELP requests Request count').includes('808080'));
+
+  themeName = 'diffpane-light';
+  runtime.setTheme(themeName);
+  assert.ok(colors('directives', '# Configuration').includes('59666c'));
+  assert.ok(colors('metrics', '# HELP requests Request count').includes('59666c'));
 });

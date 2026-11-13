@@ -42,7 +42,7 @@ An agent's chat window doesn't always give you a way to browse the project. Open
 
 Run your agent as usual, then run `diffpane` in your project folder. The file explorer shows the project, and the editor shows the full file. Files update when the agent saves changes, so you can follow along without reopening them.
 
-Git changes are marked beside the line numbers. You can open a side-by-side comparison against HEAD. Edit files yourself; edits save automatically.
+Git changes are marked beside the line numbers. You can compare files against HEAD. Edit files yourself; edits save automatically.
 
 Open **Changes** with ⌘⇧G to see the review queue and its progress. Select a file to jump to its first edit. Long stretches of unchanged code are collapsed, and you can move between edits or choose **Full file** to restore context. Use **Mark reviewed & next** to advance and **Mark reviewed** to finish the last file. Progress lasts for the window session. From **Reviewed**, you can return a file to **Pending**. New edits also return the file to **Pending**.
 
@@ -93,6 +93,8 @@ The app goes in `~/Applications`. The command goes in `~/.local/bin`, which need
 Opening Diffpane from Finder or the Dock shows a welcome screen. Choose Open Folder or Open File to browse a Git working tree, or reopen a recent file or folder. The terminal command opens the current directory by default.
 
 ⌘N opens a new welcome window and ⌘O opens the folder picker. ⌘P finds files, ⌘F searches a file, and ⌘B shows or hides the explorer.
+
+Open **Settings → Appearance** from the title-bar gear or press ⌘, to choose the theme, text diff layout, and editor typography. Changes apply immediately and are saved for future windows.
 
 ## Development
 

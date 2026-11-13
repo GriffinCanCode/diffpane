@@ -29,6 +29,7 @@ export function createReviewFocus({ onScope }) {
   const focus = bar.querySelector('.review-focus-mode');
   const full = bar.querySelector('.review-full-mode');
   let editor;
+  let labels;
   let listener;
   let originalMarker;
   let workingMarker;
@@ -67,6 +68,7 @@ export function createReviewFocus({ onScope }) {
     if (enabled === collapsed) return;
     collapsed = enabled;
     editor.updateOptions({
+      ...labels,
       hideUnchangedRegions: {
         enabled,
         contextLineCount: 4,
@@ -151,18 +153,13 @@ export function createReviewFocus({ onScope }) {
 
   return {
     bar,
-    attach(diffEditor, initialScope) {
+    attach(diffEditor, initialScope, ariaLabels) {
       if (editor === diffEditor) return;
       detach();
       editor = diffEditor;
+      labels = ariaLabels;
       scope = initialScope;
       bar.hidden = false;
-      editor.updateOptions({
-        useInlineViewWhenSpaceIsLimited: true,
-        renderSideBySideInlineBreakpoint: 560,
-        renderIndicators: true,
-        diffWordWrap: 'on',
-      });
       originalMarker = editor.getOriginalEditor().createDecorationsCollection();
       workingMarker = editor.getModifiedEditor().createDecorationsCollection();
       listener = editor.onDidUpdateDiff(sync);

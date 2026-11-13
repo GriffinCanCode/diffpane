@@ -21,6 +21,12 @@ let mermaidRuntime:
       render: (id: string, text: string, container: HTMLElement) => Promise<{ svg: string }>;
     }>
   | undefined;
+const mountedCodePreviews = new Set<() => void>();
+
+export function recolorMarkdownPreviews() {
+  for (const recolor of mountedCodePreviews) recolor();
+}
+
 function loadMermaid() {
   return (mermaidRuntime ??= import('mermaid').then(({ default: mermaid }) => {
     mermaid.initialize({
@@ -120,6 +126,19 @@ export function showMarkdownPreview(host: ParentNode, source: string, options: M
   let disposed = false;
   let expanded: (() => void) | null = null;
   const diagrams: HTMLElement[] = [];
+  const codeBlocks: { code: HTMLElement; text: string; language: string }[] = [];
+  let colorizeVersion = 0;
+  function recolor() {
+    const version = ++colorizeVersion;
+    for (const { code, text, language } of codeBlocks) {
+      void options
+        .colorize(text, language)
+        .then(html => {
+          if (!disposed && version === colorizeVersion) code.innerHTML = DOMPurify.sanitize(html);
+        })
+        .catch(() => {});
+    }
+  }
   const root = node('div', 'markdown-preview');
   root.tabIndex = 0;
   root.setAttribute('aria-label', 'Markdown preview');
@@ -237,14 +256,7 @@ export function showMarkdownPreview(host: ParentNode, source: string, options: M
     pre.replaceWith(block);
     block.append(toolbar, pre);
     if (!diagram) {
-      if (language !== 'text') {
-        void options
-          .colorize(text, language)
-          .then(html => {
-            if (!disposed) code.innerHTML = DOMPurify.sanitize(html);
-          })
-          .catch(() => {});
-      }
+      if (language !== 'text') codeBlocks.push({ code, text, language });
       continue;
     }
     pre.hidden = true;
@@ -302,10 +314,15 @@ export function showMarkdownPreview(host: ParentNode, source: string, options: M
       }
     })();
   }
+  if (codeBlocks.length) {
+    mountedCodePreviews.add(recolor);
+    recolor();
+  }
   root.scrollTop = options.scrollTop ?? 0;
   if (options.anchor) scrollToAnchor(options.anchor);
   return () => {
     disposed = true;
+    mountedCodePreviews.delete(recolor);
     options.onScroll?.(root.scrollTop);
     if (options.diagramHeights)
       options.diagramHeights.splice(

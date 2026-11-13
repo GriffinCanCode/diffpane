@@ -154,6 +154,7 @@ function createWindow(directory = null) {
     mediaToken: randomUUID(),
     hasPendingSaves: false,
     rendererReady: false,
+    settingsRequested: false,
     async root() {
       if (!this.repositoryRoot) this.repositoryRoot = (await this.call('snapshot'))?.root;
       if (!this.repositoryRoot) throw new Error('Open a file or folder first.');
@@ -291,6 +292,17 @@ function openTarget(target, source = BrowserWindow.getFocusedWindow()) {
   if (source && !source.isDestroyed() && sessions.get(source.webContents.id)?.directory === null)
     source.close();
   return window;
+}
+
+function openSettings() {
+  const window =
+    BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? createWindow();
+  if (window.isMinimized()) window.restore();
+  window.focus();
+  const session = sessions.get(window.webContents.id);
+  if (!session) return;
+  if (session.rendererReady) window.webContents.send('open-settings');
+  else session.settingsRequested = true;
 }
 
 async function chooseTarget(window, kind) {
@@ -470,7 +482,12 @@ ipcMain.on('save-state', (event, dirty) => {
 });
 ipcMain.on('renderer-ready', event => {
   const session = sessions.get(event.sender.id);
-  if (session) session.rendererReady = true;
+  if (!session) return;
+  session.rendererReady = true;
+  if (session.settingsRequested) {
+    session.settingsRequested = false;
+    event.sender.send('open-settings');
+  }
 });
 for (const kind of ['folder', 'file'])
   ipcMain.handle(`open-${kind}`, event => {
@@ -531,6 +548,8 @@ void app.whenReady().then(() => {
         label: 'Diffpane',
         submenu: [
           { role: 'about' },
+          { type: 'separator' },
+          { label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: openSettings },
           { type: 'separator' },
           { role: 'hide' },
           { role: 'hideOthers' },

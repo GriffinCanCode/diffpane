@@ -10,7 +10,7 @@
   padding: 7px 10px;
   list-style: none;
   cursor: pointer;
-  color: #aaa;
+  color: light-dark(#56626d, #aaa);
 }
 .howmany-panel > summary > span:first-child {
   font-weight: 650;
@@ -18,7 +18,7 @@
 }
 .howmany-summary {
   margin-left: auto;
-  color: #777;
+  color: light-dark(#576470, #777);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -40,7 +40,7 @@
   overflow-wrap: anywhere;
 }
 .howmany-value {
-  color: #aaa;
+  color: light-dark(#56626d, #aaa);
   text-align: right;
   font-variant-numeric: tabular-nums;
   flex-shrink: 0;
@@ -51,19 +51,19 @@
   overflow: hidden;
   border-radius: 2px;
   margin: 8px 0;
-  background: #292929;
+  background: light-dark(#e4e9ed, #292929);
 }
 .howmany-code_lines {
-  background: #80a99b;
+  background: light-dark(#5a8a7b, #80a99b);
 }
 .howmany-doc_lines {
-  background: #c4a7e7;
+  background: light-dark(#8467ad, #c4a7e7);
 }
 .howmany-comment_lines {
-  background: #6d8cba;
+  background: light-dark(#5477a4, #6d8cba);
 }
 .howmany-blank_lines {
-  background: #555;
+  background: light-dark(#9ca9b3, #555);
 }
 .howmany-quality {
   margin-top: 4px;
@@ -72,23 +72,23 @@
 }
 [data-band='high'] > .howmany-value,
 .howmany-section[data-band='high'] > h3 {
-  color: #80b699;
+  color: light-dark(#367054, #80b699);
 }
 [data-band='good'] > .howmany-value,
 .howmany-section[data-band='good'] > h3 {
-  color: #8eb1cf;
+  color: light-dark(#37688f, #8eb1cf);
 }
 [data-band='fair'] > .howmany-value,
 .howmany-section[data-band='fair'] > h3 {
-  color: #c7b580;
+  color: light-dark(#79571c, #c7b580);
 }
 [data-band='low'] > .howmany-value,
 .howmany-section[data-band='low'] > h3 {
-  color: #cb9999;
+  color: light-dark(#a2494b, #cb9999);
 }
 .howmany-empty {
   font-size: 12px;
-  color: #999;
+  color: light-dark(#5e6b77, #999);
   line-height: 1.6;
   overflow-wrap: anywhere;
 }
@@ -103,12 +103,12 @@
   background: none;
   border: 0;
   padding: 2px 0;
-  color: #aaa;
+  color: light-dark(#56626d, #aaa);
   font-size: 11px;
 }
 .howmany-actions button:hover,
 .howmany-status:hover {
-  color: #eee;
+  color: light-dark(#252b33, #eee);
 }
 .howmany-refresh {
   font-size: 17px !important;
@@ -124,25 +124,28 @@
   padding: 5px 22px 5px 68px;
   font-size: 11px;
   line-height: 1.5;
-  color: #888;
+  color: light-dark(#596672, #888);
   flex-shrink: 0;
 }
 .howmany-warnings {
-  color: #c7b580;
+  color: light-dark(#79571c, #c7b580);
   padding-top: 0;
 }
 .howmany-dialog {
   width: min(760px, calc(100vw - 48px));
   max-height: calc(100vh - 64px);
   padding: 0;
-  border: 1px solid #383838;
+  border: 1px solid var(--control-border);
   border-radius: 10px;
-  background: #181818;
-  color: #ccc;
-  box-shadow: 0 18px 80px #0008;
+  background: var(--workbench-background);
+  color: light-dark(#343e49, #ccc);
+  box-shadow: 0 18px 80px light-dark(#26374744, #0008);
 }
 .howmany-dialog::backdrop {
   background: #0008;
+}
+:root[data-theme='light'] .howmany-dialog::backdrop {
+  background: #26374755;
 }
 .howmany-dialog > header {
   display: flex;
@@ -155,17 +158,17 @@
   font-size: 19px;
   margin: 0 0 4px;
   font-weight: 550;
-  color: #eee;
+  color: light-dark(#252b33, #eee);
 }
 .howmany-dialog header p {
   margin: 0;
-  color: #888;
+  color: light-dark(#596672, #888);
   font-size: 12px;
 }
 .howmany-close {
   border: 0;
   background: none;
-  color: #999;
+  color: light-dark(#5e6b77, #999);
   font-size: 23px;
   padding: 0 2px;
 }
@@ -185,14 +188,14 @@
   margin: 0 0 12px;
   font-size: 15px;
   font-weight: 550;
-  color: #ddd;
+  color: light-dark(#303943, #ddd);
 }
 .howmany-section .howmany-row {
   font-size: 12px;
   padding: 5px 0;
 }
 .howmany-muted {
-  color: #888;
+  color: light-dark(#596672, #888);
   font-size: 11px;
   line-height: 1.6;
   margin: 0 0 12px;
@@ -207,13 +210,13 @@
 .howmany-report-state {
   margin-right: auto;
   font-size: 11px;
-  color: #888;
+  color: light-dark(#596672, #888);
   min-width: 0;
   overflow-wrap: anywhere;
 }
 .howmany-dialog footer button {
-  background: #282828;
-  border: 1px solid #3a3a3a;
+  background: light-dark(#edf1f4, #282828);
+  border: 1px solid light-dark(#c5d0d7, #3a3a3a);
   border-radius: 4px;
   padding: 5px 10px;
   font-size: 12px;

@@ -3,8 +3,8 @@
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  background: #121212;
-  color: #ccc;
+  background: light-dark(#f4f6f7, #121212);
+  color: light-dark(#303943, #ccc);
   user-select: none;
   overflow: hidden;
   font-size: 13px;
@@ -26,7 +26,7 @@
   border: 0;
   background: none;
   padding: 0;
-  color: #777;
+  color: light-dark(#566471, #777);
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
@@ -51,7 +51,7 @@
   justify-content: center;
   border: 0;
   border-radius: 3px;
-  color: #777;
+  color: light-dark(#566471, #777);
   background: none;
   padding: 2px;
 }
@@ -60,8 +60,8 @@
   height: 16px;
 }
 .navigator-action:hover {
-  color: #ccc;
-  background: #2a2d2e;
+  color: light-dark(#303943, #ccc);
+  background: light-dark(#e9eef1, #2a2d2e);
 }
 .navigator-search {
   display: flex;
@@ -71,18 +71,18 @@
   margin: 4px 10px 5px;
   padding: 0 7px;
   height: 26px;
-  border: 1px solid #3c3c3c;
-  background: #181818;
+  border: 1px solid light-dark(#c5d0d7, #3c3c3c);
+  background: light-dark(#fff, #181818);
   overflow: hidden;
 }
 .navigator-search svg {
   width: 14px;
   height: 14px;
   flex-shrink: 0;
-  color: #777;
+  color: light-dark(#566471, #777);
 }
 .navigator-search input {
-  color: #ccc;
+  color: light-dark(#303943, #ccc);
   font-size: 12px;
   background: none;
   width: 100%;
@@ -92,14 +92,14 @@
   outline: none;
 }
 .navigator-search input::placeholder {
-  color: #777;
+  color: light-dark(#566471, #777);
 }
 .navigator-search:focus-within {
-  border-color: #56808b;
+  border-color: light-dark(#417685, #56808b);
 }
 .navigator-summary {
   padding: 0 10px 5px;
-  color: #777;
+  color: light-dark(#566471, #777);
   font-size: 11px;
   line-height: 16px;
   white-space: nowrap;
@@ -142,26 +142,26 @@
   contain: layout style;
 }
 .navigator-row:hover {
-  background: #2a2d2e;
+  background: light-dark(#e9eef1, #2a2d2e);
 }
 .navigator-row[aria-selected='true'] {
-  background: #37373d;
+  background: light-dark(#dfeaf1, #37373d);
 }
 .navigator-tree:focus-visible .navigator-row[data-active='true'] {
-  outline: 1px solid #56808b;
+  outline: 1px solid light-dark(#417685, #56808b);
   outline-offset: -1px;
 }
 .navigator-row[data-changed='true'] .navigator-name {
-  color: #80b7c4;
+  color: light-dark(#2e6979, #80b7c4);
 }
 .navigator-row[data-status='D'] .navigator-name {
   text-decoration: line-through;
 }
 .navigator-row[data-status='!'] .navigator-name {
-  color: #f48771;
+  color: light-dark(#a84132, #f48771);
 }
 .navigator-row[data-ignored='true'] .navigator-name {
-  color: #969696;
+  color: light-dark(#52606b, #969696);
 }
 .navigator-row[data-ignored='true'] .navigator-icon {
   opacity: 0.65;
@@ -179,8 +179,8 @@
   position: absolute;
   width: 5px;
   height: 5px;
-  border-right: 1px solid #999;
-  border-bottom: 1px solid #999;
+  border-right: 1px solid light-dark(#65717b, #999);
+  border-bottom: 1px solid light-dark(#65717b, #999);
   transform: rotate(-45deg);
   top: 4px;
   left: 0;
@@ -207,7 +207,7 @@
   min-width: 0;
 }
 .navigator-directory {
-  color: #777;
+  color: light-dark(#566471, #777);
   overflow: hidden;
   text-overflow: ellipsis;
   font-size: 11px;
@@ -225,17 +225,17 @@
   font-size: 11px;
   font-weight: 600;
   text-align: right;
-  color: #80b7c4;
+  color: light-dark(#2e6979, #80b7c4);
 }
 .navigator-row[data-kind='directory'] .navigator-badge {
-  color: #405d63;
+  color: light-dark(#56737b, #405d63);
   font-size: 9px;
 }
 .navigator-badge:empty {
   display: none;
 }
 .navigator-row[data-status='!'] .navigator-badge {
-  color: #f48771;
+  color: light-dark(#a84132, #f48771);
 }
 .navigator-footer {
   display: none;
@@ -244,15 +244,15 @@
   width: 7px;
 }
 .navigator-tree::-webkit-scrollbar-thumb {
-  background: #424242;
+  background: light-dark(#bcc8d0, #424242);
 }
 .navigator-tree::-webkit-scrollbar-thumb:hover {
-  background: #555;
+  background: light-dark(#9eafb9, #555);
 }
 
 .navigator-outline {
   flex-shrink: 0;
-  border-top: 1px solid #252525;
+  border-top: 1px solid light-dark(#dbe2e8, #252525);
 }
 .navigator-outline summary {
   height: 22px;
@@ -261,7 +261,7 @@
   gap: 6px;
   padding: 0 10px;
   list-style: none;
-  color: #777;
+  color: light-dark(#566471, #777);
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
@@ -277,7 +277,7 @@
   flex: 0 0 14px;
   width: 14px;
   height: 14px;
-  background: #999;
+  background: light-dark(#65717b, #999);
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='m6 4 4 4-4 4' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
     center / contain no-repeat;
 }
@@ -292,7 +292,7 @@
   border: 0;
   border-radius: 0;
   box-shadow: none;
-  background: #121212;
+  background: light-dark(#f4f6f7, #121212);
   padding: 0;
 }
 .navigator-outline .symbol-item {
@@ -310,7 +310,7 @@
 .search-filter-reset {
   border: 0;
   background: transparent;
-  color: #999;
+  color: light-dark(#65717b, #999);
   padding: 3px 0;
   font: inherit;
   font-size: 11px;
@@ -322,7 +322,7 @@
 }
 .search-filter-toggle:hover,
 .search-filter-toggle[data-active='true'] {
-  color: #80b7c4;
+  color: light-dark(#2e6979, #80b7c4);
 }
 .search-filter-panel {
   display: grid;
@@ -337,7 +337,7 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-  color: #999;
+  color: light-dark(#65717b, #999);
   font-size: 11px;
   min-width: 0;
 }
@@ -347,10 +347,10 @@
   min-width: 0;
   height: 27px;
   box-sizing: border-box;
-  border: 1px solid #3c3c3c;
+  border: 1px solid light-dark(#c5d0d7, #3c3c3c);
   border-radius: 3px;
-  background: #181818;
-  color: #ccc;
+  background: light-dark(#fff, #181818);
+  color: light-dark(#303943, #ccc);
   font: inherit;
   font-size: 12px;
   padding: 3px 5px;
@@ -370,10 +370,10 @@
   z-index: 1000;
   min-width: 190px;
   padding: 4px;
-  border: 1px solid #444;
+  border: 1px solid light-dark(#c0cbd3, #444);
   border-radius: 6px;
-  background: #252526;
-  box-shadow: 0 8px 24px #0008;
+  background: light-dark(#fff, #252526);
+  box-shadow: 0 8px 24px light-dark(#26374738, #0008);
 }
 .file-context-menu[hidden] {
   display: none;
@@ -386,13 +386,13 @@
   border-radius: 3px;
   padding: 6px 12px;
   background: transparent;
-  color: #ccc;
+  color: light-dark(#303943, #ccc);
   font: inherit;
   font-size: 12px;
 }
 .file-context-menu button:hover,
 .file-context-menu button:focus-visible {
-  background: #35415c;
+  background: light-dark(#e5eef8, #35415c);
   outline: none;
 }
 .file-context-menu button:disabled {
@@ -400,20 +400,23 @@
 }
 .file-context-menu button[data-action='trash'] {
   margin-top: 4px;
-  border-top: 1px solid #444;
-  color: #e99c9c;
+  border-top: 1px solid light-dark(#c0cbd3, #444);
+  color: light-dark(#9d3944, #e99c9c);
 }
 .rename-dialog {
   width: min(380px, calc(100vw - 40px));
   box-sizing: border-box;
   padding: 22px;
-  border: 1px solid #444;
+  border: 1px solid light-dark(#c0cbd3, #444);
   border-radius: 8px;
-  background: #202020;
-  color: #ccc;
+  background: light-dark(#f5f7f8, #202020);
+  color: light-dark(#303943, #ccc);
 }
 .rename-dialog::backdrop {
   background: #0008;
+}
+:root[data-theme='light'] .rename-dialog::backdrop {
+  background: #26374755;
 }
 .rename-dialog h2 {
   margin: 0 0 18px;
@@ -427,14 +430,14 @@
 }
 .rename-dialog input {
   padding: 8px;
-  border: 1px solid #56808b;
+  border: 1px solid light-dark(#417685, #56808b);
   border-radius: 3px;
-  background: #181818;
-  color: #eee;
+  background: light-dark(#fff, #181818);
+  color: light-dark(#242b33, #eee);
   font: inherit;
 }
 .rename-error {
-  color: #e99c9c;
+  color: light-dark(#9d3944, #e99c9c);
   font-size: 12px;
   overflow-wrap: anywhere;
 }
@@ -445,15 +448,15 @@
 }
 .rename-dialog button {
   padding: 6px 12px;
-  border: 1px solid #444;
+  border: 1px solid light-dark(#c0cbd3, #444);
   border-radius: 4px;
-  background: #303030;
-  color: #ddd;
+  background: light-dark(#e9eef1, #303030);
+  color: light-dark(#37414c, #ddd);
   font: inherit;
   font-size: 12px;
 }
 .rename-dialog button[type='submit'] {
-  background: #354f58;
+  background: light-dark(#dcecf0, #354f58);
 }
 
 .picker-results {

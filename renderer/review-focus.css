@@ -1,5 +1,5 @@
 .review-hunk-bar {
-  --review-hunk-accent: #a4d0d1;
+  --review-hunk-accent: light-dark(#2b6c4f, #a4d0d1);
   display: flex;
   flex: 0 0 auto;
   flex-wrap: wrap;
@@ -8,8 +8,8 @@
   min-height: 42px;
   padding: 6px 14px;
   border-top: 1px solid var(--line);
-  background: #1d2020;
-  color: #acb4b4;
+  background: light-dark(#f5f7f6, #1d2020);
+  color: light-dark(#53635b, #acb4b4);
   font-size: 11px;
   user-select: none;
 }
@@ -41,7 +41,7 @@
 }
 
 .review-hunk-caption {
-  color: #acb4b4;
+  color: light-dark(#53635b, #acb4b4);
 }
 
 .review-hunk-navigation {
@@ -52,9 +52,9 @@
   gap: 2px;
   margin-inline-start: auto;
   padding: 2px;
-  border: 1px solid #343b3b;
+  border: 1px solid light-dark(#cdd9d1, #343b3b);
   border-radius: 6px;
-  background: #161818;
+  background: light-dark(#f0f4f1, #161818);
 }
 
 .review-hunk-bar button {
@@ -66,7 +66,7 @@
   border: 1px solid transparent;
   border-radius: 4px;
   background: transparent;
-  color: #b7c0c0;
+  color: light-dark(#53635b, #b7c0c0);
   font-size: inherit;
   font-weight: 550;
   line-height: 1.2;
@@ -84,14 +84,14 @@
 }
 
 .review-hunk-bar button:not(:disabled, [aria-disabled='true']):hover {
-  background: #2b3232;
-  color: #eff5f4;
+  background: light-dark(#e9efec, #2b3232);
+  color: light-dark(#252b33, #eff5f4);
 }
 
 .review-hunk-bar button[aria-pressed='true'] {
-  border-color: #405657;
-  background: #293b3b;
-  color: #d6eeee;
+  border-color: light-dark(#adcbbd, #405657);
+  background: light-dark(#e0efe6, #293b3b);
+  color: light-dark(#2b5e49, #d6eeee);
 }
 
 .review-hunk-bar button:focus-visible {
@@ -114,7 +114,7 @@
   }
 }
 
-.file-card[data-review-scope]:has(.monaco-diff-editor:not(.side-by-side)) .comparison-labels {
+.file-card:has(.monaco-diff-editor:not(.side-by-side)) .comparison-labels {
   grid-template-columns: minmax(0, 1fr);
 
   .comparison-original,
@@ -150,23 +150,23 @@
 }
 
 .file-card[data-review-scope] .monaco-diff-editor .line-insert {
-  background: #6fb99822 !important;
+  background: light-dark(#519e6b23, #6fb99822) !important;
 }
 
 .file-card[data-review-scope] .monaco-diff-editor .line-delete {
-  background: #cf787624 !important;
+  background: light-dark(#c96a6528, #cf787624) !important;
 }
 
 .file-card[data-review-scope] .monaco-editor .review-hunk-active {
-  box-shadow: inset 2px 0 #a4d0d1;
+  box-shadow: inset 2px 0 light-dark(#2b6c4f, #a4d0d1);
 }
 
 .file-card[data-review-scope='focus'] .monaco-editor .diff-hidden-lines .center {
-  background: #222828;
-  color: #a8b8b8;
+  background: light-dark(#edf4ef, #222828);
+  color: light-dark(#53665b, #a8b8b8);
   box-shadow:
-    inset 0 1px #89b6b51f,
-    inset 0 -1px #89b6b51f;
+    inset 0 1px light-dark(#3e755525, #89b6b51f),
+    inset 0 -1px light-dark(#3e755525, #89b6b51f);
   font-size: 11px;
 }
 
@@ -174,6 +174,6 @@
   .monaco-editor
   .diff-hidden-lines
   .center:is(:hover, :focus-within) {
-  background: #293333;
-  color: #d5e5e5;
+  background: light-dark(#e0efe6, #293333);
+  color: light-dark(#2b5e49, #d5e5e5);
 }

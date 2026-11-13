@@ -9,6 +9,7 @@ const listen = <T>(channel: string, callback: (value: T) => void): Unsubscribe =
 };
 
 contextBridge.exposeInMainWorld('diffpane', {
+  onOpenSettings: (callback: () => void) => listen('open-settings', callback),
   reviewNotes: {
     list: () => ipcRenderer.invoke('review-notes-list'),
     change: (change: ReviewNoteChange) => ipcRenderer.invoke('review-notes-change', change),
