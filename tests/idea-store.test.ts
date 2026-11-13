@@ -1,10 +1,13 @@
-import { test } from 'vite-plus/test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+import { test } from 'vite-plus/test';
 import { IdeaStore } from '../electron/idea-store.ts';
-import { MAX_IDEA_BODY_LENGTH, type Idea } from '../ideas.ts';
+import { LocalState } from '../electron/local-state.ts';
+import { MAX_IDEA_BODY_LENGTH } from '../ideas.ts';
+import type { Idea } from '../ideas.ts';
 
 function idea(overrides: Partial<Idea> = {}): Idea {
   return {
@@ -30,88 +33,117 @@ function idea(overrides: Partial<Idea> = {}): Idea {
 
 async function fixture(t: { onTestFinished(callback: () => Promise<void>): void }) {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'diffpane-ideas-'));
-  t.onTestFinished(() => rm(directory, { recursive: true, force: true }));
-  return path.join(directory, 'settings', 'ideas.sqlite');
+  const filename = path.join(directory, 'storage', 'state.sqlite');
+  const legacyFilename = path.join(directory, 'ideas.sqlite');
+  const connections = new Set<LocalState>();
+  t.onTestFinished(async () => {
+    for (const state of connections) state.close();
+    await rm(directory, { recursive: true, force: true });
+  });
+  function open() {
+    const state = new LocalState(filename, {
+      wrap: async key => Buffer.from(key, 'base64'),
+      unwrap: async blob => blob.toString('base64'),
+    });
+    connections.add(state);
+    return {
+      store: new IdeaStore(state, legacyFilename),
+      close() {
+        connections.delete(state);
+        state.close();
+      },
+    };
+  }
+  return { filename, legacyFilename, open };
 }
 
 test('Markdown and line anchors persist across connections and stay scoped to a worktree', async t => {
-  const filename = await fixture(t);
+  const { filename, open } = await fixture(t);
   const original = idea();
   const latest = idea({ id: 'another-note', updatedAt: 40 });
   const other = idea({ title: 'Independent worktree' });
-  const first = new IdeaStore(filename);
-  try {
-    assert.deepEqual(first.list('/project'), []);
-    assert.deepEqual(first.upsert('/project', original), original);
-    first.upsert('/project', latest);
-    first.upsert('/project/worktree', other);
-  } finally {
-    first.close();
-  }
+  const first = open();
+  assert.deepEqual(await first.store.list('/project'), []);
+  assert.deepEqual(await first.store.upsert('/project', original), original);
+  await first.store.upsert('/project', latest);
+  await first.store.upsert('/project/worktree', other);
+  first.close();
   if (process.platform !== 'win32') assert.equal((await stat(filename)).mode & 0o077, 0);
 
-  const second = new IdeaStore(filename);
-  try {
-    assert.deepEqual(second.list('/project'), [latest, original]);
-    assert.deepEqual(second.list('/project/worktree'), [other]);
-    assert.deepEqual(second.list('/another-project'), []);
-    const updated = idea({ createdAt: 30, updatedAt: 50, body: '- A revised idea' });
-    const saved = { ...updated, createdAt: original.createdAt };
-    assert.deepEqual(second.upsert('/project', updated), saved);
-    assert.deepEqual(second.list('/project'), [saved, latest]);
-    assert.equal(second.delete('/project', original.id), true);
-    assert.equal(second.delete('/project', original.id), false);
-    assert.deepEqual(second.list('/project'), [latest]);
-    assert.deepEqual(second.list('/project/worktree'), [other]);
-  } finally {
-    second.close();
-  }
-  const third = new IdeaStore(filename);
-  try {
-    assert.deepEqual(third.list('/project'), [latest]);
-  } finally {
-    third.close();
-  }
+  const second = open();
+  assert.deepEqual(await second.store.list('/project'), [latest, original]);
+  assert.deepEqual(await second.store.list('/project/worktree'), [other]);
+  assert.deepEqual(await second.store.list('/another-project'), []);
+  const updated = idea({ createdAt: 30, updatedAt: 50, body: '- A revised idea' });
+  const saved = { ...updated, createdAt: original.createdAt };
+  assert.deepEqual(await second.store.upsert('/project', updated), saved);
+  assert.deepEqual(await second.store.list('/project'), [saved, latest]);
+  assert.equal(await second.store.delete('/project', original.id), true);
+  assert.equal(await second.store.delete('/project', original.id), false);
+  assert.deepEqual(await second.store.list('/project'), [latest]);
+  assert.deepEqual(await second.store.list('/project/worktree'), [other]);
+  second.close();
+  assert.deepEqual(await open().store.list('/project'), [latest]);
 });
 
 test('invalid links and oversized Markdown leave a previously saved idea intact', async t => {
-  const store = new IdeaStore(await fixture(t));
-  try {
-    const original = idea();
-    store.upsert('/project', original);
-    assert.throws(
-      () => store.upsert('/project', idea({ links: [{ path: '../outside' }] })),
-      /inside this repository/u,
-    );
-    assert.throws(
-      () =>
-        store.upsert('/project', idea({ links: [{ path: 'src/core.ts', line: 5, endLine: 4 }] })),
-      /invalid line range/u,
-    );
-    assert.throws(
-      () => store.upsert('/project', idea({ body: 'x'.repeat(MAX_IDEA_BODY_LENGTH + 1) })),
-      /Idea notes/u,
-    );
-    assert.deepEqual(store.list('/project'), [original]);
-  } finally {
-    store.close();
-  }
+  const { open } = await fixture(t);
+  const { store } = open();
+  const original = idea();
+  await store.upsert('/project', original);
+  await assert.rejects(
+    store.upsert('/project', idea({ links: [{ path: '../outside' }] })),
+    /inside this repository/u,
+  );
+  await assert.rejects(
+    store.upsert('/project', idea({ links: [{ path: 'src/core.ts', line: 5, endLine: 4 }] })),
+    /invalid line range/u,
+  );
+  await assert.rejects(
+    store.upsert('/project', idea({ body: 'x'.repeat(MAX_IDEA_BODY_LENGTH + 1) })),
+    /Idea notes/u,
+  );
+  assert.deepEqual(await store.list('/project'), [original]);
 });
 
 test('interleaved connections preserve independent writes to the same workspace', async t => {
-  const filename = await fixture(t);
-  const first = new IdeaStore(filename);
-  const second = new IdeaStore(filename);
-  try {
-    const original = idea();
-    const other = idea({ id: 'second', updatedAt: 21 });
-    first.upsert('/project', original);
-    second.upsert('/project', other);
-    const changed = { ...original, body: 'Edited', updatedAt: 30 };
-    first.upsert('/project', changed);
-    assert.deepEqual(second.list('/project'), [changed, other]);
-  } finally {
-    second.close();
-    first.close();
+  const { open } = await fixture(t);
+  const { store: first } = open();
+  const { store: second } = open();
+  const original = idea();
+  const other = idea({ id: 'second', updatedAt: 21 });
+  await Promise.all([first.upsert('/project', original), second.upsert('/project', other)]);
+  const changed = { ...original, body: 'Edited', updatedAt: 30 };
+  await first.upsert('/project', changed);
+  assert.deepEqual(await second.list('/project'), [changed, other]);
+});
+
+test('legacy Idea Builder records migrate once with title, Markdown, and links intact', async t => {
+  const { legacyFilename, open } = await fixture(t);
+  const original = idea();
+  {
+    using database = new DatabaseSync(legacyFilename);
+    database.exec(`
+      PRAGMA journal_mode = WAL;
+      CREATE TABLE ideas (workspace TEXT, id TEXT, title TEXT, body TEXT, links TEXT, created_at INTEGER, updated_at INTEGER);
+    `);
+    database
+      .prepare('INSERT INTO ideas VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(
+        '/project',
+        original.id,
+        original.title,
+        original.body,
+        JSON.stringify(original.links),
+        original.createdAt,
+        original.updatedAt,
+      );
   }
+  const first = open();
+  assert.deepEqual(await first.store.list('/project'), [original]);
+  assert.deepEqual(await first.store.list('/other-project'), []);
+  await assert.rejects(stat(legacyFilename), { code: 'ENOENT' });
+  assert.equal(await first.store.delete('/project', original.id), true);
+  first.close();
+  assert.deepEqual(await open().store.list('/project'), []);
 });

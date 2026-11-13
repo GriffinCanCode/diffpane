@@ -1,71 +1,27 @@
+import {
+  defaultPaneSizes as DEFAULTS,
+  paneColumns as COLUMNS,
+  paneDimensions as DIMENSIONS,
+  paneWidths as WIDTHS,
+  rightPaneHeight as RIGHT_HEIGHT,
+} from '../electron/ui-preferences.ts';
+import type {
+  PaneColumn as Column,
+  PaneDimension as Dimension,
+  PaneSizes as Sizes,
+  WorkspacePane as Pane,
+} from '../electron/ui-preferences.ts';
+import type { UiPreferenceController } from './ui-preferences.ts';
 import './workspace-layout.css';
 
-const WIDTHS = {
-  ideas: { initial: 282, min: 184, max: 560 },
-  files: { initial: 270, min: 156, max: 480 },
-  right: { initial: 368, min: 248, max: 680 },
-};
-const RIGHT_HEIGHT = { initial: 250, min: 172, max: 640 };
 const CODE_WIDTH = 292;
 const CODE_HEIGHT = 166;
 const DIVIDER_SIZE = 5;
-const STORAGE_KEY = 'diffpane.workspace-layout.v1';
-
-type Column = keyof typeof WIDTHS;
-type Pane = Column | 'code';
 type Destination = Pane | 'end';
-type Dimension = Column | 'rightHeight';
-type Sizes = Record<Dimension, number>;
-
-const COLUMNS: readonly Column[] = ['ideas', 'files', 'right'];
-const DIMENSIONS: readonly Dimension[] = [...COLUMNS, 'rightHeight'];
-const DEFAULT_ORDER: readonly Pane[] = ['ideas', 'files', 'code', 'right'];
 const CONTROLS = 'button, a, input, textarea, select, summary, [contenteditable]';
-const DEFAULTS: Sizes = {
-  ideas: WIDTHS.ideas.initial,
-  files: WIDTHS.files.initial,
-  right: WIDTHS.right.initial,
-  rightHeight: RIGHT_HEIGHT.initial,
-};
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
-}
-
-function readPreferences() {
-  const sizes = { ...DEFAULTS };
-  let order = DEFAULT_ORDER;
-  let stored: unknown;
-  try {
-    stored = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}');
-  } catch {
-    // The layout also works with storage disabled.
-    return { sizes, order };
-  }
-  if (!isPreferenceRecord(stored)) return { sizes, order };
-  for (const key of DIMENSIONS) {
-    const value = stored[key];
-    if (typeof value !== 'number' || !Number.isFinite(value)) continue;
-    const { min, max } = key === 'rightHeight' ? RIGHT_HEIGHT : WIDTHS[key];
-    sizes[key] = clamp(value, min, max);
-  }
-  if (
-    Array.isArray(stored.order) &&
-    stored.order.length === DEFAULT_ORDER.length &&
-    stored.order.every(isPane) &&
-    new Set(stored.order).size === DEFAULT_ORDER.length
-  ) {
-    order = stored.order;
-  }
-  return { sizes, order };
-}
-
-function isPreferenceRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function isPane(value: unknown): value is Pane {
-  return DEFAULT_ORDER.some(pane => pane === value);
 }
 
 function measure(
@@ -155,7 +111,7 @@ function resize(layout: Layout, key: Dimension, target: number) {
   return sizes;
 }
 
-export function createWorkspaceLayout(workspace: HTMLElement) {
+export function createWorkspaceLayout(workspace: HTMLElement, preferences: UiPreferenceController) {
   const panes = {
     ideas: workspace.querySelector<HTMLElement>(':scope > #ideas-panel'),
     files: workspace.querySelector<HTMLElement>(':scope > #sidebar'),
@@ -176,8 +132,8 @@ export function createWorkspaceLayout(workspace: HTMLElement) {
   };
   const abort = new AbortController();
   const options = { signal: abort.signal };
-  const { sizes: preferred, order: savedOrder } = readPreferences();
-  let order = savedOrder;
+  let { order, ...preferred } = preferences.get('layout');
+  let deferredLayout = false;
   let layout: Layout;
   let ideasNotebook = false;
   let ideasDocked = false;
@@ -408,22 +364,40 @@ export function createWorkspaceLayout(workspace: HTMLElement) {
     paint(next);
   }
 
-  function savePreferences() {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...preferred, order }));
-    } catch {
-      // Layout changes still apply for the current window.
+  function applyPreferences() {
+    const next = preferences.get('layout');
+    if (
+      next.order.every((pane, index) => order[index] === pane) &&
+      DIMENSIONS.every(key => preferred[key] === next[key])
+    )
+      return;
+    if (drag || dock) {
+      deferredLayout = true;
+      return;
     }
+    ({ order, ...preferred } = next);
+    refresh();
+  }
+
+  function syncAfterGesture() {
+    if (!deferredLayout) return;
+    deferredLayout = false;
+    queueMicrotask(() => {
+      if (!abort.signal.aborted) applyPreferences();
+    });
   }
 
   function store(before: Sizes) {
-    const changed = DIMENSIONS.filter(key => before[key] !== layout.sizes[key]);
-    if (!changed.length) return;
-    for (const key of changed) {
+    const changed: Partial<Sizes> = {};
+    for (const key of DIMENSIONS) {
+      if (before[key] === layout.sizes[key]) continue;
       const min = key === 'rightHeight' ? RIGHT_HEIGHT.min : WIDTHS[key].min;
-      preferred[key] = Math.max(min, layout.sizes[key]);
+      changed[key] = Math.max(min, layout.sizes[key]);
     }
-    savePreferences();
+    if (Object.keys(changed).length) {
+      preferred = { ...preferred, ...changed };
+      preferences.set('layout', changed);
+    }
   }
 
   function updateSize(key: Dimension, target: number) {
@@ -442,6 +416,7 @@ export function createWorkspaceLayout(workspace: HTMLElement) {
     delete document.body.dataset.workspaceResizing;
     if (keep) store(initial.sizes);
     else paint(initial);
+    syncAfterGesture();
   }
 
   function movePanel(column: Column, destination: Destination) {
@@ -451,7 +426,7 @@ export function createWorkspaceLayout(workspace: HTMLElement) {
     next.splice(index, 0, column);
     order = next;
     refresh();
-    savePreferences();
+    preferences.set('layout', { order });
   }
 
   function showDropTarget(event: PointerEvent) {
@@ -492,6 +467,7 @@ export function createWorkspaceLayout(workspace: HTMLElement) {
     workspace.removeAttribute('data-panel-dragging');
     dropMarker.hidden = true;
     dragLabel.hidden = true;
+    syncAfterGesture();
   }
 
   const handles = [
@@ -640,6 +616,7 @@ export function createWorkspaceLayout(workspace: HTMLElement) {
   window.addEventListener('blur', stopDock, options);
 
   refresh();
+  const unsubscribe = preferences.onChange('layout', applyPreferences);
   let lastWidth = workspace.clientWidth;
   let lastHeight = workspace.clientHeight;
   const dimensions = new ResizeObserver(() => {
@@ -677,6 +654,7 @@ export function createWorkspaceLayout(workspace: HTMLElement) {
       refresh();
     },
     dispose() {
+      unsubscribe();
       stopDrag(false);
       stopDock();
       abort.abort();

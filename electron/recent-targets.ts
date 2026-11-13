@@ -1,185 +1,188 @@
-import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { openSync, closeSync, readFileSync, fstatSync, constants } from 'node:fs';
+import { stat } from 'node:fs/promises';
 import path from 'node:path';
-import { setTimeout as delay } from 'node:timers/promises';
+import type { LocalState } from './local-state.ts';
 
-export type RecentTarget = {
+export interface RecentTarget {
   path: string;
   name: string;
   kind: 'folder' | 'file';
   openedAt: number;
-};
+}
 
 const LIMIT = 8;
-const LOCK_WAIT_MS = 600;
-const STALE_LOCK_MS = 30_000;
+const MAX_PENDING = 64;
+const MAX_LEGACY_SIZE = 1024 * 1024;
+const COLLECTION = 'recents';
 type Mutation = { entry: RecentTarget } | { remove: string };
 
-/** A small, optional history whose disk writes cannot corrupt the last saved list. */
-export class RecentTargets {
-  private filename: string;
-  private entries: RecentTarget[] = [];
-  private operations: Promise<void> = Promise.resolve();
-  private pending: Mutation[] = [];
-  readonly ready: Promise<void>;
+function recentTargets(input: unknown): RecentTarget[] {
+  if (!Array.isArray(input)) throw new Error('Invalid recent targets.');
+  const seen = new Set<string>();
+  return input
+    .flatMap((entry: unknown): RecentTarget[] => {
+      if (
+        !entry ||
+        typeof entry !== 'object' ||
+        !('path' in entry) ||
+        !('kind' in entry) ||
+        !('openedAt' in entry) ||
+        typeof entry.path !== 'string' ||
+        !path.isAbsolute(entry.path) ||
+        entry.path.includes('\0') ||
+        (entry.kind !== 'folder' && entry.kind !== 'file') ||
+        typeof entry.openedAt !== 'number' ||
+        !Number.isFinite(entry.openedAt) ||
+        entry.openedAt <= 0
+      )
+        return [];
+      const filename = path.resolve(entry.path);
+      return [
+        {
+          path: filename,
+          name: path.basename(filename) || filename,
+          kind: entry.kind,
+          openedAt: entry.openedAt,
+        },
+      ];
+    })
+    .toSorted((left, right) => right.openedAt - left.openedAt)
+    .filter(entry => {
+      if (seen.has(entry.path)) return false;
+      seen.add(entry.path);
+      return true;
+    })
+    .slice(0, LIMIT);
+}
 
-  constructor(filename: string) {
-    this.filename = filename;
-    this.ready = this.refresh();
+function apply(entries: RecentTarget[], mutations: Mutation[]) {
+  for (const mutation of mutations) {
+    if ('remove' in mutation) entries = entries.filter(entry => entry.path !== mutation.remove);
+    else {
+      const previous = entries.find(entry => entry.path === mutation.entry.path);
+      if (!previous || previous.openedAt <= mutation.entry.openedAt)
+        entries = [
+          mutation.entry,
+          ...entries.filter(entry => entry.path !== mutation.entry.path),
+        ].toSorted((left, right) => right.openedAt - left.openedAt);
+    }
+    entries = entries.slice(0, LIMIT);
   }
+  return entries;
+}
 
-  private async read(): Promise<RecentTarget[] | null> {
+class InvalidLegacyHistory extends Error {}
+
+function readLegacy(filename: string) {
+  const file = openSync(filename, constants.O_RDONLY | (constants.O_NOFOLLOW || 0));
+  try {
+    if (fstatSync(file).size > MAX_LEGACY_SIZE)
+      throw new InvalidLegacyHistory('Previous recent history is too large to import.');
+    const data = readFileSync(file, 'utf8');
     try {
-      const stored: unknown = JSON.parse(await readFile(this.filename, 'utf8'));
-      if (!Array.isArray(stored)) return null;
-      const seen = new Set<string>();
-      return stored
-        .filter(
-          (entry): entry is RecentTarget =>
-            entry !== null &&
-            typeof entry === 'object' &&
-            typeof entry.path === 'string' &&
-            path.isAbsolute(entry.path) &&
-            !entry.path.includes('\0') &&
-            ['folder', 'file'].includes(entry.kind) &&
-            typeof entry.openedAt === 'number' &&
-            Number.isFinite(entry.openedAt) &&
-            entry.openedAt > 0,
-        )
-        .sort((left, right) => right.openedAt - left.openedAt)
-        .map(entry => {
-          const filename = path.resolve(entry.path);
-          return {
-            path: filename,
-            name: path.basename(filename) || filename,
-            kind: entry.kind,
-            openedAt: entry.openedAt,
-          };
-        })
-        .filter(entry => {
-          if (seen.has(entry.path)) return false;
-          seen.add(entry.path);
-          return true;
-        })
-        .slice(0, LIMIT);
-    } catch {
-      // Retain uncommitted in-memory changes if disk history is unavailable.
-      return null;
+      return recentTargets(JSON.parse(data));
+    } catch (error) {
+      throw new InvalidLegacyHistory(
+        'Previous recent history is unreadable and was kept for recovery.',
+        {
+          cause: error,
+        },
+      );
     }
+  } finally {
+    closeSync(file);
+  }
+}
+
+/** History remains usable in memory while its optional disk store is unavailable. */
+export class RecentTargets {
+  private readonly state: LocalState;
+  private readonly legacyFilename: string;
+  private readonly onError?: (error: unknown) => void;
+  private entries: RecentTarget[] = [];
+  private pending: Mutation[] = [];
+  private operations = Promise.resolve<unknown>(undefined);
+  private initialized?: Promise<void>;
+  private reportedFailure = false;
+
+  constructor(state: LocalState, legacyFilename: string, onError?: (error: unknown) => void) {
+    this.state = state;
+    this.legacyFilename = legacyFilename;
+    this.onError = onError;
   }
 
-  private apply(entries: RecentTarget[], mutations: Mutation[]) {
-    for (const mutation of mutations) {
-      if ('remove' in mutation) entries = entries.filter(entry => entry.path !== mutation.remove);
-      else {
-        const previous = entries.find(entry => entry.path === mutation.entry.path);
-        if (!previous || previous.openedAt <= mutation.entry.openedAt)
-          entries = [
-            mutation.entry,
-            ...entries.filter(entry => entry.path !== mutation.entry.path),
-          ].sort((left, right) => right.openedAt - left.openedAt);
-      }
-      entries = entries.slice(0, LIMIT);
-    }
-    return entries;
+  initialize() {
+    this.initialized ??= this.state
+      .migrate(COLLECTION, this.legacyFilename, (records, filename) => {
+        const history = readLegacy(filename);
+        if (records.get(COLLECTION, '', 'history') === undefined)
+          records.put(COLLECTION, '', 'history', history);
+      })
+      .catch((error: unknown) => {
+        if (error instanceof InvalidLegacyHistory) {
+          this.onError?.(error);
+          return;
+        }
+        this.initialized = undefined;
+        throw error;
+      });
+    return this.initialized;
   }
 
-  private async refresh() {
-    this.entries = this.apply((await this.read()) ?? this.entries, this.pending);
-  }
-
-  private serialize<T>(operation: () => Promise<T>): Promise<T> {
-    const result = this.operations.then(async () => {
-      await this.ready;
-      return operation();
-    });
-    this.operations = result.then(
-      () => {},
-      () => {},
-    );
-    return result;
-  }
-
-  list(): Promise<RecentTarget[]> {
+  list() {
     return this.serialize(async () => {
-      // Other `open -n` app processes can have committed a newer recent list.
       await this.refresh();
       return this.entries.map(entry => ({ ...entry }));
     });
   }
 
-  async record(target: string) {
+  record(target: string) {
     const filename = path.resolve(target);
-    const openedAt = Date.now();
-    const info = await stat(filename).catch(() => null);
-    if (!info?.isFile() && !info?.isDirectory()) return;
-    const entry: RecentTarget = {
-      path: filename,
-      name: path.basename(filename) || filename,
-      kind: info.isFile() ? 'file' : 'folder',
-      openedAt,
-    };
-    await this.update({ entry });
-  }
-
-  remove(target: string) {
-    return this.update({ remove: target });
-  }
-
-  private update(mutation: Mutation) {
     return this.serialize(async () => {
-      this.pending.push(mutation);
-      const unlock = await this.lock();
-      try {
-        await this.refresh();
-        if (!unlock) return;
-        await this.persist();
-        this.pending = [];
-      } catch {
-        // History is optional; keep unsaved changes for the next successful write.
-      } finally {
-        await unlock?.();
-      }
+      const info = await stat(filename).catch(() => null);
+      if (!info?.isFile() && !info?.isDirectory()) return;
+      await this.refresh({
+        entry: {
+          path: filename,
+          name: path.basename(filename) || filename,
+          kind: info.isFile() ? 'file' : 'folder',
+          openedAt: Date.now(),
+        },
+      });
     });
   }
 
-  private async lock(): Promise<(() => Promise<void>) | null> {
-    const filename = `${this.filename}.lock`;
-    const token = randomUUID();
-    const deadline = Date.now() + LOCK_WAIT_MS;
-    try {
-      await mkdir(path.dirname(this.filename), { recursive: true });
-      for (;;) {
-        try {
-          await writeFile(filename, token, { flag: 'wx', mode: 0o600 });
-          return async () => {
-            if ((await readFile(filename, 'utf8').catch(() => null)) === token)
-              await rm(filename, { force: true }).catch(() => {});
-          };
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== 'EEXIST') return null;
-          const info = await stat(filename).catch(() => null);
-          if (info && Date.now() - info.mtimeMs > STALE_LOCK_MS) {
-            await rm(filename, { force: true }).catch(() => {});
-            continue;
-          }
-          if (Date.now() >= deadline) return null;
-          await delay(15);
-        }
-      }
-    } catch {
-      return null;
-    }
+  remove(target: string) {
+    return this.serialize(() => this.refresh({ remove: path.resolve(target) }));
   }
 
-  private async persist() {
-    const contents = `${JSON.stringify(this.entries, null, 2)}\n`;
-    const temporary = `${this.filename}.${randomUUID()}.tmp`;
+  private serialize<T>(run: () => Promise<T>) {
+    const result = this.operations.then(run);
+    this.operations = result.catch(() => {});
+    return result;
+  }
+
+  private async refresh(mutation?: Mutation) {
+    if (mutation) this.pending = [...this.pending, mutation].slice(-MAX_PENDING);
     try {
-      await writeFile(temporary, contents, { mode: 0o600 });
-      await rename(temporary, this.filename);
-    } finally {
-      await rm(temporary, { force: true }).catch(() => {});
+      await this.initialize();
+      const access = this.pending.length
+        ? this.state.write.bind(this.state)
+        : this.state.read.bind(this.state);
+      this.entries = await access(records => {
+        const saved = recentTargets(records.get(COLLECTION, '', 'history') ?? []);
+        if (!this.pending.length) return saved;
+        const next = apply(saved, this.pending);
+        if (JSON.stringify(saved) !== JSON.stringify(next))
+          records.put(COLLECTION, '', 'history', next);
+        return next;
+      });
+      this.pending = [];
+      this.reportedFailure = false;
+    } catch (error) {
+      this.entries = apply(this.entries, this.pending);
+      if (!this.reportedFailure) this.onError?.(error);
+      this.reportedFailure = true;
     }
   }
 }

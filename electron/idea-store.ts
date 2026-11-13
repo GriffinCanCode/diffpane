@@ -1,14 +1,16 @@
-import { closeSync, mkdirSync, openSync } from 'node:fs';
 import path from 'node:path';
-import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
+import { DatabaseSync } from 'node:sqlite';
+import type { SQLOutputValue } from 'node:sqlite';
 import {
   MAX_IDEA_BODY_LENGTH,
   MAX_IDEA_EXCERPT_LENGTH,
   MAX_IDEA_LINKS,
   MAX_IDEA_TITLE_LENGTH,
-  type Idea,
-  type IdeaLink,
 } from '../ideas.ts';
+import type { Idea, IdeaLink } from '../ideas.ts';
+import type { LocalState, StateRecords } from './local-state.ts';
+
+const COLLECTION = 'ideas';
 
 function ideaId(value: unknown) {
   if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/u.test(value))
@@ -80,89 +82,91 @@ function readIdea(value: unknown): Idea {
   return { id: ideaId(id), title, body, links: Array.from(links, readLink), createdAt, updatedAt };
 }
 
+function storedIdea(records: StateRecords, workspace: string, id: string) {
+  const value = records.get(COLLECTION, workspace, id);
+  if (value === undefined) return undefined;
+  const idea = readIdea(value);
+  if (idea.id !== id) throw new Error('The saved idea has an invalid ID.');
+  return idea;
+}
+
 function ideaFromRow(row: Record<string, SQLOutputValue>): Idea {
-  return {
-    id: row.id as string,
-    title: row.title as string,
-    body: row.body as string,
-    links: JSON.parse(row.links as string) as IdeaLink[],
-    createdAt: row.created_at as number,
-    updatedAt: row.updated_at as number,
-  };
+  const {
+    id,
+    title,
+    body,
+    links: encodedLinks,
+    created_at: createdAt,
+    updated_at: updatedAt,
+  } = row;
+  if (typeof encodedLinks !== 'string') throw new Error('The saved idea has invalid links.');
+  const links: unknown = JSON.parse(encodedLinks);
+  return readIdea({ id, title, body, links, createdAt, updatedAt });
+}
+
+function importIdeas(records: StateRecords, filename: string) {
+  using database = new DatabaseSync(filename, { readOnly: true });
+  const rows = database.prepare(
+    'SELECT workspace, id, title, body, links, created_at, updated_at FROM ideas',
+  );
+  for (const row of rows.iterate()) {
+    if (typeof row.workspace !== 'string')
+      throw new Error('The saved idea has an invalid workspace.');
+    const idea = ideaFromRow(row);
+    records.put(COLLECTION, row.workspace, idea.id, idea);
+  }
+}
+
+function compareIdeas(left: Idea, right: Idea) {
+  const time = right.updatedAt - left.updatedAt;
+  if (time || left.id === right.id) return time;
+  return left.id < right.id ? -1 : 1;
 }
 
 export class IdeaStore {
-  #database;
-  #list;
-  #upsert;
-  #delete;
+  private readonly state: LocalState;
+  private readonly legacyFilename: string;
+  private migration?: Promise<void>;
 
-  constructor(filename: string) {
-    mkdirSync(path.dirname(filename), { recursive: true });
-    closeSync(openSync(filename, 'a', 0o600));
-    const database = new DatabaseSync(filename);
-    try {
-      database.exec(`
-        PRAGMA busy_timeout = 1000;
-        PRAGMA journal_mode = WAL;
-        CREATE TABLE IF NOT EXISTS ideas (
-          workspace TEXT NOT NULL,
-          id TEXT NOT NULL,
-          title TEXT NOT NULL,
-          body TEXT NOT NULL,
-          links TEXT NOT NULL CHECK (json_valid(links)),
-          created_at INTEGER NOT NULL,
-          updated_at INTEGER NOT NULL CHECK (updated_at >= created_at),
-          PRIMARY KEY (workspace, id)
-        ) STRICT;
-        CREATE INDEX IF NOT EXISTS ideas_workspace_updated ON ideas (workspace, updated_at DESC, id);
-      `);
-      this.#list = database.prepare(`
-        SELECT id, title, body, links, created_at, updated_at
-        FROM ideas WHERE workspace = ? ORDER BY updated_at DESC, id
-      `);
-      this.#upsert = database.prepare(`
-        INSERT INTO ideas (workspace, id, title, body, links, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT (workspace, id) DO UPDATE SET
-          title = excluded.title,
-          body = excluded.body,
-          links = excluded.links,
-          updated_at = max(ideas.created_at, excluded.updated_at)
-        RETURNING id, title, body, links, created_at, updated_at
-      `);
-      this.#delete = database.prepare('DELETE FROM ideas WHERE workspace = ? AND id = ?');
-      this.#database = database;
-    } catch (error) {
-      database.close();
-      throw error;
-    }
+  constructor(state: LocalState, legacyFilename: string) {
+    this.state = state;
+    this.legacyFilename = legacyFilename;
   }
 
-  list(workspace: string) {
-    return this.#list.all(workspace).map(ideaFromRow);
+  initialize() {
+    this.migration ??= this.state
+      .migrate(COLLECTION, this.legacyFilename, importIdeas, { sqlite: true })
+      .catch((error: unknown) => {
+        this.migration = undefined;
+        throw error;
+      });
+    return this.migration;
   }
 
-  upsert(workspace: string, value: unknown) {
-    const { id, title, body, links, createdAt, updatedAt } = readIdea(value);
-    const row = this.#upsert.get(
-      workspace,
-      id,
-      title,
-      body,
-      JSON.stringify(links),
-      createdAt,
-      updatedAt,
+  async list(workspace: string) {
+    await this.initialize();
+    return this.state.read(records =>
+      records.list(COLLECTION, workspace).map(readIdea).toSorted(compareIdeas),
     );
-    if (!row) throw new Error('The idea could not be saved.');
-    return ideaFromRow(row);
   }
 
-  delete(workspace: string, id: unknown) {
-    return this.#delete.run(workspace, ideaId(id)).changes > 0;
+  async upsert(workspace: string, value: unknown) {
+    const idea = readIdea(value);
+    await this.initialize();
+    return this.state.write(records => {
+      const previous = storedIdea(records, workspace, idea.id);
+      if (previous) {
+        idea.createdAt = previous.createdAt;
+        idea.updatedAt = Math.max(idea.createdAt, idea.updatedAt);
+      }
+      records.put(COLLECTION, workspace, idea.id, idea);
+      return idea;
+    });
   }
 
-  close() {
-    this.#database.close();
+  async delete(workspace: string, id: unknown) {
+    const key = ideaId(id);
+    await this.initialize();
+    return this.state.write(records => records.delete(COLLECTION, workspace, key));
   }
 }

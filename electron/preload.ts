@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 import type { Idea, IdeaChange } from '../ideas.ts';
 import type { ReviewNote, ReviewNoteChange } from '../review-notes.ts';
+import type { UiPreferencesBridge } from './ui-preferences.ts';
 
 type Unsubscribe = () => void;
 const listen = <T>(channel: string, callback: (value: T) => void): Unsubscribe => {
@@ -10,6 +11,11 @@ const listen = <T>(channel: string, callback: (value: T) => void): Unsubscribe =
 };
 
 contextBridge.exposeInMainWorld('diffpane', {
+  preferences: {
+    get: legacy => ipcRenderer.invoke('preferences-get', legacy),
+    set: (key, value) => ipcRenderer.invoke('preferences-set', key, value),
+    onChange: callback => listen('preferences-updated', callback),
+  } satisfies UiPreferencesBridge,
   onOpenSettings: (callback: () => void) => listen('open-settings', callback),
   reviewNotes: {
     list: () => ipcRenderer.invoke('review-notes-list'),

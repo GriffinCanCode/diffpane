@@ -1,8 +1,11 @@
+import {
+  defaultAppearance as defaults,
+  maxFontSize,
+  minFontSize,
+} from '../electron/ui-preferences.ts';
+import type { Appearance } from '../electron/ui-preferences.ts';
+import type { UiPreferenceController } from './ui-preferences.ts';
 import './appearance.css';
-
-const themes = ['dark', 'light', 'system'] as const;
-const layouts = ['automatic', 'split', 'inline'] as const;
-const wrapModes = ['automatic', 'on', 'off'] as const;
 const fonts = {
   system: '"SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
   menlo: 'Menlo, Consolas, monospace',
@@ -10,54 +13,7 @@ const fonts = {
   courier: '"Courier New", Courier, monospace',
 };
 
-export type Appearance = {
-  theme: (typeof themes)[number];
-  layout: (typeof layouts)[number];
-  font: keyof typeof fonts;
-  fontSize: number;
-  wordWrap: (typeof wrapModes)[number];
-  lineNumbers: boolean;
-};
 type ColorScheme = 'light' | 'dark';
-
-const defaults: Appearance = {
-  theme: 'dark',
-  layout: 'automatic',
-  font: 'system',
-  fontSize: 14,
-  wordWrap: 'automatic',
-  lineNumbers: true,
-};
-const storageKey = 'diffpane.appearance';
-const minFontSize = 10;
-const maxFontSize = 28;
-
-function choice<T>(options: readonly T[], value: unknown, fallback: T) {
-  return options.find(option => option === value) ?? fallback;
-}
-
-function normalize(value: Partial<Appearance> | null): Appearance {
-  const size = value?.fontSize;
-  return {
-    theme: choice(themes, value?.theme, defaults.theme),
-    layout: choice(layouts, value?.layout, defaults.layout),
-    font: choice(Object.keys(fonts) as Appearance['font'][], value?.font, defaults.font),
-    fontSize:
-      typeof size === 'number' && Number.isFinite(size)
-        ? Math.min(maxFontSize, Math.max(minFontSize, Math.round(size)))
-        : defaults.fontSize,
-    wordWrap: choice(wrapModes, value?.wordWrap, defaults.wordWrap),
-    lineNumbers: typeof value?.lineNumbers === 'boolean' ? value.lineNumbers : defaults.lineNumbers,
-  };
-}
-
-function loadAppearance() {
-  try {
-    return normalize(JSON.parse(localStorage.getItem(storageKey) ?? 'null'));
-  } catch {
-    return defaults;
-  }
-}
 
 export function codeAppearance(settings: Appearance, review = false) {
   return {
@@ -128,10 +84,11 @@ const themeCard = (value: string, label: string) => `
   </label>`;
 
 export function createAppearanceSettings(
+  preferences: UiPreferenceController,
   onApply: (value: Appearance, scheme: ColorScheme) => void,
 ) {
   const system = matchMedia('(prefers-color-scheme: dark)');
-  let value = loadAppearance();
+  let value = preferences.get('appearance');
   const page = document.createElement('section');
   page.className = 'appearance-main';
   page.id = 'settings-appearance';
@@ -248,41 +205,33 @@ export function createAppearanceSettings(
     onApply(value, scheme);
   }
 
-  function update(next: Appearance) {
-    value = normalize(next);
-    try {
-      localStorage.setItem(storageKey, JSON.stringify(value));
-    } catch {
-      // Settings still apply for this window if storage is unavailable.
-    }
+  const update = (patch: Partial<Appearance>) => preferences.set('appearance', patch);
+  const unsubscribe = preferences.onChange('appearance', next => {
+    if (
+      Object.keys(defaults).every(
+        key => value[key as keyof Appearance] === next[key as keyof Appearance],
+      )
+    )
+      return;
+    value = next;
     paint();
     apply();
-  }
-
-  function syncStorage(event: StorageEvent) {
-    if (event.key !== storageKey && event.key !== null) return;
-    value = loadAppearance();
-    paint();
-    apply();
-  }
+  });
 
   function syncSystem() {
     if (value.theme === 'system') apply();
   }
 
   system.addEventListener('change', syncSystem);
-  window.addEventListener('storage', syncStorage);
   form.addEventListener('submit', event => event.preventDefault());
   form.addEventListener('change', event => {
     const field = event.target;
     if (field === size) {
       update({
-        ...value,
         fontSize: Number.isFinite(size.valueAsNumber) ? size.valueAsNumber : value.fontSize,
       });
     } else if (field instanceof HTMLInputElement || field instanceof HTMLSelectElement) {
       update({
-        ...value,
         [field.name]:
           field instanceof HTMLInputElement && field.type === 'checkbox'
             ? field.checked
@@ -290,8 +239,8 @@ export function createAppearanceSettings(
       });
     }
   });
-  decrease.addEventListener('click', () => update({ ...value, fontSize: value.fontSize - 1 }));
-  increase.addEventListener('click', () => update({ ...value, fontSize: value.fontSize + 1 }));
+  decrease.addEventListener('click', () => update({ fontSize: value.fontSize - 1 }));
+  increase.addEventListener('click', () => update({ fontSize: value.fontSize + 1 }));
   reset.addEventListener('click', () => {
     update(defaults);
     done.focus();
@@ -306,7 +255,7 @@ export function createAppearanceSettings(
     },
     dispose() {
       system.removeEventListener('change', syncSystem);
-      window.removeEventListener('storage', syncStorage);
+      unsubscribe();
     },
   };
 }

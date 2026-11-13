@@ -1,18 +1,10 @@
-import { app, safeStorage } from 'electron';
+import { safeStorage } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import { lstat, mkdir, open, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { verifyClaudeKey } from './claude-api.mjs';
-
-// The async Linux provider can fall back to a hardcoded secret. DiffPane ships on macOS.
-async function secureStorageAvailable() {
-  return (
-    ['darwin', 'win32'].includes(process.platform) &&
-    !app.commandLine.hasSwitch('use-mock-keychain') &&
-    (await safeStorage.isAsyncEncryptionAvailable().catch(() => false))
-  );
-}
+import { secureStorageAvailable } from './secure-storage.mjs';
 
 const validKey = key => typeof key === 'string' && /^[!-~]{10,2048}$/u.test(key);
 

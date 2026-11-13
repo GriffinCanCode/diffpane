@@ -52,6 +52,8 @@ Open **Ideas** with ⌘⇧I to see a searchable project notebook. Markdown forma
 
 Drag the dividers to resize Ideas, File Explorer, code, and Claude or Review Notes. With a divider focused, use the arrow keys to resize. Double-click a divider to reset its size. Diffpane remembers your layout.
 
+Ideas, review notes, recent paths, appearance, pane layout, and Ideas docking are saved in an encrypted local database. On macOS, Keychain protects the encryption key. Existing records are imported automatically on upgrade.
+
 It includes search, a file picker, language tools, line counts, and previews for images, audio, video, and PDFs.
 
 ## Claude in Diffpane

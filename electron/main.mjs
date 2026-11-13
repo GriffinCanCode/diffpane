@@ -13,12 +13,20 @@ import { ClaudeSession } from './claude-session.mjs';
 import { IdeaStore } from './idea-store.ts';
 import { ReviewNotesStore } from './review-notes.ts';
 import { formatReviewHandoff } from '../review-notes.ts';
+import { LocalState } from './local-state.ts';
+import { localStateKeys } from './secure-storage.mjs';
+import {
+  applyUiPreferencePatch,
+  parseUiPreference,
+  parseUiPreferencePatch,
+  parseUiPreferences,
+  uiPreferenceKeys,
+} from './ui-preferences.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const sessions = new Map();
 const mediaSessions = new Map();
 const fileChanges = new Map();
-let ideaStore;
 protocol.registerSchemesAsPrivileged([
   { scheme: 'diffpane-media', privileges: { standard: true, secure: true, stream: true } },
 ]);
@@ -27,22 +35,40 @@ let quitting = false;
 const shutdowns = new Set();
 const pendingOpenPaths = [];
 app.setName('Diffpane');
-const claudeCredentials = new ClaudeCredentials(path.join(app.getPath('userData'), 'claude-key'));
-const reviewNotes = new ReviewNotesStore(path.join(app.getPath('userData'), 'review-notes'));
+const userData = app.getPath('userData');
+const localState = new LocalState(path.join(userData, 'state', 'local.sqlite'), localStateKeys);
+const claudeCredentials = new ClaudeCredentials(path.join(userData, 'claude-key'));
+const ideaStore = new IdeaStore(localState, path.join(userData, 'ideas.sqlite'));
+const reviewNotes = new ReviewNotesStore(
+  localState,
+  path.join(userData, 'review-notes', 'notes.sqlite'),
+);
 let reviewNoteUpdates = Promise.resolve();
 let updatingReviewNotes = false;
-const recentTargetsReady = app.whenReady().then(async () => {
-  const history = new RecentTargets(path.join(app.getPath('userData'), 'recent-targets.json'));
-  await history.ready;
-  return history;
-});
+const recentTargets = new RecentTargets(
+  localState,
+  path.join(userData, 'recent-targets.json'),
+  error => console.error('DiffPane recent targets:', error.message),
+);
 let recentUpdates = Promise.resolve();
 let updatingRecents = false;
+let preferenceUpdates = Promise.resolve();
+let preferenceRevision = 0;
+const storageOperations = new Set();
+
+async function drainStorageOnQuit(pending) {
+  storageOperations.add(pending);
+  try {
+    return await pending;
+  } finally {
+    storageOperations.delete(pending);
+  }
+}
 
 function rememberTarget(target) {
   updatingRecents = true;
   const update = (recentUpdates = recentUpdates
-    .then(async () => (await recentTargetsReady).record(target))
+    .then(() => recentTargets.record(target))
     .catch(() => {}));
   void update.finally(() => {
     if (recentUpdates === update) updatingRecents = false;
@@ -173,15 +199,14 @@ function createWindow(directory = null) {
       return { root: this.repositoryRoot, scope: this.repositoryScope };
     },
     flush() {
-      // Startup and empty windows have no editable buffers to flush. Their close
-      // action must not depend on a worker or a renderer that failed to initialize.
+      // A clean window can still close after a startup or renderer failure.
       if (window.isDestroyed()) return Promise.resolve(true);
       const unavailable =
         fatal ||
         !this.rendererReady ||
         window.webContents.isDestroyed() ||
         window.webContents.isLoadingMainFrame();
-      if (!this.hasPendingSaves && (!directory || unavailable)) return Promise.resolve(true);
+      if (!this.hasPendingSaves && unavailable) return Promise.resolve(true);
       if (unavailable) return Promise.resolve(false);
       // A healthy project renderer also freezes clean editors, preventing new
       // edits while application quit waits for workers to finish shutting down.
@@ -396,14 +421,14 @@ for (const [method, handler] of Object.entries(claudeHandlers)) {
 }
 
 const ideaHandlers = {
-  list: (store, root) => store.list(root),
-  upsert: (store, root, idea, sender) => {
-    const saved = store.upsert(root, idea);
+  list: root => ideaStore.list(root),
+  upsert: async (root, idea, sender) => {
+    const saved = await ideaStore.upsert(root, idea);
     broadcastIdeaChange(root, sender, { type: 'upsert', idea: saved });
     return saved;
   },
-  delete: (store, root, id, sender) => {
-    if (store.delete(root, id)) broadcastIdeaChange(root, sender, { type: 'delete', id });
+  delete: async (root, id, sender) => {
+    if (await ideaStore.delete(root, id)) broadcastIdeaChange(root, sender, { type: 'delete', id });
   },
 };
 
@@ -423,9 +448,7 @@ for (const [method, handler] of Object.entries(ideaHandlers)) {
   ipcMain.handle(`ideas-${method}`, async (event, input) => {
     const session = sessions.get(event.sender.id);
     if (!session || event.senderFrame !== event.sender.mainFrame) throw new Error('Unknown window');
-    const root = await session.root();
-    ideaStore ??= new IdeaStore(path.join(app.getPath('userData'), 'ideas.sqlite'));
-    return handler(ideaStore, root, input, event.sender);
+    return drainStorageOnQuit(session.root().then(root => handler(root, input, event.sender)));
   });
 }
 
@@ -536,20 +559,75 @@ for (const kind of ['folder', 'file'])
     if (!sessions.has(event.sender.id)) throw new Error('Unknown window');
     return chooseTarget(BrowserWindow.fromWebContents(event.sender), kind);
   });
+function handlePreference(channel, update) {
+  ipcMain.handle(channel, (event, ...args) => {
+    if (!sessions.has(event.sender.id) || event.senderFrame !== event.sender.mainFrame)
+      throw new Error('Unknown window');
+    const result = preferenceUpdates.then(() => update(...args));
+    preferenceUpdates = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return drainStorageOnQuit(result);
+  });
+}
+
+const uiPreferenceCollection = 'ui-preferences';
+
+function readUiPreferences(records) {
+  const preferences = {};
+  for (const key of uiPreferenceKeys) {
+    const value = records.get(uiPreferenceCollection, '', key);
+    if (value !== undefined) {
+      const update = parseUiPreference(key, value);
+      preferences[update.key] = update.value;
+    }
+  }
+  return preferences;
+}
+
+handlePreference('preferences-get', legacy => {
+  const previous = parseUiPreferences(legacy);
+  if (!Object.keys(previous).length) return localState.read(readUiPreferences);
+  return localState.write(records => {
+    const stored = readUiPreferences(records);
+    for (const key of uiPreferenceKeys) {
+      if (stored[key] === undefined && previous[key] !== undefined)
+        records.put(uiPreferenceCollection, '', key, previous[key]);
+    }
+    return { ...previous, ...stored };
+  });
+});
+
+handlePreference('preferences-set', async (key, input) => {
+  const patch = parseUiPreferencePatch(key, input);
+  const updated = await localState.write(records => {
+    const current = records.get(uiPreferenceCollection, '', patch.key);
+    const next = applyUiPreferencePatch(patch, current);
+    if (JSON.stringify(current) !== JSON.stringify(next.value))
+      records.put(uiPreferenceCollection, '', next.key, next.value);
+    return next;
+  });
+  const event = { ...updated, revision: ++preferenceRevision };
+  for (const session of sessions.values()) {
+    if (!session.contents.isDestroyed()) session.contents.send('preferences-updated', event);
+  }
+  return event;
+});
+
 ipcMain.handle('recent-targets', async event => {
   if (!sessions.has(event.sender.id)) throw new Error('Unknown window');
   await recentUpdates;
-  return (await recentTargetsReady).list();
+  return recentTargets.list();
 });
 ipcMain.handle('open-recent', async (event, target) => {
   if (!sessions.has(event.sender.id)) throw new Error('Unknown window');
   await recentUpdates;
-  const history = await recentTargetsReady;
-  const recent = (await history.list()).find(entry => entry.path === target);
+  const recent = (await recentTargets.list()).find(entry => entry.path === target);
   if (!recent) return false;
   const info = await stat(recent.path).catch(() => null);
   if (!info || (recent.kind === 'file' ? !info.isFile() : !info.isDirectory())) {
-    await history.remove(recent.path);
+    await recentTargets.remove(recent.path);
     return false;
   }
   openTarget(recent.path, BrowserWindow.fromWebContents(event.sender));
@@ -646,6 +724,18 @@ void app.whenReady().then(() => {
       { label: 'Window', submenu: [{ role: 'minimize' }, { role: 'zoom' }] },
     ]),
   );
+  void drainStorageOnQuit(
+    Promise.allSettled([
+      ideaStore.initialize(),
+      reviewNotes.initialize(),
+      recentTargets.initialize(),
+    ]).then(results => {
+      for (const result of results) {
+        if (result.status === 'rejected')
+          console.error('DiffPane local storage:', result.reason.message);
+      }
+    }),
+  );
   const args = process.argv.slice(1).filter(argument => !argument.startsWith('-'));
   if (!app.isPackaged) args.shift();
   const targets = new Set(pendingOpenPaths.splice(0));
@@ -658,7 +748,14 @@ void app.whenReady().then(() => {
 });
 let preparingQuit = false;
 app.on('before-quit', event => {
-  if (quitting || (!sessions.size && !shutdowns.size && !updatingRecents && !updatingReviewNotes))
+  if (
+    quitting ||
+    (!sessions.size &&
+      !shutdowns.size &&
+      !updatingRecents &&
+      !updatingReviewNotes &&
+      !storageOperations.size)
+  )
     return;
   event.preventDefault();
   if (preparingQuit) return;
@@ -676,6 +773,7 @@ app.on('before-quit', event => {
         ...pending,
         ...shutdowns,
         ...fileChanges.values(),
+        ...storageOperations,
         recentUpdates,
         reviewNoteUpdates,
       ]);
@@ -687,4 +785,10 @@ app.on('before-quit', event => {
   })();
 });
 app.on('window-all-closed', () => app.quit());
-app.on('will-quit', () => ideaStore?.close());
+app.on('will-quit', () => {
+  try {
+    localState.close();
+  } catch (error) {
+    console.error('DiffPane local storage:', error.message);
+  }
+});

@@ -1,27 +1,22 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, open } from 'node:fs/promises';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { setTimeout as delay } from 'node:timers/promises';
 import {
   MAX_REVIEW_EXCERPT_LENGTH,
   MAX_REVIEW_EXCERPT_LINES,
   MAX_REVIEW_NOTE_LENGTH,
-  type ReviewAnchor,
-  type ReviewNote,
-  type ReviewNoteChange,
 } from '../review-notes.ts';
+import type { ReviewAnchor, ReviewNote, ReviewNoteChange } from '../review-notes.ts';
+import type { LocalState, StateRecords } from './local-state.ts';
 
 const MAX_NOTES = 250;
-const BUSY_WAIT_MS = 2000;
-const SQLITE_BUSY = 5;
+const COLLECTION = 'review-notes';
 const NOTE_ID = /^[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12}$/u;
-const VISIBLE_NOTE = `worktree = ?1 AND (
-  CASE WHEN anchor_path IS NULL THEN project_scope = ?2
-    ELSE ?2 = '' OR substr(anchor_path, 1, length(?2) + 1) = ?2 || '/' END
-)`;
 
-type StoredNote = { id: string; anchor: string | null; text: string; resolved: 0 | 1 };
+interface StoredNote extends ReviewNote {
+  sequence: number;
+  scope: string | null;
+}
 
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -95,6 +90,28 @@ function noteText(value: unknown) {
   return value.trim();
 }
 
+function storedNote(value: unknown): StoredNote {
+  if (!record(value)) throw new Error('The saved review note is invalid.');
+  const { id, sequence, scope, text, resolved } = value;
+  const anchor = parseAnchor(value.anchor);
+  if (
+    typeof id !== 'string' ||
+    !NOTE_ID.test(id) ||
+    !positiveInteger(sequence) ||
+    typeof resolved !== 'boolean' ||
+    (anchor ? scope !== null : scope !== '' && !repositoryPath(scope))
+  )
+    throw new Error('The saved review note is invalid.');
+  return {
+    id,
+    anchor,
+    sequence,
+    scope: scope === null || typeof scope === 'string' ? scope : null,
+    text: noteText(text),
+    resolved,
+  };
+}
+
 function parseChange(input: unknown): ReviewNoteChange {
   if (record(input)) {
     if (input.type === 'add')
@@ -114,31 +131,89 @@ function parseChange(input: unknown): ReviewNoteChange {
   throw new Error('Invalid review note change.');
 }
 
-function readNotes(database: DatabaseSync, root: string, scope: string): ReviewNote[] {
-  const rows = database
-    .prepare(`SELECT id, anchor, text, resolved FROM review_notes WHERE ${VISIBLE_NOTE}
-      ORDER BY sequence DESC`)
-    .all(root, scope) as StoredNote[];
-  return rows.map(({ id, anchor, text, resolved }) => ({
-    id,
-    anchor: anchor === null ? null : (JSON.parse(anchor) as ReviewAnchor),
-    text,
-    resolved: resolved === 1,
-  }));
+function importNotes(records: StateRecords, filename: string) {
+  using database = new DatabaseSync(filename, { readOnly: true });
+  const rows = database.prepare(
+    'SELECT sequence, id, worktree, project_scope, anchor_path, anchor, text, resolved FROM review_notes',
+  );
+  for (const row of rows.iterate()) {
+    const {
+      sequence,
+      id,
+      worktree,
+      project_scope: scope,
+      anchor_path: anchorPath,
+      anchor: encoded,
+      text,
+      resolved,
+    } = row;
+    if (
+      typeof sequence !== 'number' ||
+      !positiveInteger(sequence) ||
+      typeof id !== 'string' ||
+      !NOTE_ID.test(id) ||
+      typeof worktree !== 'string' ||
+      (scope !== null && scope !== '' && !repositoryPath(scope)) ||
+      (encoded !== null && typeof encoded !== 'string') ||
+      (resolved !== 0 && resolved !== 1)
+    )
+      throw new Error('The saved review note is invalid.');
+    const location: unknown = encoded === null ? null : JSON.parse(encoded);
+    const anchor = parseAnchor(location);
+    if (
+      anchor ? anchorPath !== anchor.path || scope !== null : anchorPath !== null || scope === null
+    )
+      throw new Error('The saved review note has an invalid scope.');
+    const note: StoredNote = {
+      id,
+      anchor,
+      text: noteText(text),
+      resolved: resolved === 1,
+      sequence,
+      scope,
+    };
+    records.put(COLLECTION, worktree, id, note);
+  }
+}
+
+function visible(note: StoredNote, scope: string) {
+  if (!note.anchor) return note.scope === scope;
+  return scope === '' || note.anchor.path.startsWith(`${scope}/`);
+}
+
+function visibleNotes(notes: StoredNote[], scope: string): ReviewNote[] {
+  return notes
+    .filter(note => visible(note, scope))
+    .toSorted((left, right) => right.sequence - left.sequence)
+    .map(({ id, anchor, text, resolved }) => ({ id, anchor, text, resolved }));
 }
 
 export class ReviewNotesStore {
-  private readonly filename: string;
-  private initialized: Promise<void> | undefined;
+  private readonly state: LocalState;
+  private readonly legacyFilename: string;
+  private migration?: Promise<void>;
 
-  constructor(directory: string) {
-    this.filename = path.join(directory, 'notes.sqlite');
+  constructor(state: LocalState, legacyFilename: string) {
+    this.state = state;
+    this.legacyFilename = legacyFilename;
+  }
+
+  initialize() {
+    this.migration ??= this.state
+      .migrate(COLLECTION, this.legacyFilename, importNotes, { sqlite: true })
+      .catch((error: unknown) => {
+        this.migration = undefined;
+        throw error;
+      });
+    return this.migration;
   }
 
   async list(root: string, scope: string): Promise<ReviewNote[]> {
     const relative = relativeScope(root, scope);
     await this.initialize();
-    return this.withDatabase(database => readNotes(database, root, relative));
+    return this.state.read(records =>
+      visibleNotes(records.list(COLLECTION, root).map(storedNote), relative),
+    );
   }
 
   async change(root: string, scope: string, input: unknown): Promise<ReviewNote[]> {
@@ -152,111 +227,44 @@ export class ReviewNotesStore {
     )
       throw new Error('The review note location is outside the open folder.');
     await this.initialize();
-    return this.withDatabase(database => {
-      database.exec('PRAGMA secure_delete = ON');
-      database.exec('BEGIN IMMEDIATE');
+    return this.state.write(records => {
+      const notes = records.list(COLLECTION, root).map(storedNote);
       if (change.type === 'add') {
-        const count = database
-          .prepare('SELECT count(*) AS total FROM review_notes WHERE worktree = ?')
-          .get(root)?.total as number;
-        if (count >= MAX_NOTES)
+        if (notes.length >= MAX_NOTES)
           throw new Error(
             `This worktree has ${MAX_NOTES} review notes. Delete one to add another.`,
           );
-        database
-          .prepare(`INSERT INTO review_notes (id, worktree, project_scope, anchor_path, anchor, text)
-            VALUES (?, ?, ?, ?, ?, ?)`)
-          .run(
-            randomUUID(),
-            root,
-            change.anchor ? null : relative,
-            change.anchor?.path ?? null,
-            change.anchor ? JSON.stringify(change.anchor) : null,
-            change.text,
-          );
+        const sequence = Math.max(0, ...notes.map(note => note.sequence)) + 1;
+        const note: StoredNote = {
+          id: randomUUID(),
+          anchor: change.anchor,
+          text: change.text,
+          resolved: false,
+          sequence,
+          scope: change.anchor ? null : relative,
+        };
+        records.put(COLLECTION, root, note.id, note);
+        notes.push(note);
       } else {
-        // The same visibility rule applies to changes, even when a renderer already knows an ID.
-        const result =
-          change.type === 'edit'
-            ? database
-                .prepare(`UPDATE review_notes SET text = ?4
-                  WHERE ${VISIBLE_NOTE} AND id = ?3 AND text = ?5`)
-                .run(root, relative, change.id, change.text, change.expectedText)
-            : change.type === 'resolve'
-              ? database
-                  .prepare(
-                    `UPDATE review_notes SET resolved = ?4 WHERE ${VISIBLE_NOTE} AND id = ?3`,
-                  )
-                  .run(root, relative, change.id, Number(change.resolved))
-              : database
-                  .prepare(`DELETE FROM review_notes WHERE ${VISIBLE_NOTE} AND id = ?3`)
-                  .run(root, relative, change.id);
-        if (result.changes === 0) {
-          const changed =
-            change.type === 'edit' &&
-            database
-              .prepare(`SELECT 1 FROM review_notes WHERE ${VISIBLE_NOTE} AND id = ?3`)
-              .get(root, relative, change.id);
-          if (changed) throw new Error('This review note changed in another window.');
-          throw new Error('This review note is no longer available here.');
+        // A renderer that already knows an ID must still be in the note's scope.
+        const index = notes.findIndex(note => note.id === change.id && visible(note, relative));
+        const note = notes[index];
+        if (!note) throw new Error('This review note is no longer available here.');
+        if (change.type === 'delete') {
+          records.delete(COLLECTION, root, note.id);
+          notes.splice(index, 1);
+        } else {
+          if (change.type === 'edit') {
+            if (note.text !== change.expectedText)
+              throw new Error('This review note changed in another window.');
+            note.text = change.text;
+          } else {
+            note.resolved = change.resolved;
+          }
+          records.put(COLLECTION, root, note.id, note);
         }
       }
-      const notes = readNotes(database, root, relative);
-      database.exec('COMMIT');
-      return notes;
+      return visibleNotes(notes, relative);
     });
-  }
-
-  private initialize() {
-    this.initialized ??= this.createDatabase().catch(error => {
-      this.initialized = undefined;
-      throw error;
-    });
-    return this.initialized;
-  }
-
-  private async createDatabase() {
-    await mkdir(path.dirname(this.filename), { recursive: true, mode: 0o700 });
-    try {
-      const file = await open(this.filename, 'wx', 0o600);
-      await file.close();
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-    }
-    await this.withDatabase(database => {
-      database.exec('PRAGMA journal_mode = WAL');
-      database.exec(`CREATE TABLE IF NOT EXISTS review_notes (
-        sequence INTEGER PRIMARY KEY,
-        id TEXT NOT NULL UNIQUE,
-        worktree TEXT NOT NULL,
-        project_scope TEXT,
-        anchor_path TEXT,
-        anchor TEXT,
-        text TEXT NOT NULL,
-        resolved INTEGER NOT NULL DEFAULT 0
-      ) STRICT;
-      CREATE INDEX IF NOT EXISTS review_notes_worktree ON review_notes(worktree, sequence);`);
-    });
-  }
-
-  private async withDatabase<T>(run: (database: DatabaseSync) => T): Promise<T> {
-    const deadline = performance.now() + BUSY_WAIT_MS;
-    for (;;) {
-      try {
-        const database = new DatabaseSync(this.filename);
-        try {
-          return run(database);
-        } finally {
-          // SQLite rolls back an unfinished transaction when the connection closes.
-          database.close();
-        }
-      } catch (error) {
-        const code = (error as { errcode?: number }).errcode;
-        if (code === undefined || (code & 255) !== SQLITE_BUSY) throw error;
-        if (performance.now() >= deadline)
-          throw new Error('Review notes are busy in another Diffpane window. Try again.');
-        await delay(20);
-      }
-    }
   }
 }

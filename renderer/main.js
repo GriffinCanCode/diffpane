@@ -13,6 +13,7 @@ import { createFilePicker } from './files.ts';
 import { createReviewNotes } from './review-notes.ts';
 import { mountIdeaBuilder } from './ideas.ts';
 import { createWorkspaceLayout } from './workspace-layout.ts';
+import { createUiPreferences } from './ui-preferences.ts';
 import { captureReviewLines, locateReviewLines } from '../review-notes.ts';
 import { projectIcon } from './icons.ts';
 import { createNavigator } from './navigator.js';
@@ -79,6 +80,7 @@ app.innerHTML = `
     </div>
     <section class="workbench" tabindex="-1" aria-label="Code workspace">
   <div class="message" id="message" role="status" hidden></div>
+  <div class="message" id="preference-message" role="status" hidden></div>
   <main class="start-screen" id="start-screen" aria-labelledby="start-title" aria-busy="true">
     <div class="start-content"><span class="start-mark">${icons.mark}</span><h1 id="start-title">Opening workspace…</h1><p id="start-description" role="status">Your files will appear here in a moment.</p><div class="start-actions" id="start-actions" hidden><button type="button" id="open-folder">Open Folder…</button><button type="button" id="open-file">Open File…</button></div><section class="recent-targets" id="recent-targets" aria-labelledby="recent-title" hidden><h2 id="recent-title">Recently opened</h2><ul class="recent-list" id="recent-list"></ul><p id="recent-status" role="status" hidden></p></section></div>
   </main>
@@ -108,6 +110,7 @@ const ui = Object.fromEntries(
     'project-path',
     'branch-name',
     'message',
+    'preference-message',
     'feed-scroll',
     'feed',
     'empty-state',
@@ -124,6 +127,22 @@ const ui = Object.fromEntries(
   ].map(id => [id.replaceAll('-', '_'), document.getElementById(id)]),
 );
 const api = window.diffpane;
+const preferenceFailures = new Map();
+const uiPreferences = createUiPreferences(api?.preferences, (key, failure) => {
+  if (failure) preferenceFailures.set(key, failure);
+  else preferenceFailures.delete(key);
+  ui.preference_message.replaceChildren();
+  for (const { message, retry } of preferenceFailures.values()) {
+    const notice = document.createElement('div');
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = 'Try again';
+    button.addEventListener('click', retry);
+    notice.append(message, ' ', button);
+    ui.preference_message.append(notice);
+  }
+  ui.preference_message.hidden = !preferenceFailures.size;
+});
 const cards = new Map();
 let snapshot = null;
 let openedFile = null;
@@ -140,13 +159,12 @@ let recentVersion = 0;
 let recentSignature = '';
 let applyingAssistantPath = null;
 let applyingAssistantEdit = null;
-const ideaVisibilityKey = 'diffpane.ideas.visible';
 let ideaMode = 'closed';
 let ideaDocked = false;
 let focusBeforeIdeas = null;
 
 let activeScheme;
-const appearance = createAppearanceSettings((preferences, scheme) => {
+const appearance = createAppearanceSettings(uiPreferences, (preferences, scheme) => {
   const themeChanged = activeScheme !== scheme;
   if (themeChanged) {
     activeScheme = scheme;
@@ -579,7 +597,8 @@ const ideas =
     openExternal: api.openExternal,
     media: api.media,
   });
-const workspaceLayout = createWorkspaceLayout(ui.workspace);
+const workspaceLayout = createWorkspaceLayout(ui.workspace, uiPreferences);
+const unsubscribeIdeaVisibility = uiPreferences.onChange('ideasVisible', syncIdeasVisibility);
 ui.ideas_toggle.addEventListener('click', () => {
   if (!returnFromIdeas({ restoreFocus: true })) showIdeasNotebook();
 });
@@ -611,14 +630,17 @@ function setIdeasMode(mode, { remember = false } = {}) {
   workspaceLayout.setIdeasNotebook(notebook, ideaDocked);
   languageWidgets.hidden = notebook;
   ui.ideas_toggle.setAttribute('aria-expanded', String(notebook));
-  if (remember) {
-    try {
-      localStorage.setItem(ideaVisibilityKey, String(ideaDocked));
-    } catch {
-      // The pane can still change modes when local storage is unavailable.
-    }
-  }
+  if (remember) uiPreferences.set('ideasVisible', ideaDocked);
   return true;
+}
+
+/** @param {boolean} docked */
+function syncIdeasVisibility(docked) {
+  if (!ideas || !snapshot || closingRequested || closed || docked === ideaDocked) return;
+  if (ideaMode === 'notebook') {
+    ideaDocked = docked;
+    workspaceLayout.setIdeasNotebook(true, docked);
+  } else setIdeasMode(docked ? 'dock' : 'closed');
 }
 
 function showIdeasNotebook() {
@@ -1031,11 +1053,7 @@ function applySnapshot(next) {
     reviewNotes?.setContext(true);
     if (ideas) {
       ui.ideas_toggle.hidden = false;
-      try {
-        if (localStorage.getItem(ideaVisibilityKey) === 'true') setIdeasMode('dock');
-      } catch {
-        // Ideas can still open when local storage is unavailable.
-      }
+      syncIdeasVisibility(uiPreferences.get('ideasVisible'));
       void ideas.load();
     }
     document.querySelector('.branch').hidden = false;
@@ -1950,6 +1968,7 @@ if (!api) showError('The desktop connection is unavailable. Reopen diffpane from
 else {
   const resumeEditing = () => {
     closingRequested = false;
+    syncIdeasVisibility(uiPreferences.get('ideasVisible'));
     ideas?.setReadOnly(false);
     for (const card of cards.values()) applyEditorReadOnly(card);
     syncReviewState();
@@ -1965,6 +1984,7 @@ else {
         ...[...cards.values()].map(card => card.autosave?.flush()),
         applyingAssistantEdit?.catch(() => {}),
         ideas?.flush(),
+        uiPreferences.settled(),
       ]);
       syncSaveState();
       api.savesFlushed(true);
@@ -2017,6 +2037,8 @@ else {
       assistant?.dispose();
       reviewNotes?.dispose();
       workspaceLayout.dispose();
+      unsubscribeIdeaVisibility();
+      uiPreferences.dispose();
       unsubscribeIdeas?.();
       ideas?.dispose();
       if (snapshotFrame !== null) cancelAnimationFrame(snapshotFrame);
