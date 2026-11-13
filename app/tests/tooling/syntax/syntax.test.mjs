@@ -16,7 +16,7 @@ test('every grammar dependency exists in the pinned lazy catalog', () => {
 
 test('unknown extensionless files use local TOML syntax when their contents are recognizable', () => {
   const registered = new Set()
-  const { resolve } = configureSyntax({
+  const syntax = configureSyntax({
     languages: {
       getLanguages: () => [],
       register: language => void registered.add(language.id),
@@ -28,7 +28,7 @@ test('unknown extensionless files use local TOML syntax when their contents are 
   })
   /** @param {string} text */
   const languageFor = (text, filename = 'ProjectSettings', language = 'plaintext') =>
-    resolve({ uri: { path: `/project/${filename}` }, getLanguageId: () => language }, text)
+    syntax.resolve({ uri: { path: `/project/${filename}` }, getLanguageId: () => language }, text)
   const project = '# Project configuration\r\nversion = 1\r\n[build.tools]\r\ncommand = "build"\r\n'
   assert.ok(registered.has('toml'))
   assert.equal(languageFor(project), 'toml')
@@ -104,6 +104,42 @@ test('real grammars color custom formats and preserve source characters exactly'
   }
 })
 
+test('an explicit syntax request shares lazy loading and can retry after a provider fails to install', async () => {
+  /** @type {import('monaco-editor').languages.ILanguageExtensionPoint[]} */
+  const languages = []
+  /** @type {string[]} */
+  const attempts = []
+  let fail = true
+  const syntax = configureSyntax({
+    languages: {
+      getLanguages: () => languages,
+      register: language => void languages.push(language),
+      onLanguage: () => ({ dispose() {} }),
+      setTokensProvider(id) {
+        attempts.push(id)
+        if (fail) throw new Error('provider unavailable')
+        return { dispose() {} }
+      },
+      registerTokensProviderFactory: () => ({ dispose() {} }),
+    },
+    editor: { defineTheme() {}, setTheme() {} },
+  })
+  const work = syntax.ensureLanguage('toml')
+  assert.ok(work)
+  assert.equal(syntax.ensureLanguage('toml'), work)
+  assert.deepEqual(syntax.stats().pending, ['toml'])
+  await assert.rejects(work, /provider unavailable/)
+  assert.equal(syntax.stats().loaded.includes('toml'), false)
+
+  fail = false
+  await syntax.ensureLanguage('json5')
+  assert.equal(syntax.stats().loaded.includes('toml'), false)
+  await syntax.ensureLanguage('toml')
+  assert.deepEqual(attempts, ['toml', 'json5', 'toml'])
+  assert.ok(syntax.stats().loaded.includes('toml'))
+  assert.deepEqual(syntax.stats().errors, {})
+})
+
 test('late TextMate grammars use the active editor theme and respond to changes', async () => {
   /** @type {import('../../../renderer/editor/highlighting/editor-themes.ts').EditorThemeName} */
   let themeName = 'diffpane'
@@ -171,4 +207,33 @@ test('late TextMate grammars use the active editor theme and respond to changes'
   runtime.setTheme(themeName)
   assert.ok(colors('directives', '# Configuration').includes('59666c'))
   assert.ok(colors('metrics', '# HELP requests Request count').includes('59666c'))
+})
+
+test('embedded TextMate grammars preserve an existing native token provider', async () => {
+  /** @type {string[]} */
+  const providers = []
+  /** @type {import('virtual:syntax-catalog').SyntaxCatalogEntry[]} */
+  const entries = []
+  for (const entry of catalog) {
+    if (entry.id === 'designcraft-script' || entry.scope === 'source.json') {
+      entries.push({ ...entry, load: () => grammarBytes(entry) })
+    }
+  }
+  const runtime = await createSyntaxRuntime(
+    {
+      languages: {
+        getLanguages: () => entries,
+        setTokensProvider(id) {
+          providers.push(id)
+          return { dispose() {} }
+        },
+      },
+      editor: { defineTheme() {} },
+    },
+    entries,
+    () => 'diffpane',
+    new Set(['json']),
+  )
+  await runtime.load('source.designcraft-script')
+  assert.deepEqual(providers, ['designcraft-script'])
 })

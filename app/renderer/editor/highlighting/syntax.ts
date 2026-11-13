@@ -2,8 +2,8 @@ import type { editor, languages } from 'monaco-editor'
 import sourceCatalog from 'virtual:syntax-catalog'
 import type { SyntaxCatalogEntry } from 'virtual:syntax-catalog'
 import { parseDocument, isMap, isSeq } from 'yaml'
-import { appError, attemptAsync } from '../../../shared/recovery/app-errors.ts'
-import { reportError, runTask } from '../../shell/recovery/errors.ts'
+import { appError } from '../../../shared/recovery/app-errors.ts'
+import { runTask } from '../../shell/recovery/errors.ts'
 import { EDITOR_THEMES } from './editor-themes.ts'
 import type { EditorThemeName } from './editor-themes.ts'
 import type { SyntaxRuntime } from './grammars.ts'
@@ -102,10 +102,44 @@ export function configureSyntax(monaco: MonacoApi) {
   }
   const react = new Set(['tsx', 'jsx'])
   const loaded = new Set<string>()
-  const pending = new Set<string>()
+  const pending = new Map<string, Promise<void>>()
   const errors = new Map<string, string>()
+  const lazyLanguages = new Map(catalog.filter(entry => !ids.has(entry.id)).map(entry => [entry.id, entry]))
   let runtime: SyntaxRuntime | undefined
   let loadingRuntime: Promise<SyntaxRuntime> | undefined
+
+  function ensureLanguage(id: string): Promise<void> | undefined {
+    const entry = lazyLanguages.get(id)
+    if (!entry || loaded.has(id)) return undefined
+    const existing = pending.get(id)
+    if (existing) return existing
+    loadingRuntime ??= import('./grammars.ts')
+      .then(module => module.createSyntaxRuntime(monaco, catalog, () => themeName, ids))
+      .then(highlighter => (runtime = highlighter))
+      .catch((cause: unknown) => {
+        loadingRuntime = undefined
+        throw appError(cause, { operation: 'Load syntax highlighter' })
+      })
+    const operation = `Load syntax for ${entry.displayName}`
+    const work = loadingRuntime
+      .then(current => current.load(entry.scope))
+      .then(languages => {
+        for (const language of languages) {
+          loaded.add(language)
+          errors.delete(language)
+        }
+        return undefined
+      })
+      .catch((cause: unknown) => {
+        const error = appError(cause, { operation })
+        errors.set(id, error.message)
+        throw error
+      })
+      .finally(() => pending.delete(id))
+    pending.set(id, work)
+    return work
+  }
+
   for (const entry of catalog) {
     const extensions = entry.extensions.filter(
       extension => entry.priority === true || !claimed.has(extension) || react.has(entry.id),
@@ -121,33 +155,6 @@ export function configureSyntax(monaco: MonacoApi) {
       })
       for (const value of [...extensions, ...filenames]) claimed.add(value)
     }
-    if (ids.has(entry.id)) continue
-    monaco.languages.onLanguage(entry.id, () => {
-      pending.add(entry.id)
-      loadingRuntime ??= import('./grammars.ts')
-        .then(module => module.createSyntaxRuntime(monaco, catalog, () => themeName))
-        .then(highlighter => (runtime = highlighter))
-        .catch((cause: unknown) => {
-          loadingRuntime = undefined
-          throw appError(cause, { operation: 'Load syntax highlighter' })
-        })
-      const current = loadingRuntime
-      const operation = `Load syntax for ${entry.displayName}`
-      runTask(operation, async () => {
-        try {
-          const result = await attemptAsync(async () => (await current).load(entry.scope), { operation })
-          if (result.ok) {
-            errors.delete(entry.id)
-            for (const language of result.value) loaded.add(language)
-          } else {
-            errors.set(entry.id, result.error.message)
-            reportError(result.error, { silent: true })
-          }
-        } finally {
-          pending.delete(entry.id)
-        }
-      })
-    })
   }
   monaco.languages.register({
     id: 'json',
@@ -199,10 +206,23 @@ export function configureSyntax(monaco: MonacoApi) {
     },
   })
 
-  // Unknown suffixes often contain an ordinary serialization format. Parse it first.
+  const registered = new Set(monaco.languages.getLanguages().map(language => language.id))
+  for (const [id, entry] of lazyLanguages) {
+    if (!registered.has(id)) continue
+    monaco.languages.onLanguage(id, () => {
+      runTask(`Load syntax for ${entry.displayName}`, () => ensureLanguage(id), { silent: true })
+    })
+  }
 
   return {
-    resolve,
+    resolve(model: MonacoModel, text: string) {
+      const id = resolve(model, text)
+      if (errors.has(id) && !pending.has(id)) {
+        runTask('Retry syntax highlighting', () => ensureLanguage(id), { silent: true })
+      }
+      return id
+    },
+    ensureLanguage,
     setTheme(name: EditorThemeName) {
       themeName = name
       runtime?.setTheme(name)
@@ -210,7 +230,7 @@ export function configureSyntax(monaco: MonacoApi) {
     },
     stats: () => ({
       loaded: [...loaded],
-      pending: [...pending],
+      pending: [...pending.keys()],
       errors: Object.fromEntries(errors),
     }),
   }

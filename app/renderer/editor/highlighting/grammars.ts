@@ -47,6 +47,7 @@ export async function createSyntaxRuntime(
   monaco: MonacoHost,
   catalog: readonly SyntaxCatalogEntry[],
   currentTheme: () => EditorThemeName,
+  nativeLanguages: ReadonlySet<string> = new Set(),
 ): Promise<SyntaxRuntime> {
   const highlighter = await createHighlighterCore({
     engine: createOnigurumaEngine(import('@shikijs/engine-oniguruma/wasm-inlined')),
@@ -55,6 +56,7 @@ export async function createSyntaxRuntime(
   })
   const scopes = new Map(catalog.map(entry => [entry.scope, entry]))
   const loaded = new Set<string>()
+  const loadedLanguages = () => [...new Set([...loaded].map(scope => findScope(scope).id))]
   const themeSetters: Array<(name: EditorThemeName) => void> = []
   let themesDefined = false
   let queue: Promise<unknown> = Promise.resolve()
@@ -74,7 +76,7 @@ export async function createSyntaxRuntime(
   }
   function load(scope: string) {
     const loading = queue.then(async () => {
-      if (loaded.has(scope)) return highlighter.getLoadedLanguages()
+      if (loaded.has(scope)) return loadedLanguages()
       const entries = new Map<string, SyntaxCatalogEntry>()
       const collect = (name: string) => {
         if (loaded.has(name) || entries.has(name)) return
@@ -85,7 +87,6 @@ export async function createSyntaxRuntime(
       collect(scope)
       const grammars = await Promise.all([...entries.values()].map(entry => loadRegistration(entry)))
       await highlighter.loadLanguage(...grammars)
-      for (const name of entries.keys()) loaded.add(name)
       const adapterEditor: Pick<typeof editor, 'defineTheme' | 'setTheme'> = {
         defineTheme(name, syntax) {
           if (themesDefined) return
@@ -108,14 +109,16 @@ export async function createSyntaxRuntime(
           languages: {
             setTokensProvider: (id: string, provider: Parameters<typeof languages.setTokensProvider>[1]) =>
               monaco.languages.setTokensProvider(id, provider),
-            getLanguages: () => monaco.languages.getLanguages().filter(({ id }) => newLanguages.has(id)),
+            getLanguages: () =>
+              monaco.languages.getLanguages().filter(({ id }) => newLanguages.has(id) && !nativeLanguages.has(id)),
           },
           editor: adapterEditor,
         },
       )
       themesDefined = true
       themeSetters.push(name => adapterEditor.setTheme(name))
-      return highlighter.getLoadedLanguages()
+      for (const name of entries.keys()) loaded.add(name)
+      return loadedLanguages()
     })
     queue = loading.catch(() => undefined)
     return loading

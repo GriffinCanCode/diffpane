@@ -1151,7 +1151,7 @@ function showMarkdownOutline(card, list) {
 }
 
 /** @param {string} code @param {string} language */
-function colorizeMarkdown(code, language) {
+async function colorizeMarkdown(code, language) {
   /** @type {Record<string, string>} */
   const aliases = {
     js: 'javascript',
@@ -1161,7 +1161,9 @@ function colorizeMarkdown(code, language) {
     yml: 'yaml',
     py: 'python',
   }
-  return monaco.editor.colorize(code, aliases[language] ?? language, {})
+  const id = aliases[language] ?? language
+  await syntax.ensureLanguage(id)
+  return monaco.editor.colorize(code, id, {})
 }
 
 function toggleNavigator() {
