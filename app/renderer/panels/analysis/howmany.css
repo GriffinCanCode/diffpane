@@ -1,7 +1,7 @@
 .howmany-panel {
   flex-shrink: 0;
   border-top: 1px solid var(--line);
-  font-size: 11px;
+  font-size: var(--text-caption);
 }
 .howmany-panel > summary {
   display: flex;
@@ -10,7 +10,7 @@
   padding: 7px 10px;
   list-style: none;
   cursor: pointer;
-  color: light-dark(#56626d, #aaa);
+  color: var(--muted);
 }
 .howmany-panel > summary:hover {
   background: var(--hover);
@@ -32,15 +32,24 @@
   transform: translateY(-1px) rotate(45deg);
 }
 .howmany-panel > summary > span:first-child {
-  font-weight: 650;
+  font-weight: var(--weight-semibold);
   text-transform: uppercase;
 }
 .howmany-summary {
   margin-left: auto;
-  color: light-dark(#576470, #777);
+  color: var(--subtle);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.howmany-panel[data-state='error'] .howmany-summary,
+.howmany-status[data-state='error'],
+.howmany-report-state[data-state='error'],
+.howmany-empty[data-state='error'] {
+  color: var(--removed);
+}
+.howmany-report-state[data-state='exported'] {
+  color: var(--added);
 }
 .howmany-body {
   max-height: min(220px, 30vh);
@@ -59,7 +68,7 @@
   overflow-wrap: anywhere;
 }
 .howmany-value {
-  color: light-dark(#56626d, #aaa);
+  color: var(--muted);
   text-align: right;
   font-variant-numeric: tabular-nums;
   flex-shrink: 0;
@@ -70,19 +79,19 @@
   overflow: hidden;
   border-radius: 2px;
   margin: 8px 0;
-  background: light-dark(#e4e9ed, #292929);
+  background: var(--surface-inset);
 }
 .howmany-code_lines {
-  background: light-dark(#5a8a7b, #80a99b);
+  background: var(--chart-code);
 }
 .howmany-doc_lines {
-  background: light-dark(#8467ad, #c4a7e7);
+  background: var(--chart-docs);
 }
 .howmany-comment_lines {
-  background: light-dark(#5477a4, #6d8cba);
+  background: var(--chart-comments);
 }
 .howmany-blank_lines {
-  background: light-dark(#9ca9b3, #555);
+  background: var(--chart-blank);
 }
 .howmany-quality {
   margin-top: 4px;
@@ -91,23 +100,23 @@
 }
 [data-band='high'] > .howmany-value,
 .howmany-section[data-band='high'] > h3 {
-  color: light-dark(#367054, #80b699);
+  color: var(--added);
 }
 [data-band='good'] > .howmany-value,
 .howmany-section[data-band='good'] > h3 {
-  color: light-dark(#37688f, #8eb1cf);
+  color: var(--accent);
 }
 [data-band='fair'] > .howmany-value,
 .howmany-section[data-band='fair'] > h3 {
-  color: light-dark(#79571c, #c7b580);
+  color: var(--warning);
 }
 [data-band='low'] > .howmany-value,
 .howmany-section[data-band='low'] > h3 {
-  color: light-dark(#a2494b, #cb9999);
+  color: var(--removed);
 }
 .howmany-empty {
-  font-size: 12px;
-  color: light-dark(#5e6b77, #999);
+  font-size: var(--text-label);
+  color: var(--muted);
   line-height: 1.6;
   overflow-wrap: anywhere;
 }
@@ -122,12 +131,12 @@
   background: none;
   border: 0;
   padding: 2px 0;
-  color: light-dark(#56626d, #aaa);
-  font-size: 11px;
+  color: var(--muted);
+  font-size: var(--text-caption);
 }
 .howmany-actions button:hover,
 .howmany-status:hover {
-  color: light-dark(#252b33, #eee);
+  color: var(--text);
 }
 .howmany-refresh {
   font-size: 17px !important;
@@ -141,24 +150,24 @@
 .howmany-counts,
 .howmany-warnings {
   padding: 5px 22px 5px 68px;
-  font-size: 11px;
+  font-size: var(--text-caption);
   line-height: 1.5;
-  color: light-dark(#596672, #888);
+  color: var(--muted);
   flex-shrink: 0;
 }
 .howmany-warnings {
-  color: light-dark(#79571c, #c7b580);
+  color: var(--warning);
   padding-top: 0;
 }
 .howmany-dialog {
   width: min(760px, calc(100vw - 48px));
   max-height: calc(100vh - 64px);
   padding: 0;
-  border: 1px solid var(--control-border);
-  border-radius: 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
   background: var(--workbench-background);
-  color: light-dark(#343e49, #ccc);
-  box-shadow: 0 18px 80px light-dark(#26374744, #0008);
+  color: var(--text);
+  box-shadow: 0 18px 80px var(--shadow);
 }
 .howmany-dialog::backdrop {
   background: var(--backdrop);
@@ -211,15 +220,15 @@
   background: var(--chart-docs);
 }
 .howmany-dialog h2 {
-  font-size: 19px;
+  font-size: var(--text-heading);
   margin: 0 0 4px;
-  font-weight: 550;
-  color: light-dark(#252b33, #eee);
+  font-weight: var(--weight-semibold);
+  color: var(--text);
 }
 .howmany-dialog header p {
   margin: 0;
-  color: light-dark(#596672, #888);
-  font-size: 12px;
+  color: var(--muted);
+  font-size: var(--text-label);
 }
 .howmany-close {
   display: grid;
@@ -268,17 +277,17 @@
 }
 .howmany-section h3 {
   margin: 0 0 12px;
-  font-size: 15px;
-  font-weight: 550;
-  color: light-dark(#303943, #ddd);
+  font-size: var(--text-subheading);
+  font-weight: var(--weight-medium);
+  color: var(--text);
 }
 .howmany-section .howmany-row {
-  font-size: 12px;
+  font-size: var(--text-label);
   padding: 5px 0;
 }
 .howmany-muted {
-  color: light-dark(#596672, #888);
-  font-size: 11px;
+  color: var(--muted);
+  font-size: var(--text-caption);
   line-height: 1.6;
   margin: 0 0 12px;
 }
@@ -288,21 +297,48 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  background: var(--surface);
 }
 .howmany-report-state {
   margin-right: auto;
-  font-size: 11px;
-  color: light-dark(#596672, #888);
+  font-size: var(--text-caption);
+  color: var(--muted);
   min-width: 0;
   overflow-wrap: anywhere;
 }
 .howmany-dialog footer button {
-  background: light-dark(#edf1f4, #282828);
-  border: 1px solid light-dark(#c5d0d7, #3a3a3a);
+  background: var(--surface-raised);
+  border: 1px solid var(--control-border);
   border-radius: 4px;
   padding: 5px 10px;
-  font-size: 12px;
+  font-size: var(--text-label);
   flex-shrink: 0;
+}
+.howmany-dialog footer button:hover:not(:disabled) {
+  background: var(--hover);
+}
+.howmany-dialog footer .howmany-export {
+  border-color: transparent;
+  background: var(--action);
+  color: var(--action-text);
+}
+.howmany-dialog footer .howmany-export:hover:not(:disabled) {
+  background: var(--action-hover);
+}
+.howmany-composition + .howmany-row {
+  margin-top: 2px;
+}
+.howmany-series-label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.howmany-series-key {
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
 }
 @media (prefers-reduced-motion: no-preference) {
   .howmany-dialog[open] {

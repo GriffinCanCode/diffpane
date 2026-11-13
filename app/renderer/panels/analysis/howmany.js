@@ -93,6 +93,17 @@ function composition(basic) {
   return bar
 }
 
+/** @param {(typeof CATEGORIES)[number][0]} key @param {string} label @param {string} value */
+function seriesRow(key, label, value) {
+  const item = row(label, value)
+  const name = requireElement(item, 'span', HTMLSpanElement)
+  const marker = node('span', `howmany-series-key howmany-${key}`)
+  marker.setAttribute('aria-hidden', 'true')
+  name.classList.add('howmany-series-label')
+  name.prepend(marker)
+  return item
+}
+
 /**
  * @param {Pick<typeof import('monaco-editor'), 'editor' | 'MarkerSeverity'>} monaco
  * @param {Pick<DiffpaneApi, 'howmany'>} api
@@ -163,6 +174,7 @@ export function createHowMany(monaco, api, navigator, statusbar) {
     requireElement(dialog, '.howmany-export', HTMLButtonElement).disabled = !(source && breakdown)
     requireElement(dialog, '.howmany-report-refresh', HTMLButtonElement).disabled = running
     reportState.toggleAttribute('data-loading-status', running)
+    reportState.dataset.state = state.status
     reportState.textContent = running
       ? 'Analyzing…'
       : state.message ||
@@ -170,7 +182,9 @@ export function createHowMany(monaco, api, navigator, statusbar) {
           ? `Updated ${new Date(state.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · HowMany ${version}`
           : '')
     if (!source || !breakdown) {
-      content.append(node('p', 'howmany-empty', state.message || 'Counting files and analyzing code…'))
+      const message = node('p', 'howmany-empty', state.message || 'Counting files and analyzing code…')
+      message.dataset.state = state.status
+      content.append(message)
       return
     }
     const { ratios, complexity } = reportData
@@ -185,10 +199,10 @@ export function createHowMany(monaco, api, navigator, statusbar) {
     )
     for (const [key, label] of CATEGORIES)
       overview.append(
-        row(
+        seriesRow(
+          key,
           label,
           `${formatNumber(source[key])} · ${source.total_lines ? ((source[key] / source.total_lines) * 100).toFixed(1) : '0'}%`,
-          key,
         ),
       )
     content.append(overview)
@@ -259,15 +273,20 @@ export function createHowMany(monaco, api, navigator, statusbar) {
     const { report, message } = state
     const source = report?.source
     const running = state.status === 'analyzing'
+    const failed = state.status === 'error'
+    panel.dataset.state = state.status
+    status.dataset.state = state.status
     refresh.disabled = running
     panel.setAttribute('aria-busy', String(running))
     summary.toggleAttribute('data-loading-status', running)
-    summary.textContent = running ? 'Analyzing…' : source ? `${formatNumber(source.code_lines)} code` : ''
-    status.textContent = running ? 'HowMany…' : source ? `${formatNumber(source.code_lines)} code` : 'HowMany'
+    const countLabel = source ? `${formatNumber(source.code_lines)} code` : ''
+    summary.textContent = running ? 'Analyzing…' : failed ? 'Analysis failed' : countLabel
+    status.textContent = running ? 'HowMany…' : failed ? 'Analysis failed' : countLabel || 'HowMany'
     status.title = message || 'Open HowMany workspace analysis'
     if (source) {
       body.append(row(count(source.file_count, 'source file'), count(source.total_lines, 'line')), composition(source))
-      for (const [key, label] of CATEGORIES) if (source[key]) body.append(row(label, formatNumber(source[key])))
+      for (const [key, label] of CATEGORIES)
+        if (source[key]) body.append(seriesRow(key, label, formatNumber(source[key])))
       const ratios = asReportData(report).ratios
       const quality =
         isRecord(ratios) && isRecord(ratios.quality_metrics) ? ratios.quality_metrics.overall_quality_score : undefined
@@ -277,7 +296,11 @@ export function createHowMany(monaco, api, navigator, statusbar) {
         body.append(score)
       }
     }
-    if (message || !report) body.append(node('p', 'howmany-empty', message || 'Counting files…'))
+    if (message || !report) {
+      const description = node('p', 'howmany-empty', message || 'Counting files…')
+      description.dataset.state = state.status
+      body.append(description)
+    }
     if (dialog.open) renderReport()
   }
 
@@ -327,9 +350,13 @@ export function createHowMany(monaco, api, navigator, statusbar) {
       const result = await attemptAsync(() => runtime.export(), { operation: 'Export HowMany report' })
       if (disposed) return
       if (result.ok) {
-        if (result.value) reportState.textContent = 'Report exported'
+        if (result.value) {
+          reportState.dataset.state = 'exported'
+          reportState.textContent = 'Report exported'
+        }
       } else {
         reportError(result.error, { silent: true })
+        reportState.dataset.state = 'error'
         reportState.textContent = result.error.message
       }
     })
