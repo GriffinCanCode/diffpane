@@ -10,7 +10,7 @@
   gap: 12px;
   padding: 8px 16px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--text-label);
   border-bottom: 1px solid var(--line);
   flex-shrink: 0;
 }
@@ -30,6 +30,7 @@
   color: var(--text);
 }
 .preview-byte-toggle[aria-pressed='true'] {
+  background: var(--selection);
   color: var(--accent);
 }
 .preview-panes {
@@ -45,29 +46,26 @@
   overflow: hidden;
 }
 .document-preview[data-compare='true'] {
-  --preview-compare-meta: light-dark(#55616b, #bdb6af);
-
   .preview-toolbar {
     padding-block: 5px;
-    background: light-dark(#f3f5f6, #211f1d);
-    color: var(--preview-compare-meta);
+    background: var(--surface);
+    color: var(--muted);
   }
 
   .preview-byte-toggle {
     min-height: 24px;
-    border-color: light-dark(#c5cdd4, #49433d);
-    background: light-dark(#edf1f3, #2b2825);
+    border-color: var(--control-border);
+    background: var(--surface-raised);
   }
 
   .preview-byte-toggle:hover {
-    background: light-dark(#e3eaee, #38332f);
+    background: var(--hover);
     color: var(--text);
   }
 
   .preview-byte-toggle[aria-pressed='true'] {
-    border-color: light-dark(#afcbbd, #53665b);
-    background: light-dark(#e1efe7, #28342e);
-    color: var(--comparison-working);
+    background: var(--selection);
+    color: var(--accent);
   }
 
   .preview-pane + .preview-pane {
@@ -106,8 +104,8 @@
 
   .preview-heading-details {
     flex: 1 1 0;
-    color: var(--preview-compare-meta);
-    font-size: 11px;
+    color: var(--muted);
+    font-size: var(--text-caption);
     font-variant-numeric: tabular-nums;
     text-align: end;
   }
@@ -121,23 +119,24 @@
 .preview-note {
   padding: 8px 16px;
   margin: 0;
-  font-size: 12px;
+  font-size: var(--text-label);
   color: var(--muted);
 }
 .preview-body {
   flex: 1;
   min-height: 0;
   overflow: auto;
+  scrollbar-color: var(--scrollbar) transparent;
 }
 .preview-text {
   padding: 16px;
   margin: 0;
   min-height: 100%;
-  font-family: var(--editor-font, monospace);
-  font-size: var(--editor-font-size, 14px);
-  line-height: var(--editor-line-height, 22px);
+  font-family: var(--editor-font, var(--font-mono));
+  font-size: var(--editor-font-size, var(--editor-default-size));
+  line-height: var(--editor-line-height, var(--editor-default-line-height));
   white-space: pre;
-  color: light-dark(#303841, #d4d4d4);
+  color: var(--text);
   tab-size: 4;
 }
 .preview-text mark {
