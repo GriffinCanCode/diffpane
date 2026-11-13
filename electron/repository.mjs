@@ -4,7 +4,13 @@ import { constants } from 'node:fs';
 import { lstat, open, readdir, readlink, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { encodeText, fileContent, MAX_FILE_BYTES, readLimit } from './file-content.ts';
-import { checkClaudeFile, claudeFilePath, readClaudeBytes } from './claude-workspace.mjs';
+import {
+  checkClaudeFile,
+  claudeFilePath,
+  claudeVisiblePath,
+  MAX_CLAUDE_FILE_BYTES,
+  readClaudeBytes,
+} from './claude-workspace.mjs';
 import { mediaType } from '../media-types.ts';
 
 const MAX_STATUS_BYTES = 16 * 1024 * 1024;
@@ -739,6 +745,29 @@ export class Repository {
     }
   }
 
+  async readClaudeHead(file) {
+    const filename = file.originalPath ?? file.path;
+    if (!claudeVisiblePath(filename) || !within(this.scope, path.join(this.root, filename)))
+      throw new Error('No regular HEAD text file is available at this path.');
+    const output = await git(
+      this.root,
+      ['ls-tree', '-z', 'HEAD', '--', filename],
+      MAX_STATUS_BYTES,
+    );
+    const entry = /^100(?:644|755) blob ([a-f0-9]{40,64})\t[^\0]+\0$/u.exec(
+      output.toString('utf8'),
+    );
+    const oid = entry?.[1];
+    if (!oid) throw new Error('No regular HEAD text file is available at this path.');
+    const bytes = await this.#blobContents(oid, filename, MAX_CLAUDE_FILE_BYTES);
+    if (bytes.size > MAX_CLAUDE_FILE_BYTES)
+      throw new Error('No regular HEAD text file is available at this path.');
+    const contents = fileContent(bytes, filename);
+    if (contents.kind !== 'text' || contents.limited)
+      throw new Error('No regular HEAD text file is available at this path.');
+    return contents.value;
+  }
+
   async #editPath(filename) {
     validatePath(filename);
     const absolute = path.join(this.root, filename);
@@ -829,8 +858,8 @@ export class Repository {
     return this.#blobContents(successful(output).toString('ascii').trim(), filename);
   }
 
-  async #blobContents(oid, filename) {
-    const key = `${oid}:${readLimit(filename)}`;
+  async #blobContents(oid, filename, limit = readLimit(filename)) {
+    const key = `${oid}:${limit}`;
     let cached = this.blobs.get(key);
     if (cached) {
       this.blobs.delete(key);
@@ -843,7 +872,7 @@ export class Repository {
         (await git(this.root, ['cat-file', '-s', oid], 4096)).toString('ascii').trim(),
       );
       const bytes = successful(
-        await command(this.root, ['cat-file', 'blob', oid], readLimit(filename), undefined, true),
+        await command(this.root, ['cat-file', 'blob', oid], limit, undefined, true),
       );
       return { bytes, size };
     })();

@@ -577,9 +577,10 @@ async function findFile(filePath) {
 }
 
 async function claudeFile(filePath) {
-  await files();
-  const file = catalogIndex.get(filePath);
-  if (!file || file.ignored || file.submodule || file.directory || !claudeVisiblePath(filePath))
+  if (!claudeVisiblePath(filePath))
+    throw new Error('Choose an available, nonignored project text file.');
+  const file = await findFile(filePath);
+  if (!file || file.ignored || file.submodule || file.directory)
     throw new Error('Choose an available, nonignored project text file.');
   return file;
 }
@@ -659,8 +660,14 @@ parentPort.on('message', async ({ id, method, args = [] }) => {
       }
       value = { paths, truncated };
     } else if (method === 'claude-read') {
-      await claudeFile(args[0]);
-      value = await readClaudeFile(repository, args[0]);
+      const [filename, side = 'working'] = args;
+      if (side !== 'working' && side !== 'head')
+        throw new Error('Choose the working file or HEAD.');
+      const file = await claudeFile(filename);
+      value =
+        side === 'head'
+          ? await repository.readClaudeHead(file)
+          : await readClaudeFile(repository, filename);
     } else if (method === 'directory-expanded') {
       const change = directoryChanges.then(async () => {
         await files();

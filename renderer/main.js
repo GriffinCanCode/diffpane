@@ -68,7 +68,7 @@ app.innerHTML = `
       <button type="button" id="ideas-toggle" class="titlebar-button" aria-controls="ideas-panel" aria-expanded="false" aria-keyshortcuts="Meta+Shift+I Control+Shift+I" title="Ideas · ⌘⇧I" hidden>${icons.idea}<span>Ideas</span></button>
       <button type="button" id="review-toggle" class="titlebar-button review-toggle" aria-label="Review changes" aria-controls="change-review" aria-pressed="false" aria-keyshortcuts="Meta+Shift+G Control+Shift+G" title="Review changes · ⌘⇧G" hidden>${icons.review}<span>Changes</span><span class="review-count" aria-hidden="true"></span></button>
       <button type="button" id="review-notes-toggle" class="titlebar-button" aria-label="Review notes" aria-controls="review-notes-panel" aria-expanded="false" aria-keyshortcuts="Meta+Shift+J Control+Shift+J" title="Review notes · ⌘⇧J" hidden>${icons.note}<span>Notes</span><span class="review-notes-count" aria-hidden="true" hidden></span></button>
-      <button type="button" id="claude-toggle" aria-label="Claude" aria-controls="claude-panel" aria-expanded="false" aria-keyshortcuts="Meta+Shift+L Control+Shift+L" title="Claude · ⌘⇧L" hidden>${icons.claude}<span>Claude</span></button>
+      <button type="button" id="claude-toggle" class="titlebar-button" aria-label="Claude" aria-controls="claude-panel" aria-expanded="false" aria-keyshortcuts="Meta+Shift+L Control+Shift+L" title="Claude · ⌘⇧L" hidden>${icons.claude}<span>Claude</span></button>
       <button type="button" id="settings-toggle" class="titlebar-button" aria-label="Settings" aria-haspopup="dialog" aria-controls="app-settings" title="Settings · ⌘," aria-keyshortcuts="Meta+, Control+,">${icons.settings}</button>
     </div>
   </header>
@@ -194,24 +194,43 @@ const assistant =
       returnFromIdeas({ dock: true });
       reviewNotes?.close();
     },
-    prepareSend: async pathname => {
-      if (closingRequested || closed) throw new Error('This window is closing.');
-      await cards.get(pathname)?.autosave?.flush();
+    getFileContext: assistantFileContext,
+    openFile: async ({ path, anchor, startLine, endLine, side }) => {
+      const location = startLine
+        ? { path, side, line: startLine, endLine: endLine ?? startLine, excerpt: '', direct: true }
+        : null;
+      if (!(await openFile({ path, anchor }, { anchor: location, ideaLink: Boolean(anchor) })))
+        throw new Error('The linked file could not be opened.');
     },
-    applyEdit: async ({ id, path }) => {
+    openIdea: async id => {
+      if (!ideas || !setIdeasMode('dock') || !(await ideas.open(id)))
+        throw new Error('This idea is unavailable.');
+    },
+    colorize: colorizeMarkdown,
+    prepareSend: async ({ fileContext, ideaId }) => {
       if (closingRequested || closed) throw new Error('This window is closing.');
+      const path = fileContext?.path;
+      await Promise.all([
+        path ? cards.get(path)?.autosave?.flush() : undefined,
+        ideaId ? ideas?.flush() : undefined,
+      ]);
+    },
+    applyEdit: async proposal => {
+      if (closingRequested || closed) throw new Error('This window is closing.');
+      const path = proposal.kind === 'idea' ? null : proposal.path;
       applyingAssistantPath = path;
-      const card = cards.get(path);
+      const card = path ? cards.get(path) : undefined;
       const apply = async () => {
         if (card) applyEditorReadOnly(card);
         await card?.autosave?.flush();
-        await api.claude.apply(id);
+        if (proposal.kind === 'idea') await ideas?.flush();
+        await api.claude.apply(proposal.id);
       };
       applyingAssistantEdit = apply();
       try {
         syncSaveState();
         await applyingAssistantEdit;
-        const current = cards.get(path);
+        const current = path ? cards.get(path) : undefined;
         if (current) {
           current.dirty = true;
           syncReviewState();
@@ -220,7 +239,7 @@ const assistant =
       } finally {
         applyingAssistantEdit = null;
         applyingAssistantPath = null;
-        const current = cards.get(path);
+        const current = path ? cards.get(path) : undefined;
         if (current) applyEditorReadOnly(current);
         syncSaveState();
       }
@@ -367,7 +386,7 @@ function closeCurrentFile() {
   for (const card of cards.values()) deactivate(card);
   cards.clear();
   openedFile = null;
-  assistant?.setContext(Boolean(snapshot), null);
+  assistant?.refreshContext();
   ideas?.refreshContext();
   ui.feed.replaceChildren();
   ui.empty_state.hidden = false;
@@ -754,7 +773,7 @@ async function openFile(
   }
   cards.clear();
   openedFile = file;
-  assistant?.setContext(Boolean(snapshot), file.path);
+  assistant?.refreshContext();
   const card = createCard(reviewFiles(comparison).find(value => value.path === file.path) ?? file);
   card.pendingReviewAnchor = anchor;
   card.markdownAnchor = file.anchor || null;
@@ -1044,7 +1063,7 @@ function applySnapshot(next) {
   const allDirty =
     !next.changedPaths || next.changedPaths.includes('*') || next.root !== snapshot?.root;
   snapshot = next;
-  assistant?.setContext(true, openedFile?.path ?? null);
+  assistant?.setContext(true, next.root);
   ui.start_screen.hidden = true;
   ui.feed_scroll.hidden = false;
   if (first) {
@@ -1437,6 +1456,27 @@ function selectionLines(selection) {
   return { line, endLine };
 }
 
+function assistantFileContext() {
+  if (!openedFile) return null;
+  const path = openedFile.path;
+  const card = cards.get(path);
+  if (!card) return { path, side: 'working' };
+  const side =
+    card.diffEditor && card.noteSide === 'head' && comparisonLabel(card) === 'HEAD'
+      ? 'head'
+      : 'working';
+  const editor = side === 'head' ? card.diffEditor.getOriginalEditor() : card.editor;
+  const selection = editor?.getSelection();
+  if (selection && !selection.isEmpty()) {
+    const { line, endLine } = selectionLines(selection);
+    return { path, side, startLine: line, endLine };
+  }
+  const visible = editor?.getVisibleRanges()[0];
+  if (!visible) return { path, side };
+  const startLine = visible.startLineNumber;
+  return { path, side, startLine, endLine: Math.min(visible.endLineNumber, startLine + 39) };
+}
+
 function captureIdeaLink(card, side = card.ideaSide ?? 'working') {
   if (side === 'head' && comparisonLabel(card) === 'Checkpoint') side = 'working';
   const editor = side === 'head' ? card.diffEditor?.getOriginalEditor() : card.editor;
@@ -1495,6 +1535,14 @@ function revealReviewAnchor(card) {
   const model = editor?.getModel();
   if (!model) {
     showReviewLocation(card, 'The saved lines are unavailable in the current file view.');
+    return;
+  }
+  if (anchor.direct) {
+    card.noteSide = anchor.side ?? 'working';
+    const start = Math.min(anchor.line, model.getLineCount());
+    const end = Math.min(anchor.endLine ?? start, model.getLineCount());
+    editor.setSelection(new monaco.Range(start, 1, end, model.getLineMaxColumn(end)));
+    editor.revealLineInCenter(start, monaco.editor.ScrollType.Immediate);
     return;
   }
   const location = locateReviewLines(model, anchor);
@@ -1672,14 +1720,26 @@ function setCardEditor(card, state) {
   } else card.editor = monaco.editor.create(card.host, editorOptions(card));
   card.noteSide = 'working';
   card.ideaSide = 'working';
-  if (reviewNotes || ideas) {
+  if (reviewNotes || ideas || assistant) {
     card.contextActions = [];
+    let contextFrame = 0;
+    const refreshAssistantContext = () => {
+      if (!assistant || ui.claude_panel.hidden || contextFrame) return;
+      contextFrame = requestAnimationFrame(() => {
+        contextFrame = 0;
+        assistant.refreshContext();
+      });
+    };
+    card.contextActions.push({ dispose: () => cancelAnimationFrame(contextFrame) });
     const bindContext = (editor, side) => {
       card.contextActions.push(
         editor.onDidFocusEditorText(() => {
           card.noteSide = side;
           card.ideaSide = side;
+          refreshAssistantContext();
         }),
+        editor.onDidChangeCursorSelection(refreshAssistantContext),
+        editor.onDidScrollChange(refreshAssistantContext),
       );
       if (reviewNotes)
         card.contextActions.push(
@@ -1716,6 +1776,7 @@ function setCardEditor(card, state) {
     };
     bindContext(card.editor, 'working');
     if (card.diffEditor) bindContext(card.diffEditor.getOriginalEditor(), 'head');
+    refreshAssistantContext();
   }
   card.decorationCollection = card.editor.createDecorationsCollection();
   if (state) card.editor.restoreViewState(state);

@@ -6,6 +6,7 @@ import path from 'node:path';
 import { test } from 'vite-plus/test';
 import { promisify } from 'node:util';
 import { Repository } from '../electron/repository.mjs';
+import { readClaudeFile } from '../electron/claude-workspace.mjs';
 
 const execute = promisify(execFile);
 const plain = filename => ({
@@ -527,6 +528,25 @@ test('CRLF and terminal newlines are preserved for Monaco text models', async t 
   });
   await repo.write('a.rs', 'hello\nlast\n');
   assert.match((await repository.contents(plain('a.rs'))).note, /line endings/);
+});
+
+test('Claude can read either side of a file in scope and cannot read private or oversized HEAD blobs', async t => {
+  const repo = await fixture(t);
+  await repo.write('src/[file].ts', 'committed text\n');
+  await repo.write('src/large.txt', 'x'.repeat(513 * 1024));
+  await repo.write('src/.env', 'private\n');
+  await repo.write('outside.ts', 'out of scope\n');
+  await repo.commit();
+  await repo.write('src/[file].ts', 'working text\n');
+
+  const repository = await Repository.open(path.join(repo.root, 'src'));
+  assert.equal(await repository.readClaudeHead(plain('src/[file].ts')), 'committed text\n');
+  assert.equal(await readClaudeFile(repository, 'src/[file].ts'), 'working text\n');
+  await Promise.all(
+    ['src/.env', 'src/large.txt', 'src/missing.txt', 'outside.ts'].map(name =>
+      assert.rejects(repository.readClaudeHead(plain(name)), /No regular HEAD text file/u),
+    ),
+  );
 });
 
 test('contents use the current HEAD after a commit without retaining old blobs', async t => {

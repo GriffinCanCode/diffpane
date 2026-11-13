@@ -1,29 +1,49 @@
-import DOMPurify from 'dompurify';
-import { marked } from 'marked';
-import { formatIdeaContext } from './idea-context.ts';
+import { attemptAsync } from '../app-errors.ts';
+import {
+  createEditProposal,
+  createToolActivity,
+  renderAssistantMarkdown,
+  runTask,
+} from './assistant-content.js';
+import { requireElement } from './dom.js';
 import './assistant.css';
+import './loading.css';
 
-const keyUrl = 'https://platform.claude.com/settings/keys';
-const settingsIcon =
-  '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 4h11m-11 4h11m-11 4h11"/><path d="M5 2.5v3m6 1v3m-5 1v3" stroke-width="1.7"/></svg>';
-const resetIcon =
-  '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" aria-hidden="true"><path d="M3 6a5 5 0 1 1 .6 5.5M3 3v3h3"/></svg>';
-const closeIcon =
-  '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" aria-hidden="true"><path d="m4.5 4.5 7 7m0-7-7 7"/></svg>';
+/**
+ * @import { ClaudePrompt, DiffpaneApi } from '../electron/preload.ts'
+ * @import { Proposal, FileTarget } from './assistant-content.js'
+ */
+/** @typedef {NonNullable<ClaudePrompt['fileContext']>} FileContext */
+/** @typedef {Awaited<ReturnType<DiffpaneApi['claude']['status']>>} Connection */
+/** @typedef {{id: string, title: string}} IdeaAttachment */
+/** @typedef {{body: HTMLElement, text: string, frame: number, complete: boolean}} ReplyText */
+/** @typedef {{id: string, turn: HTMLElement, reply: HTMLElement, sections: HTMLElement, working: HTMLElement, paragraphs: Map<number, ReplyText>, tools: Map<string, ReturnType<typeof createToolActivity>>, toolGroup?: ReturnType<typeof createToolActivity>, started: boolean, stopping: boolean}} SendState */
 
-function message(error) {
-  return String(error?.message ?? error).replace(
-    /^Error invoking remote method '[^']+': (?:Error: )?/u,
-    '',
-  );
+const KEY_URL = 'https://platform.claude.com/settings/keys';
+const ICONS = {
+  mark: '<path d="M8 1.75v12.5M1.75 8h12.5M3.6 3.6l8.8 8.8m0-8.8-8.8 8.8"/>',
+  new: '<path d="M8 3.25v9.5m-4.75-4.75h9.5"/>',
+  settings: '<path d="M2.75 4h10.5m-10.5 4h10.5m-10.5 4h10.5M5.25 2.5v3m5.5 1v3m-5.5 1v3"/>',
+  close: '<path d="m4 4 8 8m0-8-8 8"/>',
+  up: '<path d="M8 12.75v-9.5m-3.75 3.75L8 3.25 11.75 7"/>',
+  down: '<path d="M8 3.25v9.5m-3.75-3.75L8 12.75 11.75 9"/>',
+  next: '<path d="M3.25 8h9.5M9 4.25 12.75 8 9 11.75"/>',
+  stop: '<rect x="4.5" y="4.5" width="7" height="7" rx="1.1" fill="currentColor" stroke="none"/>',
+  file: '<path d="M9 2.5H4.75A1.25 1.25 0 0 0 3.5 3.75v8.5a1.25 1.25 0 0 0 1.25 1.25h6.5a1.25 1.25 0 0 0 1.25-1.25V6L9 2.5Z"/><path d="M9 2.5V6h3.5"/>',
+  idea: '<path d="M5.75 10.25c0-1.3-1.5-1.9-1.5-3.9a3.75 3.75 0 0 1 7.5 0c0 2-1.5 2.6-1.5 3.9m-4.5 0h4.5m-3.8 2.25h3.1m-2.1 1.75h1.1"/>',
+  check: '<path d="m3.75 8.25 2.6 2.6 5.9-5.9"/>',
+};
+
+/** @param {keyof typeof ICONS} name */
+function icon(name) {
+  return `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name]}</svg>`;
 }
 
-function showNotice(element, text, error = false) {
-  element.textContent = text;
-  element.hidden = !text;
-  element.classList.toggle('is-error', error);
-}
-
+/** @template {keyof HTMLElementTagNameMap} Tag
+ * @param {Tag} tag
+ * @param {string} className
+ * @param {string} [text]
+ */
 function node(tag, className, text) {
   const element = document.createElement(tag);
   element.className = className;
@@ -31,43 +51,82 @@ function node(tag, className, text) {
   return element;
 }
 
+/** @param {HTMLElement} element @param {string} [text] */
+function showNotice(element, text = '') {
+  element.textContent = text;
+  element.hidden = !text;
+}
+
+/** @param {HTMLElement} element @param {Error} error */
+function showFailure(element, error) {
+  console.error(error);
+  showNotice(element, error.message);
+}
+
+/** @param {FileContext} file */
+function fileLabel(file) {
+  const name = file.path.split('/').at(-1) ?? file.path;
+  const lines = file.startLine
+    ? `:${file.startLine}${file.endLine && file.endLine !== file.startLine ? `–${file.endLine}` : ''}`
+    : '';
+  return `${name}${lines}${file.side === 'head' ? ' · HEAD' : ''}`;
+}
+
+/**
+ * @param {HTMLElement} container
+ * @param {HTMLButtonElement} toggle
+ * @param {Pick<DiffpaneApi, 'claude' | 'openExternal'>} api
+ * @param {{prepareSend: (request: ClaudePrompt) => unknown, getFileContext: () => FileContext | null, openFile?: (target: FileTarget) => unknown, openIdea?: (id: string) => unknown, applyEdit: (proposal: Proposal) => unknown, onOpen?: () => void, colorize?: (text: string, language: string) => string | PromiseLike<string>}} options
+ */
 export function createAssistant(
   container,
   toggle,
   { claude, openExternal },
-  { prepareSend, applyEdit, onOpen },
+  { prepareSend, getFileContext, openFile, openIdea, applyEdit, onOpen, colorize },
 ) {
   container.className = 'claude-panel';
   container.setAttribute('aria-labelledby', 'claude-title');
   container.innerHTML = `
     <header class="claude-heading">
-      <h2 id="claude-title">Claude</h2>
+      <h2 id="claude-title"><span class="claude-brand">${icon('mark')}</span>Claude</h2>
       <div class="claude-tools">
-        <button type="button" class="claude-icon" data-action="reset" aria-label="New conversation" title="New conversation">${resetIcon}</button>
-        <button type="button" class="claude-icon" data-action="settings" aria-label="Claude settings" title="Claude settings">${settingsIcon}</button>
-        <button type="button" class="claude-icon" data-action="close" aria-label="Close Claude" title="Close Claude">${closeIcon}</button>
+        <button type="button" class="claude-icon" data-action="reset" aria-label="New conversation" title="New conversation">${icon('new')}</button>
+        <button type="button" class="claude-icon" data-action="settings" aria-label="Claude settings" title="Claude settings" aria-haspopup="dialog">${icon('settings')}</button>
+        <button type="button" class="claude-icon" data-action="close" aria-label="Close Claude" title="Close Claude">${icon('close')}</button>
       </div>
     </header>
-    <div class="claude-conversation" role="log" aria-label="Conversation" tabindex="0">
-      <div class="claude-empty">
-        <p></p>
-        <button type="button" class="claude-button" data-action="connect" hidden>Set up API key</button>
-      </div>
-      <div class="claude-turns"></div>
-      <p class="claude-working" role="status" hidden></p>
-    </div>
-    <p class="claude-notice" role="status" hidden></p>
-    <form class="claude-composer">
-      <p class="claude-context" hidden></p>
-      <div class="claude-idea" hidden><span class="claude-idea-label"></span><button type="button" class="claude-icon" data-action="remove-idea" aria-label="Remove attached idea" title="Remove attached idea">${closeIcon}</button></div>
-      <textarea aria-label="Message Claude" rows="3" maxlength="8000" placeholder="Ask about this codebase"></textarea>
-      <div class="claude-composer-actions">
-        <div class="claude-mode" role="group" aria-label="Request mode">
-          <button type="button" data-mode="ask" aria-pressed="true" title="Ask a read-only question">Ask</button>
-          <button type="button" data-mode="edit" aria-pressed="false" title="Propose an edit for review">Edit</button>
+    <div class="claude-transcript">
+      <div class="claude-conversation" role="log" aria-live="off" aria-label="Conversation" tabindex="0">
+        <div class="claude-empty">
+          <span class="claude-empty-mark">${icon('mark')}</span>
+          <h3></h3>
+          <p></p>
+          <div class="claude-starters"></div>
+          <button type="button" class="claude-button claude-primary" data-action="connect" hidden>Set up API key ${icon('next')}</button>
         </div>
-        <button class="claude-button claude-primary" type="submit">Send</button>
-        <button class="claude-button" type="button" data-action="stop" hidden>Stop</button>
+        <div class="claude-turns"></div>
+      </div>
+      <button class="claude-jump" type="button" data-action="jump" hidden>${icon('down')} Latest</button>
+    </div>
+    <p class="claude-notice" role="alert" hidden></p>
+    <div class="claude-sr-only" role="status"></div>
+    <form class="claude-composer">
+      <div class="claude-compose-surface">
+        <div class="claude-context">
+          <button type="button" class="claude-context-chip" data-action="file" aria-pressed="true" hidden>${icon('file')}<span></span></button>
+          <div class="claude-context-chip claude-idea" hidden>${icon('idea')}<span></span><button type="button" class="claude-chip-remove" data-action="remove-idea" aria-label="Remove attached idea" title="Remove attached idea">${icon('close')}</button></div>
+        </div>
+        <div class="claude-input">
+          <textarea aria-label="Message Claude" rows="2" maxlength="8000" placeholder="Message Claude"></textarea>
+          <div class="claude-composer-actions">
+            <div class="claude-mode" role="group" aria-label="Request mode">
+              <button type="button" data-mode="ask" aria-pressed="true" title="Read files and ideas">Ask</button>
+              <button type="button" data-mode="edit" aria-pressed="false" title="Propose file or idea changes for review">Edit</button>
+            </div>
+            <button class="claude-send" type="submit" aria-label="Send message" title="Send message">${icon('up')}</button>
+            <button class="claude-send claude-stop" type="button" data-action="stop" aria-label="Stop response" title="Stop response" hidden>${icon('stop')}</button>
+          </div>
+        </div>
       </div>
     </form>`;
   const settings = node('dialog', 'claude-settings');
@@ -75,15 +134,15 @@ export function createAssistant(
   settings.setAttribute('aria-labelledby', 'claude-settings-title');
   settings.innerHTML = `
     <header class="claude-heading">
-      <h2 id="claude-settings-title">Claude settings</h2>
-      <button type="button" class="claude-icon" aria-label="Close Claude settings">${closeIcon}</button>
+      <h2 id="claude-settings-title"><span class="claude-brand">${icon('mark')}</span>Claude settings</h2>
+      <button type="button" class="claude-icon" aria-label="Close Claude settings">${icon('close')}</button>
     </header>
     <form>
       <p class="claude-settings-status" role="status"></p>
       <label for="claude-api-key">API key</label>
       <input id="claude-api-key" type="password" autocomplete="off" spellcheck="false" maxlength="2048" placeholder="sk-ant-…" />
-      <p class="claude-settings-hint">Use a workspace-scoped Claude API key. <a href="${keyUrl}">Get an API key</a></p>
-      <p class="claude-settings-hint">DiffPane encrypts the key using your system’s credential protection. When you send a message, Claude receives your prompt, any attached idea, and the project context it needs.</p>
+      <p class="claude-settings-hint">Use a workspace-scoped Claude API key. Diffpane stores it with your system’s credential protection.</p>
+      <a class="claude-settings-link" href="${KEY_URL}">Get an API key ${icon('next')}</a>
       <p class="claude-settings-notice" role="status" hidden></p>
       <div class="claude-settings-actions">
         <button type="submit" class="claude-button claude-primary">Save API key</button>
@@ -93,81 +152,169 @@ export function createAssistant(
     </form>`;
   document.body.append(settings);
 
-  const select = selector => container.querySelector(selector);
-  const action = name => select(`[data-action="${name}"]`);
+  /** @param {string} selector */
+  function select(selector) {
+    return requireElement(container, selector, HTMLElement);
+  }
+  /** @param {string} name */
+  function action(name) {
+    return requireElement(container, `[data-action="${name}"]`, HTMLButtonElement);
+  }
   const conversation = select('.claude-conversation');
   const turns = select('.claude-turns');
   const empty = select('.claude-empty');
-  const emptyText = empty.querySelector('p');
-  const working = select('.claude-working');
-  const context = select('.claude-context');
-  const ideaContext = select('.claude-idea');
-  const ideaLabel = select('.claude-idea-label');
+  const emptyTitle = requireElement(empty, 'h3', HTMLHeadingElement);
+  const emptyText = requireElement(empty, 'p', HTMLParagraphElement);
+  const starters = requireElement(empty, '.claude-starters', HTMLDivElement);
+  const fileChip = action('file');
+  const fileName = requireElement(fileChip, 'span', HTMLSpanElement);
+  const ideaChip = select('.claude-idea');
+  const ideaLabel = requireElement(ideaChip, 'span', HTMLSpanElement);
   const notice = select('.claude-notice');
-  const composer = select('.claude-composer');
-  const promptInput = composer.querySelector('textarea');
-  const send = composer.querySelector('[type="submit"]');
+  const announcement = select('.claude-sr-only');
+  const composer = requireElement(container, '.claude-composer', HTMLFormElement);
+  const composerInput = requireElement(composer, '.claude-input', HTMLDivElement);
+  const promptInput = requireElement(composer, 'textarea', HTMLTextAreaElement);
+  const send = requireElement(composer, '[type="submit"]', HTMLButtonElement);
   const stop = action('stop');
-  const modes = [...composer.querySelectorAll('[data-mode]')];
-  const keyInput = settings.querySelector('input');
-  const saveKey = settings.querySelector('[type="submit"]');
-  const removeKey = settings.querySelector('.claude-remove');
-  const closeSettings = settings.querySelector('.claude-icon');
-  const settingsStatus = settings.querySelector('.claude-settings-status');
-  const settingsNotice = settings.querySelector('.claude-settings-notice');
+  const jump = action('jump');
+  const modes = [...composer.querySelectorAll('button')].filter(button => button.dataset.mode);
+  const keyInput = requireElement(settings, 'input', HTMLInputElement);
+  const saveKey = requireElement(settings, '[type="submit"]', HTMLButtonElement);
+  const removeKey = requireElement(settings, '.claude-remove', HTMLButtonElement);
+  const closeSettings = requireElement(settings, '.claude-icon', HTMLButtonElement);
+  const settingsStatus = requireElement(settings, '.claude-settings-status', HTMLParagraphElement);
+  const settingsNotice = requireElement(settings, '.claude-settings-notice', HTMLParagraphElement);
+  const settingsForm = requireElement(settings, 'form', HTMLFormElement);
+  const listeners = new AbortController();
+  const listenerOptions = { signal: listeners.signal };
 
+  /** @type {Connection | undefined} */
   let connection;
   let checking = false;
   let changingKey = false;
   let mode = 'ask';
   let workspace = false;
-  let path = null;
+  /** @type {string | null} */
+  let workspaceId = null;
+  let includeFile = true;
   let busy = '';
-  let canceled = false;
+  /** @type {SendState | null} */
+  let activeSend = null;
+  /** @type {{proposal: Proposal, card: HTMLElement, controls: HTMLElement} | null} */
   let pending = null;
+  /** @type {IdeaAttachment | null} */
   let attachedIdea = null;
   let connectionGeneration = 0;
+  let following = true;
+  let starterContext = '';
+  /** @type {HTMLElement | null} */
+  let settingsOpener = null;
+
+  /** @param {string} status */
+  function renderStarters(status) {
+    if (starterContext === status) return;
+    starterContext = status;
+    const prompts = {
+      idea: [
+        ['Review this idea', 'Review this idea. What is clear, and what still needs a decision?'],
+        ['Outline a plan', 'Turn this idea into a short implementation plan.'],
+      ],
+      file: [
+        ['Explain this file', 'Explain how the open file works. Point me to the relevant code.'],
+        [
+          'Review this file',
+          'Review the open file for correctness and point out anything that needs attention.',
+        ],
+      ],
+      project: [
+        [
+          'Get oriented',
+          'Give me a short tour of this project and tell me where to start reading.',
+        ],
+        ['Find my ideas', 'What ideas are in this workspace?'],
+      ],
+    };
+    const choices =
+      status === 'idea' || status === 'file' || status === 'project' ? prompts[status] : [];
+    starters.replaceChildren(
+      ...choices.map(([label, prompt]) => {
+        const button = node('button', 'claude-starter', label);
+        button.type = 'button';
+        button.dataset.prompt = prompt;
+        button.insertAdjacentHTML('beforeend', icon('next'));
+        return button;
+      }),
+    );
+  }
 
   function render() {
+    if (listeners.signal.aborted) return;
     const connected = connection?.configured === true;
     const checkingConnection = !connection && checking;
     const hasTurns = turns.childElementCount > 0;
-    const canChat = workspace && connected && !busy && !changingKey && !pending;
+    const canDraft = workspace && connected;
+    const locked = Boolean(busy || changingKey || pending);
+    const currentFile = getFileContext();
+    const context = attachedIdea ? 'idea' : currentFile && includeFile ? 'file' : 'project';
     empty.hidden = hasTurns;
-    emptyText.toggleAttribute('data-loading-status', checkingConnection);
-    emptyText.textContent = checkingConnection
-      ? 'Checking Claude connection…'
+    emptyTitle.textContent = checkingConnection
+      ? 'Connecting to Claude…'
       : !connected
-        ? 'Connect Claude with an API key to get started.'
+        ? 'Connect Claude'
         : !workspace
-          ? 'Open a file or folder to ask Claude about a project.'
-          : 'Ask about this project or switch to Edit to propose a small change.';
+          ? 'Open a project to start'
+          : context === 'idea'
+            ? 'Work through an idea'
+            : 'What are you working on?';
+    emptyText.textContent = checkingConnection
+      ? ''
+      : !connected
+        ? 'Use your Claude API key to chat about your files and ideas.'
+        : !workspace
+          ? 'Claude can read files and ideas in your open project.'
+          : '';
+    emptyText.hidden = !emptyText.textContent;
     action('connect').hidden = connected || checking;
-    action('reset').disabled = (!hasTurns && !promptInput.value) || Boolean(busy) || changingKey;
-    context.hidden = !path;
-    context.textContent = path ? `Open file · ${path}` : '';
-    context.title = path ?? '';
-    ideaContext.hidden = !attachedIdea;
-    ideaLabel.textContent = attachedIdea ? `Idea · ${attachedIdea.title}` : '';
+    renderStarters(canDraft && !hasTurns ? context : '');
+    action('reset').disabled =
+      (!hasTurns && !promptInput.value && !attachedIdea) || Boolean(busy) || changingKey;
+    fileChip.hidden = !currentFile || !canDraft;
+    fileChip.disabled = locked;
+    fileChip.setAttribute('aria-pressed', String(includeFile));
+    if (currentFile) {
+      fileName.textContent = fileLabel(currentFile);
+      fileChip.title = `${includeFile ? 'Exclude' : 'Include'} open file context · ${currentFile.path}`;
+      fileChip.setAttribute('aria-label', `Use open file context for ${fileLabel(currentFile)}`);
+    }
+    ideaChip.hidden = !attachedIdea;
+    ideaLabel.textContent = attachedIdea?.title ?? '';
     ideaLabel.title = ideaLabel.textContent;
-    action('remove-idea').disabled = Boolean(busy) || changingKey;
-    promptInput.disabled = !canChat;
-    promptInput.placeholder =
-      mode === 'edit' ? 'Describe a small change' : 'Ask about this codebase';
+    action('remove-idea').disabled = locked;
+    composer.hidden = !canDraft && !attachedIdea;
+    composerInput.hidden = !canDraft;
+    promptInput.readOnly = locked;
+    promptInput.disabled = !canDraft;
+    promptInput.placeholder = pending
+      ? 'Review the proposal to continue'
+      : mode === 'edit'
+        ? 'Describe a change'
+        : attachedIdea
+          ? 'Ask about this idea'
+          : 'Message Claude';
     for (const button of modes) {
-      button.disabled = !canChat;
+      button.disabled = !canDraft || locked;
       button.setAttribute('aria-pressed', String(button.dataset.mode === mode));
     }
-    send.disabled = !canChat || !promptInput.value.trim();
-    send.hidden = busy === 'send';
-    stop.hidden = busy !== 'send';
-    stop.disabled = canceled;
-    working.hidden = busy !== 'send';
-    working.toggleAttribute('data-loading-status', !working.hidden);
-    working.textContent = canceled ? 'Stopping…' : 'Claude is working…';
-    if (pending)
-      for (const button of pending.controls.querySelectorAll('button'))
+    send.disabled = !canDraft || locked || !promptInput.value.trim();
+    send.hidden = Boolean(activeSend);
+    stop.hidden = !activeSend;
+    stop.disabled = activeSend?.stopping ?? false;
+    if (pending) {
+      for (const button of pending.controls.querySelectorAll('button')) {
         button.disabled = Boolean(busy) || changingKey;
+      }
+    }
     keyInput.disabled = checking || changingKey || Boolean(busy) || !connection?.secureStorage;
     saveKey.disabled = keyInput.disabled || !keyInput.value.trim();
     saveKey.textContent = connected ? 'Replace API key' : 'Save API key';
@@ -183,104 +330,219 @@ export function createAssistant(
           : !connection.secureStorage
             ? 'Secure credential storage is unavailable.'
             : connected
-              ? 'API key configured.'
-              : 'No API key saved.';
+              ? 'API key configured'
+              : 'No API key saved';
   }
+
+  function resizeDraft() {
+    promptInput.style.height = '';
+    promptInput.style.height = `${promptInput.scrollHeight}px`;
+  }
+
+  function syncScroll() {
+    const distance = conversation.scrollHeight - conversation.clientHeight - conversation.scrollTop;
+    following = distance < 32;
+    jump.hidden = following || !turns.childElementCount;
+  }
+
+  function updateScroll() {
+    if (container.hidden) return;
+    if (following) conversation.scrollTop = conversation.scrollHeight;
+    syncScroll();
+  }
+
+  const viewportObserver = new ResizeObserver(updateScroll);
+  viewportObserver.observe(conversation);
 
   function scrollToLatest() {
-    conversation.scrollTop = conversation.scrollHeight;
+    following = true;
+    updateScroll();
   }
 
-  function addTurn(author, text, idea) {
+  function focusDraft() {
+    if (!listeners.signal.aborted && !container.hidden && !settings.open)
+      (promptInput.disabled ? action('settings') : promptInput).focus();
+  }
+
+  /** @param {string} prompt @param {FileContext | undefined} file @param {IdeaAttachment | null} idea */
+  function addTurn(prompt, file, idea) {
     const turn = node('article', 'claude-turn');
-    turn.dataset.author = author;
-    const label = node('h3', 'claude-author', author);
-    const body = node('div', 'claude-turn-content');
-    if (author === 'Claude') {
-      body.innerHTML = DOMPurify.sanitize(marked.parse(text, { gfm: true }), {
-        ALLOWED_TAGS: [
-          'p',
-          'br',
-          'strong',
-          'em',
-          's',
-          'code',
-          'pre',
-          'ul',
-          'ol',
-          'li',
-          'blockquote',
-          'h1',
-          'h2',
-          'h3',
-          'h4',
-          'h5',
-          'h6',
-          'hr',
-          'table',
-          'thead',
-          'tbody',
-          'tr',
-          'th',
-          'td',
-        ],
-        ALLOWED_ATTR: [],
-        ALLOW_ARIA_ATTR: false,
-        ALLOW_DATA_ATTR: false,
-      });
-    } else body.textContent = text;
-    turn.append(label, body);
-    if (idea) turn.append(node('p', 'claude-context claude-turn-idea', `Idea · ${idea.title}`));
-    turns.append(turn);
-    return turn;
-  }
-
-  function showProposal(proposal) {
-    const card = node('section', 'claude-proposal');
-    card.append(node('h3', 'claude-proposal-title', 'Proposed edit'));
-    const filename = node('p', 'claude-proposal-path', proposal.path);
-    filename.title = proposal.path;
-    card.append(filename);
-    for (const [label, text] of [
-      ['Before', proposal.before],
-      ['After', proposal.after],
-    ]) {
-      const snippet = node('div', 'claude-snippet');
-      snippet.dataset.change = label.toLowerCase();
-      snippet.append(node('h4', '', label), node('pre', '', text || 'Empty'));
-      card.append(snippet);
+    turn.dataset.author = 'You';
+    turn.setAttribute('aria-label', 'You');
+    if (file || idea) {
+      const context = node('div', 'claude-turn-context');
+      if (file) {
+        const label = node('span', 'claude-turn-tag');
+        label.innerHTML = icon('file');
+        label.append(fileLabel(file));
+        label.title = file.path;
+        context.append(label);
+      }
+      if (idea) {
+        const label = node('span', 'claude-turn-tag');
+        label.innerHTML = icon('idea');
+        label.append(idea.title);
+        label.title = idea.title;
+        context.append(label);
+      }
+      turn.append(context);
     }
-    const controls = node('div', 'claude-proposal-controls');
-    const apply = node('button', 'claude-button claude-primary', 'Apply edit');
-    const discard = node('button', 'claude-button', 'Discard edit');
-    apply.type = discard.type = 'button';
-    apply.addEventListener('click', () => void resolveProposal(true));
-    discard.addEventListener('click', () => void resolveProposal(false));
-    controls.append(apply, discard);
-    card.append(controls);
-    turns.append(card);
-    pending = { proposal, controls };
+    turn.append(node('div', 'claude-turn-content', prompt));
+    turns.append(turn);
+
+    const reply = node('article', 'claude-turn');
+    reply.dataset.author = 'Claude';
+    const title = node('h3', 'claude-author');
+    title.innerHTML = `<span class="claude-brand">${icon('mark')}</span>Claude`;
+    const sections = node('div', 'claude-reply-sections');
+    const working = node('div', 'claude-working', 'Thinking…');
+    working.setAttribute('data-loading-status', '');
+    reply.append(title, sections, working);
+    turns.append(reply);
+    return { turn, reply, sections, working };
   }
 
+  /** @param {ReplyText} paragraph @param {boolean} streaming */
+  function drawReply(paragraph, streaming) {
+    if (paragraph.frame) window.clearTimeout(paragraph.frame);
+    paragraph.frame = 0;
+    paragraph.complete = !streaming;
+    renderAssistantMarkdown(paragraph.body, paragraph.text, {
+      colorize,
+      openExternal,
+      openFile,
+      streaming,
+      onError: showLinkFailure,
+      onLayout: updateScroll,
+    });
+    updateScroll();
+  }
+
+  /** @param {SendState} state @param {number} step @param {string} text @param {boolean} streaming */
+  function addReplyText(state, step, text, streaming) {
+    let paragraph = state.paragraphs.get(step);
+    if (!paragraph) {
+      const body = node('div', 'claude-turn-content');
+      paragraph = { body, text: '', frame: 0, complete: false };
+      state.paragraphs.set(step, paragraph);
+      state.sections.append(body);
+    }
+    state.toolGroup = undefined;
+    paragraph.text = streaming ? paragraph.text + text : text;
+    if (!streaming || !paragraph.body.childElementCount) drawReply(paragraph, streaming);
+    else if (!paragraph.frame) {
+      const current = paragraph;
+      current.frame = window.setTimeout(() => drawReply(current, true), 64);
+    }
+  }
+
+  /** @param {Error} error */
+  function showLinkFailure(error) {
+    showFailure(notice, error);
+  }
+
+  const unsubscribeActivity = claude.onActivity(event => {
+    const state = activeSend;
+    if (!state || event.requestId !== state.id || state.stopping) return;
+    if (event.type === 'text') {
+      state.working.hidden = true;
+      addReplyText(state, event.step, event.text, true);
+    } else {
+      const paragraph = state.paragraphs.get(event.step);
+      if (paragraph && !paragraph.complete) drawReply(paragraph, false);
+      let group = state.tools.get(event.id);
+      if (!group) {
+        if (!state.toolGroup) {
+          state.toolGroup = createToolActivity({ openFile, onError: showLinkFailure });
+          state.sections.append(state.toolGroup.element);
+        }
+        group = state.toolGroup;
+        state.tools.set(event.id, group);
+      }
+      group.update(event);
+      state.working.hidden = [...state.tools.values()].some(
+        activity => activity.element.dataset.status === 'running',
+      );
+      state.working.textContent = 'Thinking…';
+      updateScroll();
+    }
+  });
+
+  /** @param {Proposal} proposal @param {HTMLElement} sections */
+  function showProposal(proposal, sections) {
+    const { card, controls } = createEditProposal(proposal, {
+      onApply: () => runTask('Apply Claude proposal', () => resolveProposal(true)),
+      onDiscard: () => runTask('Discard Claude proposal', () => resolveProposal(false)),
+      onOpenFile: openFile,
+      onError: showLinkFailure,
+      openExternal,
+      colorize,
+    });
+    sections.append(card);
+    card.tabIndex = -1;
+    pending = { proposal, card, controls };
+  }
+
+  /** @param {boolean} apply */
   async function resolveProposal(apply) {
     if (!pending || busy || changingKey) return;
-    const { proposal, controls } = pending;
+    const { proposal, card, controls } = pending;
     const generation = connectionGeneration;
     busy = apply ? 'apply' : 'discard';
-    showNotice(notice, '');
+    showNotice(notice);
     render();
     try {
-      if (apply) await applyEdit(proposal);
-      else await claude.discard(proposal.id);
+      const result = await attemptAsync(
+        () => (apply ? applyEdit(proposal) : claude.discard(proposal.id)),
+        {
+          operation: apply ? 'Apply Claude proposal' : 'Discard Claude proposal',
+        },
+      );
       if (generation !== connectionGeneration) return;
-      controls.replaceChildren(node('span', 'claude-resolution', apply ? 'Applied' : 'Discarded'));
+      if (!result.ok) {
+        showFailure(notice, result.error);
+        return;
+      }
+      const label = !apply
+        ? 'Discarded'
+        : proposal.kind !== 'idea'
+          ? 'Applied'
+          : proposal.action === 'create'
+            ? 'Idea created'
+            : 'Idea updated';
+      const resolution = node('span', 'claude-resolution');
+      if (apply) resolution.innerHTML = icon('check');
+      resolution.append(label);
+      controls.replaceChildren(resolution);
+      if (apply && proposal.kind === 'idea' && openIdea) {
+        const open = node('button', 'claude-button', 'Open idea');
+        open.type = 'button';
+        open.addEventListener(
+          'click',
+          () => {
+            runTask('Open idea', async () => {
+              const opened = await attemptAsync(() => openIdea(proposal.ideaId), {
+                operation: 'Open idea',
+              });
+              if (!opened.ok && !listeners.signal.aborted) showFailure(notice, opened.error);
+            });
+          },
+          listenerOptions,
+        );
+        controls.append(open);
+      }
+      card.dataset.resolution = apply ? 'applied' : 'discarded';
+      announcement.textContent = label;
       pending = null;
-    } catch (error) {
-      if (generation === connectionGeneration) showNotice(notice, message(error), true);
     } finally {
       busy = '';
       render();
-      if (!pending && !container.hidden && !settings.open) promptInput.focus();
+      updateScroll();
+      if (
+        !pending &&
+        (document.activeElement === document.body || controls.contains(document.activeElement))
+      )
+        focusDraft();
     }
   }
 
@@ -290,23 +552,18 @@ export function createAssistant(
     const generation = connectionGeneration;
     render();
     try {
-      const status = await claude.status();
-      if (generation === connectionGeneration) connection = status;
-    } catch (error) {
-      if (generation === connectionGeneration)
-        showNotice(settings.open ? settingsNotice : notice, message(error), true);
+      const result = await attemptAsync(() => claude.status(), {
+        operation: 'Check Claude connection',
+      });
+      if (generation !== connectionGeneration) return;
+      if (result.ok) connection = result.value;
+      else showFailure(settings.open ? settingsNotice : notice, result.error);
     } finally {
       checking = false;
       render();
       if (settings.open && document.activeElement === closeSettings && !keyInput.disabled)
         keyInput.focus();
-      else if (
-        !settings.open &&
-        !container.hidden &&
-        document.activeElement === action('settings') &&
-        !promptInput.disabled
-      )
-        promptInput.focus();
+      else if (document.activeElement === action('settings') && !promptInput.disabled) focusDraft();
     }
   }
 
@@ -314,25 +571,38 @@ export function createAssistant(
     container.hidden = !open;
     toggle.setAttribute('aria-expanded', String(open));
     if (open) {
-      onOpen?.();
-      scrollToLatest();
-      (promptInput.disabled ? action('settings') : promptInput).focus();
-      void checkConnection();
+      runTask('Open Claude panel', () => onOpen?.());
+      render();
+      resizeDraft();
+      updateScroll();
+      focusDraft();
+      runTask('Check Claude connection', checkConnection);
     } else if (restoreFocus) toggle.focus();
   }
 
-  function openSettings() {
-    showNotice(settingsNotice, '');
+  /** @param {Event} event */
+  function openSettings(event) {
+    settingsOpener = event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
+    showNotice(settingsNotice);
     settings.showModal();
-    void checkConnection();
+    if (!keyInput.disabled) keyInput.focus();
+    runTask('Check Claude connection', checkConnection);
   }
 
   function clearConversation(keepIdea = false) {
+    if (activeSend) {
+      for (const paragraph of activeSend.paragraphs.values()) window.clearTimeout(paragraph.frame);
+      activeSend = null;
+    }
     pending = null;
     promptInput.value = '';
+    includeFile = true;
     if (!keepIdea) attachedIdea = null;
     turns.replaceChildren();
-    showNotice(notice, '');
+    announcement.textContent = '';
+    showNotice(notice);
+    scrollToLatest();
+    resizeDraft();
   }
 
   const unsubscribeReset = claude.onReset(status => {
@@ -342,156 +612,338 @@ export function createAssistant(
     render();
   });
 
+  /** @param {boolean} save */
   async function updateKey(save) {
     if (checking || busy || changingKey || (save ? saveKey.disabled : removeKey.disabled)) return;
     const key = keyInput.value.trim();
     keyInput.value = '';
     changingKey = true;
-    showNotice(settingsNotice, '');
+    showNotice(settingsNotice);
     render();
     try {
-      await (save ? claude.saveKey(key) : claude.removeKey());
-      showNotice(settingsNotice, save ? 'API key saved.' : 'API key removed.');
-    } catch (error) {
-      showNotice(settingsNotice, message(error), true);
+      const result = await attemptAsync(() => (save ? claude.saveKey(key) : claude.removeKey()), {
+        operation: save ? 'Save Claude API key' : 'Remove Claude API key',
+      });
+      if (listeners.signal.aborted) return;
+      if (result.ok) {
+        connection = result.value;
+        settingsNotice.classList.remove('is-error');
+        showNotice(settingsNotice, save ? 'API key saved.' : 'API key removed.');
+      } else {
+        settingsNotice.classList.add('is-error');
+        showFailure(settingsNotice, result.error);
+      }
     } finally {
       changingKey = false;
       render();
     }
   }
 
-  async function sendMessage(event) {
-    event.preventDefault();
+  async function sendMessage() {
     if (send.disabled || busy) return;
     const prompt = promptInput.value.trim();
     const idea = attachedIdea;
+    const file = includeFile ? (getFileContext() ?? undefined) : undefined;
+    const id = crypto.randomUUID();
     const request = {
+      requestId: id,
       prompt,
-      path: path ?? undefined,
+      fileContext: file,
       proposeEdits: mode === 'edit',
-      ideaContext: idea?.context,
+      ideaId: idea?.id,
     };
     const generation = connectionGeneration;
+    const parts = addTurn(prompt, file, idea);
+    /** @type {SendState} */
+    const state = {
+      ...parts,
+      id,
+      paragraphs: new Map(),
+      tools: new Map(),
+      started: false,
+      stopping: false,
+    };
+    activeSend = state;
     busy = 'send';
-    canceled = false;
-    showNotice(notice, '');
-    const turn = addTurn('You', prompt, idea);
+    showNotice(notice);
+    announcement.textContent = 'Claude is responding.';
     promptInput.value = '';
     render();
+    resizeDraft();
     scrollToLatest();
     try {
-      await prepareSend(request.path);
+      const result = await attemptAsync(
+        async () => {
+          await prepareSend(request);
+          if (generation !== connectionGeneration || state.stopping) return undefined;
+          state.started = true;
+          return claude.send(request);
+        },
+        { operation: 'Send message to Claude' },
+      );
       if (generation !== connectionGeneration) return;
-      if (canceled) {
-        turn.remove();
+      state.working.hidden = true;
+      for (const group of new Set(state.tools.values())) group.finish();
+      if (result.ok && result.value) {
+        const response = result.value;
+        const step = response.step;
+        if (response.text && state.paragraphs.get(step)?.text !== response.text) {
+          addReplyText(state, step, response.text, false);
+        }
+        if (response.proposal) showProposal(response.proposal, state.sections);
+        attachedIdea = null;
+        announcement.textContent = response.proposal
+          ? 'Claude’s proposal is ready to review.'
+          : 'Claude replied.';
+      } else {
+        const status = state.stopping ? 'Response stopped.' : 'Response interrupted.';
+        announcement.textContent = status;
         promptInput.value = prompt;
-        return;
+        if (!result.ok && !state.stopping) showFailure(notice, result.error);
+        if (!state.sections.childElementCount) {
+          state.turn.remove();
+          state.reply.remove();
+        } else state.sections.append(node('p', 'claude-interrupted', status));
       }
-      const response = await claude.send(request);
-      if (generation !== connectionGeneration) return;
-      attachedIdea = null;
-      if (response.text) addTurn('Claude', response.text);
-      if (response.proposal) showProposal(response.proposal);
-    } catch (error) {
-      if (generation !== connectionGeneration) return;
-      turn.remove();
-      promptInput.value = prompt;
-      if (!canceled) showNotice(notice, message(error), true);
+      for (const paragraph of state.paragraphs.values()) {
+        if (!paragraph.complete) drawReply(paragraph, false);
+      }
     } finally {
       const focused =
         composer.contains(document.activeElement) || document.activeElement === document.body;
+      if (activeSend === state) activeSend = null;
       busy = '';
-      canceled = false;
       render();
-      scrollToLatest();
-      if (focused && !container.hidden && !settings.open)
-        (pending?.controls.querySelector('button') ?? promptInput).focus();
+      resizeDraft();
+      updateScroll();
+      if (!listeners.signal.aborted && focused && !container.hidden && !settings.open) {
+        if (pending && following) pending.card.focus({ preventScroll: true });
+        else if (!pending) focusDraft();
+      }
     }
   }
 
-  toggle.addEventListener('click', () => togglePanel());
-  action('close').addEventListener('click', () => togglePanel(false));
-  action('remove-idea').addEventListener('click', () => {
-    attachedIdea = null;
-    render();
-    (promptInput.disabled ? action('settings') : promptInput).focus();
-  });
-  for (const name of ['settings', 'connect']) action(name).addEventListener('click', openSettings);
-  action('reset').addEventListener('click', async () => {
+  async function resetConversation() {
     busy = 'reset';
     render();
     try {
-      await claude.reset();
-      clearConversation();
-    } catch (error) {
-      showNotice(notice, message(error), true);
+      const result = await attemptAsync(() => claude.reset(), {
+        operation: 'Reset Claude conversation',
+      });
+      if (listeners.signal.aborted) return;
+      if (result.ok) clearConversation();
+      else showFailure(notice, result.error);
     } finally {
       busy = '';
       render();
-      if (!container.hidden && !settings.open) promptInput.focus();
+      focusDraft();
     }
-  });
-  stop.addEventListener('click', () => {
-    canceled = true;
+  }
+
+  async function stopResponse() {
+    const state = activeSend;
+    if (!state) return;
+    state.stopping = true;
+    state.working.hidden = false;
+    state.working.textContent = 'Stopping…';
     render();
-    void claude.cancel().catch(error => showNotice(notice, message(error), true));
-  });
-  container.addEventListener('keydown', event => {
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      togglePanel(false);
-    }
-  });
-  for (const button of modes)
-    button.addEventListener('click', () => {
-      mode = button.dataset.mode;
+    updateScroll();
+    if (!state.started) return;
+    const result = await attemptAsync(() => claude.cancel(), { operation: 'Stop Claude response' });
+    if (!result.ok && activeSend === state) {
+      state.stopping = false;
+      state.working.textContent = 'Thinking…';
+      showFailure(notice, result.error);
       render();
-      promptInput.focus();
-    });
-  composer.addEventListener('submit', sendMessage);
-  promptInput.addEventListener('input', render);
-  promptInput.addEventListener('keydown', event => {
-    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
-      event.preventDefault();
-      composer.requestSubmit();
     }
-  });
-  settings.querySelector('form').addEventListener('submit', event => {
-    event.preventDefault();
-    void updateKey(true);
-  });
-  keyInput.addEventListener('input', render);
-  removeKey.addEventListener('click', () => void updateKey(false));
-  for (const button of [closeSettings, settings.querySelector('.claude-done')])
-    button.addEventListener('click', () => settings.close());
-  settings.querySelector('a').addEventListener('click', event => {
-    event.preventDefault();
-    void openExternal(keyUrl).catch(error => showNotice(settingsNotice, message(error), true));
-  });
-  settings.addEventListener('close', () => {
-    keyInput.value = '';
-    render();
-  });
+  }
+
+  toggle.addEventListener('click', () => togglePanel(), listenerOptions);
+  action('close').addEventListener('click', () => togglePanel(false), listenerOptions);
+  conversation.addEventListener('scroll', syncScroll, { ...listenerOptions, passive: true });
+  conversation.addEventListener('toggle', updateScroll, { ...listenerOptions, capture: true });
+  jump.addEventListener(
+    'click',
+    () => {
+      scrollToLatest();
+      conversation.focus({ preventScroll: true });
+    },
+    listenerOptions,
+  );
+  fileChip.addEventListener(
+    'click',
+    () => {
+      includeFile = !includeFile;
+      render();
+      focusDraft();
+    },
+    listenerOptions,
+  );
+  action('remove-idea').addEventListener(
+    'click',
+    () => {
+      attachedIdea = null;
+      render();
+      focusDraft();
+    },
+    listenerOptions,
+  );
+  starters.addEventListener(
+    'click',
+    event => {
+      if (!(event.target instanceof Element)) return;
+      const button = event.target.closest('button');
+      if (!button?.dataset.prompt) return;
+      promptInput.value = button.dataset.prompt;
+      render();
+      resizeDraft();
+      focusDraft();
+    },
+    listenerOptions,
+  );
+  for (const name of ['settings', 'connect'])
+    action(name).addEventListener('click', openSettings, listenerOptions);
+  action('reset').addEventListener(
+    'click',
+    () => runTask('Reset Claude conversation', resetConversation),
+    listenerOptions,
+  );
+  stop.addEventListener(
+    'click',
+    () => runTask('Stop Claude response', stopResponse),
+    listenerOptions,
+  );
+  container.addEventListener(
+    'keydown',
+    event => {
+      if (event.key === 'Escape' && !event.defaultPrevented && !event.isComposing) {
+        event.preventDefault();
+        togglePanel(false);
+      }
+    },
+    listenerOptions,
+  );
+  for (const button of modes) {
+    button.addEventListener(
+      'click',
+      () => {
+        mode = button.dataset.mode === 'edit' ? 'edit' : 'ask';
+        render();
+        focusDraft();
+      },
+      listenerOptions,
+    );
+  }
+  composer.addEventListener(
+    'submit',
+    event => {
+      event.preventDefault();
+      runTask('Send message to Claude', sendMessage);
+    },
+    listenerOptions,
+  );
+  promptInput.addEventListener(
+    'input',
+    () => {
+      render();
+      resizeDraft();
+      updateScroll();
+    },
+    listenerOptions,
+  );
+  promptInput.addEventListener(
+    'keydown',
+    event => {
+      if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+        event.preventDefault();
+        if (!send.disabled) composer.requestSubmit();
+      }
+    },
+    listenerOptions,
+  );
+  settingsForm.addEventListener(
+    'submit',
+    event => {
+      event.preventDefault();
+      runTask('Save Claude API key', () => updateKey(true));
+    },
+    listenerOptions,
+  );
+  keyInput.addEventListener('input', render, listenerOptions);
+  removeKey.addEventListener(
+    'click',
+    () => runTask('Remove Claude API key', () => updateKey(false)),
+    listenerOptions,
+  );
+  for (const button of [
+    closeSettings,
+    requireElement(settings, '.claude-done', HTMLButtonElement),
+  ]) {
+    button.addEventListener('click', () => settings.close(), listenerOptions);
+  }
+  requireElement(settings, 'a', HTMLAnchorElement).addEventListener(
+    'click',
+    event => {
+      event.preventDefault();
+      runTask('Open Claude API settings', async () => {
+        const result = await attemptAsync(() => openExternal?.(KEY_URL), {
+          operation: 'Open Claude API settings',
+        });
+        if (!result.ok && !listeners.signal.aborted) showFailure(settingsNotice, result.error);
+      });
+    },
+    listenerOptions,
+  );
+  settings.addEventListener(
+    'close',
+    () => {
+      keyInput.value = '';
+      render();
+      if (!container.hidden) {
+        if (settingsOpener && !settingsOpener.hidden) settingsOpener.focus();
+        else focusDraft();
+      }
+      settingsOpener = null;
+    },
+    listenerOptions,
+  );
+
   render();
   toggle.hidden = false;
   return {
+    /** @param {IdeaAttachment} idea */
     attachIdea(idea) {
-      if (busy || changingKey) throw new Error('Wait for Claude to finish, then add the idea.');
-      attachedIdea = {
-        title: idea.title.trim() || 'Untitled idea',
-        context: formatIdeaContext(idea),
-      };
-      showNotice(notice, '');
-      render();
+      if (busy || changingKey || pending)
+        throw new Error('Finish the current response or proposal before attaching an idea.');
+      attachedIdea = { id: idea.id, title: idea.title.trim() || 'Untitled idea' };
+      showNotice(notice);
       togglePanel(true);
     },
-    setContext(hasWorkspace, activePath) {
-      if (workspace === hasWorkspace && path === activePath) return;
+    /** @param {boolean} hasWorkspace @param {string | null} [id] */
+    setContext(hasWorkspace, id = null) {
+      if (workspaceId && id && workspaceId !== id) {
+        connectionGeneration++;
+        clearConversation();
+      }
       workspace = hasWorkspace;
-      path = activePath;
+      workspaceId = id;
       render();
     },
+    refreshContext: render,
     toggle: togglePanel,
-    dispose: unsubscribeReset,
+    dispose() {
+      listeners.abort();
+      viewportObserver.disconnect();
+      connectionGeneration++;
+      unsubscribeActivity();
+      unsubscribeReset();
+      if (activeSend) {
+        for (const paragraph of activeSend.paragraphs.values())
+          window.clearTimeout(paragraph.frame);
+      }
+      if (activeSend?.started) runTask('Stop Claude response', () => claude.cancel());
+      activeSend = null;
+      settings.remove();
+    },
   };
 }

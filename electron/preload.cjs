@@ -1,10 +1,51 @@
 const electron_1 = require('electron');
+function isClaudeActivity(value) {
+  if (typeof value !== 'object' || value === null) return false;
+  const activity = value;
+  const {
+    requestId,
+    step,
+    type,
+    text,
+    id,
+    name,
+    label,
+    status,
+    detail,
+    path,
+    side,
+    startLine,
+    endLine,
+  } = activity;
+  if (
+    typeof requestId !== 'string' ||
+    typeof step !== 'number' ||
+    !Number.isSafeInteger(step) ||
+    step < 0
+  )
+    return false;
+  if (type === 'text') return typeof text === 'string';
+  return (
+    type === 'tool' &&
+    typeof id === 'string' &&
+    typeof name === 'string' &&
+    typeof label === 'string' &&
+    (status === 'running' || status === 'done' || status === 'error') &&
+    (detail === undefined || typeof detail === 'string') &&
+    (path === undefined || typeof path === 'string') &&
+    (side === undefined || side === 'working' || side === 'head') &&
+    (startLine === undefined ||
+      (typeof startLine === 'number' && Number.isSafeInteger(startLine) && startLine > 0)) &&
+    (endLine === undefined ||
+      (typeof endLine === 'number' && Number.isSafeInteger(endLine) && endLine > 0))
+  );
+}
 const listen = (channel, callback) => {
   const listener = (_event, value) => callback(value);
   electron_1.ipcRenderer.on(channel, listener);
   return () => electron_1.ipcRenderer.removeListener(channel, listener);
 };
-electron_1.contextBridge.exposeInMainWorld('diffpane', {
+const api = {
   preferences: {
     get: legacy => electron_1.ipcRenderer.invoke('preferences-get', legacy),
     set: (key, value) => electron_1.ipcRenderer.invoke('preferences-set', key, value),
@@ -26,6 +67,10 @@ electron_1.contextBridge.exposeInMainWorld('diffpane', {
     discard: id => electron_1.ipcRenderer.invoke('claude-discard', id),
     reset: () => electron_1.ipcRenderer.invoke('claude-reset'),
     cancel: () => electron_1.ipcRenderer.invoke('claude-cancel'),
+    onActivity: callback =>
+      listen('claude-activity', activity => {
+        if (isClaudeActivity(activity)) callback(activity);
+      }),
     onReset: callback => listen('claude-reset', callback),
   },
   ideas: {
@@ -75,4 +120,5 @@ electron_1.contextBridge.exposeInMainWorld('diffpane', {
   onChange: callback => listen('change', callback),
   onPaths: callback => listen('paths', callback),
   onError: callback => listen('backend-error', callback),
-});
+};
+electron_1.contextBridge.exposeInMainWorld('diffpane', api);

@@ -1,0 +1,57 @@
+[data-loading-status]::before,
+.placeholder-line {
+  background: linear-gradient(
+      90deg,
+      transparent 42%,
+      var(--loading-highlight, currentColor) 50%,
+      transparent 58%
+    )
+    100% 50% / 240% 100% no-repeat
+    var(--loading-track, color-mix(in srgb, currentColor 28%, transparent));
+}
+
+[data-loading-status]::before {
+  display: inline-block;
+  flex: none;
+  width: var(--loading-width, 16px);
+  height: var(--loading-height, 3px);
+  margin-inline-end: var(--loading-gap, 0.55em);
+  vertical-align: 0.18em;
+  color: var(--loading-accent, var(--accent));
+  mask: repeating-linear-gradient(90deg, #000 0 calc(100% / 3 - 1px), transparent 0 calc(100% / 3));
+  content: '' / '';
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  [data-loading-status]::before {
+    animation:
+      loading-reveal 160ms ease-out 120ms both,
+      loading-scan 1.55s cubic-bezier(0.45, 0, 0.25, 1) 120ms infinite;
+  }
+
+  .is-loading .placeholder-line {
+    animation: loading-scan 1.55s cubic-bezier(0.45, 0, 0.25, 1) var(--scan-delay, 120ms) infinite;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-loading-status]::before {
+    background-position: 50% 50%;
+  }
+}
+
+@keyframes loading-reveal {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes loading-scan {
+  76%,
+  100% {
+    background-position: 0% 50%;
+  }
+}

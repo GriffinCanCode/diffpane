@@ -383,23 +383,43 @@ const claudeHandlers = {
   },
   send: (session, input) => {
     if (!session.directory) throw new Error('Open a file or folder to ask about your project.');
-    return session.claude.send(input, () => claudeCredentials.key(), {
-      list: query =>
-        session.call('claude-list', [query]).catch(() => {
-          throw new Error('The project file list is unavailable.');
-        }),
-      read: filename =>
-        session.call('claude-read', [filename]).catch(() => {
-          throw new Error('This project text file could not be read.');
-        }),
-    });
+    return session.claude.send(
+      input,
+      () => claudeCredentials.key(),
+      {
+        list: query =>
+          session.call('claude-list', [query]).catch(() => {
+            throw new Error('The project file list is unavailable.');
+          }),
+        read: async (filename, side) => {
+          const text = await session.call('claude-read', [filename, side]).catch(() => {
+            throw new Error('This project text file could not be read.');
+          });
+          if (typeof text !== 'string')
+            throw new Error('This project text file could not be read.');
+          return text;
+        },
+        listIdeas: async query => ideaStore.summaries(await session.root(), query),
+        readIdea: async id => ideaStore.get(await session.root(), id),
+      },
+      activity => {
+        if (!session.contents.isDestroyed()) session.contents.send('claude-activity', activity);
+      },
+    );
   },
   apply: (session, id) =>
-    session.claude.apply(id, (filename, text, expected) =>
-      changeFiles(session, [filename], () =>
-        session.call('claude-save', [filename, text, expected]),
-      ),
-    ),
+    session.claude.apply(id, {
+      saveFile: (filename, text, expected) =>
+        changeFiles(session, [filename], () =>
+          session.call('claude-save', [filename, text, expected]),
+        ),
+      saveIdea: async (idea, expected) => {
+        const root = await session.root();
+        const saved = await drainStorageOnQuit(ideaStore.applyDraft(root, idea, expected));
+        broadcastIdeaChange(root, null, { type: 'upsert', idea: saved });
+        return saved;
+      },
+    }),
   discard: (session, id) => session.claude.discard(id),
   reset: session => session.claude.reset(),
   cancel: session => session.claude.cancel(),

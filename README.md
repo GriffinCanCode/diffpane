@@ -60,9 +60,11 @@ It includes search, a file picker, language tools, line counts, and previews for
 
 Open **Claude** and select **Claude settings**. Paste a workspace-scoped Claude API key and save it. Diffpane verifies the key before saving it and uses macOS Keychain-backed encryption for the local copy. You can remove the key from the same settings. [Create a Claude API key](https://platform.claude.com/settings/keys)
 
-Use **Ask** to ask about the open project. Claude uses the current editor path as a starting point and can look up other project files. In **Edit** mode, Claude can propose a small replacement in an existing file. Review the proposed text and select **Apply edit** or **Discard**. If the file has changed on disk since the proposal, request a fresh edit.
+Use **Ask** to talk through code or find and read ideas. The composer shows the open file and the selected or visible lines Claude can read. Click the file chip to remove that context from your message. Replies stream as Claude works. Expand an activity row to see what it inspected, or follow a file reference to jump to the relevant lines.
 
-Diffpane calls Claude Haiku directly. Prompts and any project paths or file excerpts Claude requests go to Anthropic and use your API workspace. Chat history lasts for the window session.
+In **Edit** mode, Claude can propose a small file edit, create an idea, or revise an existing idea. Preview the change in chat and choose whether to apply or discard it. If the source changed after Claude read it, request a fresh proposal.
+
+Diffpane calls Claude Haiku directly. Your prompts, context references, and the file or idea excerpts Claude requests go to Anthropic and use your API workspace. Chat history lasts for the window session.
 
 ## Build from source
 

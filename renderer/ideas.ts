@@ -1077,6 +1077,13 @@ export function mountIdeaBuilder(host: HTMLElement, options: IdeaBuilderOptions)
   renderList();
   return {
     load,
+    async open(id: string) {
+      await load();
+      if (!ideas.has(id)) return false;
+      selectIdea(id);
+      title.focus();
+      return true;
+    },
     reset,
     dispose() {
       if (lifetime.signal.aborted) return;

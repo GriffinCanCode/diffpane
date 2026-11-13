@@ -11,6 +11,7 @@ import type { Idea, IdeaLink } from '../ideas.ts';
 import type { LocalState, StateRecords } from './local-state.ts';
 
 const COLLECTION = 'ideas';
+const SUMMARY_LIMIT = 25;
 
 function ideaId(value: unknown) {
   if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/u.test(value))
@@ -123,6 +124,10 @@ function compareIdeas(left: Idea, right: Idea) {
   return left.id < right.id ? -1 : 1;
 }
 
+function foldSearchText(value: string) {
+  return value.replace(/[A-Z]/gu, character => character.toLowerCase());
+}
+
 export class IdeaStore {
   private readonly state: LocalState;
   private readonly legacyFilename: string;
@@ -148,6 +153,49 @@ export class IdeaStore {
     return this.state.read(records =>
       records.list(COLLECTION, workspace).map(readIdea).toSorted(compareIdeas),
     );
+  }
+
+  async summaries(workspace: string, query: string) {
+    const term = foldSearchText(query);
+    const matches = (await this.list(workspace)).filter(
+      ({ title, body }) =>
+        !term || foldSearchText(title).includes(term) || foldSearchText(body).includes(term),
+    );
+    return {
+      ideas: matches.slice(0, SUMMARY_LIMIT).map(({ id, title }) => ({ id, title })),
+      truncated: matches.length > SUMMARY_LIMIT,
+    };
+  }
+
+  async get(workspace: string, id: unknown) {
+    const key = ideaId(id);
+    await this.initialize();
+    return this.state.read(records => storedIdea(records, workspace, key));
+  }
+
+  async applyDraft(workspace: string, value: Idea, expected?: Idea) {
+    const idea = readIdea(value);
+    await this.initialize();
+    return this.state.write(records => {
+      const previous = storedIdea(records, workspace, idea.id);
+      const matches =
+        expected &&
+        previous &&
+        previous.createdAt === expected.createdAt &&
+        previous.updatedAt === expected.updatedAt &&
+        previous.title === expected.title &&
+        previous.body === expected.body;
+      if (expected ? !matches : previous !== undefined) {
+        throw new Error(
+          'This idea changed after Claude read it. Discard the proposal and request a new one.',
+        );
+      }
+      const saved = previous
+        ? readIdea({ ...previous, title: idea.title, body: idea.body, updatedAt: idea.updatedAt })
+        : idea;
+      records.put(COLLECTION, workspace, saved.id, saved);
+      return saved;
+    });
   }
 
   async upsert(workspace: string, value: unknown) {
