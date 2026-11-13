@@ -121,15 +121,13 @@
   border-radius: 5px;
   background: var(--surface-raised);
   color: var(--text);
-  box-shadow: 0 3px 12px #0003;
-  font-size: 12px;
-  font-weight: 600;
+  box-shadow: 0 3px 12px var(--shadow);
+  font-size: var(--text-label);
+  font-weight: var(--weight-semibold);
   white-space: nowrap;
 }
 
 .workspace-splitter {
-  --splitter-accent: light-dark(#386c8a, #9abfe1);
-  --splitter-border: light-dark(#c7cfd6, #373b40);
   --splitter-x: var(--splitter-pull, 0px);
   --splitter-y: 0px;
   display: grid;
@@ -182,7 +180,7 @@
   position: absolute;
   width: 1px;
   height: 100%;
-  background: var(--splitter-border);
+  background: var(--control-border);
   transform: translate(var(--splitter-x), var(--splitter-y));
   transition:
     background-color 130ms ease-out,
@@ -196,7 +194,7 @@
   width: 3px;
   height: 25px;
   border-radius: 4px;
-  background: color-mix(in oklab, var(--splitter-border), var(--splitter-accent) 33%);
+  background: color-mix(in oklab, var(--control-border), var(--focus-ring) 33%);
   opacity: 0;
   transform: translate(var(--splitter-x), var(--splitter-y));
   transition:
@@ -219,13 +217,13 @@
 }
 
 .workspace-splitter:is(:hover, :focus-visible, .is-dragging)::after {
-  background: color-mix(in oklab, var(--splitter-border), var(--splitter-accent) 55%);
+  background: color-mix(in oklab, var(--control-border), var(--focus-ring) 55%);
 }
 
 .workspace-splitter:is(:hover, :focus-visible, .is-dragging) span {
   width: 5px;
   height: 44px;
-  background: var(--splitter-accent);
+  background: var(--focus-ring);
   opacity: 1;
 }
 

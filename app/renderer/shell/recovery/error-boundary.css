@@ -1,21 +1,10 @@
 @import './window-mascot.css';
 
 .error-boundary {
-  --error-ink: var(--text, light-dark(#252b33, #e3e5e7));
-  --error-muted: var(--muted, light-dark(#53616d, #a0a4aa));
-  --error-surface: var(--surface, light-dark(#f4f6f7, #202226));
-  --error-line: var(--line, light-dark(#202e401f, #ffffff16));
-  --error-focus: var(--focus-ring, light-dark(#346e97, #9acbfa));
-  --error-accent: light-dark(#8a521c, #ebbb89);
-  --error-tint: light-dark(#f9f1e6, #2a241f);
   box-sizing: border-box;
   min-width: 0;
-  color: var(--error-ink);
-  font:
-    13px/1.5 -apple-system,
-    BlinkMacSystemFont,
-    'Segoe UI',
-    sans-serif;
+  color: var(--text);
+  font: var(--text-body)/var(--leading-ui) var(--font-ui);
 }
 
 .error-boundary *,
@@ -35,12 +24,7 @@
   padding: 48px 20px 24px;
   overflow: auto;
   border: 0;
-  background: var(--canvas, light-dark(#f8f9fa, #151719));
-  color-scheme: dark;
-}
-
-:root[data-theme='light'] .error-boundary--app {
-  color-scheme: light;
+  background: var(--canvas);
 }
 
 .error-boundary--app[open],
@@ -66,9 +50,9 @@
 .error-boundary__card {
   width: min(100%, 390px);
   padding: 25px 24px;
-  border: 1px solid var(--error-line);
+  border: 1px solid var(--line);
   border-radius: 12px;
-  background: var(--error-surface);
+  background: var(--surface);
   text-align: center;
   animation: error-boundary-appear 240ms ease-out both;
 }
@@ -76,7 +60,7 @@
 .error-boundary--app .error-boundary__card {
   width: min(100%, 440px);
   padding: clamp(24px, 5vw, 38px);
-  box-shadow: 0 12px 36px #0002;
+  box-shadow: 0 12px 36px var(--shadow);
 }
 
 .error-boundary__illustration {
@@ -87,7 +71,7 @@
   width: 86px;
   height: 65px;
   margin: 0 auto 16px;
-  color: var(--error-accent);
+  color: var(--warning);
   isolation: isolate;
 }
 
@@ -96,7 +80,7 @@
   inset: 2px 13px;
   z-index: -1;
   border-radius: 50%;
-  background: var(--error-tint);
+  background: var(--warning-surface);
   content: '';
 }
 
@@ -106,14 +90,13 @@
   z-index: -1;
   height: 6px;
   border-radius: 50%;
-  background: color-mix(in srgb, currentColor 16%, transparent);
+  background: color-mix(in oklab, currentColor 16%, transparent);
   content: '';
   animation: error-boundary-shadow 2.2s ease-in-out 2 both;
 }
 
 .error-boundary__sprite {
-  --mascot-surface: var(--error-surface);
-  --mascot-fill: light-dark(#fff8ef, #342920);
+  --mascot-surface: var(--surface);
   margin-block-end: 4px;
   transform: rotate(-7deg);
   animation: error-boundary-bob 2.2s ease-in-out 2 both;
@@ -125,15 +108,15 @@
 
 .error-boundary__title {
   margin: 0;
-  font-size: 19px;
-  font-weight: 600;
+  font-size: var(--text-heading);
+  font-weight: var(--weight-semibold);
   line-height: 1.2;
   letter-spacing: -0.025em;
   overflow-wrap: anywhere;
 }
 
 .error-boundary--app .error-boundary__title {
-  font-size: clamp(21px, 4vw, 28px);
+  font-size: clamp(var(--text-heading), 4vw, var(--text-display));
 }
 
 .error-boundary__title:focus {
@@ -143,7 +126,7 @@
 .error-boundary__message,
 .error-boundary__feedback {
   margin: 8px 0 0;
-  color: var(--error-muted);
+  color: var(--muted);
   overflow-wrap: anywhere;
 }
 
@@ -158,20 +141,20 @@
 .error-boundary__action {
   min-height: 30px;
   padding: 4px 10px;
-  border: 1px solid var(--error-line);
+  border: 1px solid var(--line);
   border-radius: 6px;
   background: transparent;
-  color: var(--error-ink);
+  color: var(--text);
   font: inherit;
-  font-size: 12px;
-  font-weight: 500;
+  font-size: var(--text-label);
+  font-weight: var(--weight-medium);
   cursor: pointer;
 }
 
 .error-boundary__action--primary {
-  border-color: color-mix(in srgb, var(--error-accent) 35%, transparent);
-  background: var(--error-tint);
-  color: var(--error-accent);
+  border-color: transparent;
+  background: var(--action);
+  color: var(--action-text);
 }
 
 .error-boundary__action[aria-disabled='true'] {
@@ -180,18 +163,22 @@
 }
 
 .error-boundary__action:hover:not([aria-disabled='true']) {
-  background: color-mix(in srgb, var(--error-accent) 13%, var(--error-surface));
+  background: var(--hover);
+}
+
+.error-boundary__action--primary:hover:not([aria-disabled='true']) {
+  background: var(--action-hover);
 }
 
 .error-boundary__action:focus-visible,
 .error-boundary__details-toggle:focus-visible {
-  outline: 2px solid var(--error-focus);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 
 .error-boundary__feedback {
-  color: var(--error-accent);
-  font-size: 12px;
+  color: var(--warning);
+  font-size: var(--text-label);
 }
 
 .error-boundary__feedback:empty {
@@ -200,8 +187,8 @@
 
 .error-boundary__details {
   margin-top: 12px;
-  color: var(--error-muted);
-  font-size: 11px;
+  color: var(--muted);
+  font-size: var(--text-caption);
 }
 
 .error-boundary__details-toggle {
@@ -219,19 +206,17 @@
 }
 
 .error-boundary__operation {
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 
 .error-boundary__detail {
   max-height: 130px;
   padding: 7px 9px;
   overflow: auto;
-  border: 1px solid var(--error-line);
+  border: 1px solid var(--line);
   border-radius: 5px;
-  background: var(--error-tint);
-  font:
-    11px/1.5 ui-monospace,
-    monospace;
+  background: var(--warning-surface);
+  font: var(--text-caption)/var(--leading-ui) var(--font-mono);
   white-space: pre-wrap;
 }
 
@@ -242,9 +227,9 @@
   width: 100%;
   gap: 10px;
   padding: 9px 12px;
-  border: 1px solid color-mix(in srgb, var(--error-accent) 23%, transparent);
+  border: 1px solid var(--warning-edge);
   border-radius: 7px;
-  background: var(--error-tint);
+  background: var(--warning-surface);
   text-align: start;
 }
 
@@ -265,13 +250,13 @@
 }
 
 .error-boundary--notice .error-boundary__title {
-  font-size: 12px;
+  font-size: var(--text-label);
 }
 
 .error-boundary--notice .error-boundary__message,
 .error-boundary--notice .error-boundary__feedback {
   margin-top: 3px;
-  font-size: 12px;
+  font-size: var(--text-label);
 }
 
 .error-boundary--notice .error-boundary__feedback:empty {

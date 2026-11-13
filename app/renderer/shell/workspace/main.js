@@ -633,7 +633,7 @@ function closeCurrentFile() {
   ui.emptyState.hidden = false
   navigator.select(null)
   syncReviewState()
-  requireElement(app, '#save-state', HTMLElement).textContent = 'Autosave on'
+  setSaveLabel('Autosave on')
   const outline = ui.navigator.querySelector('.navigator-outline .symbol-list')
   if (outline) outline.textContent = 'Open a file to see its outline'
 }
@@ -1103,7 +1103,7 @@ async function openFile(
   ui.feed.replaceChildren(card.element)
   ideas?.refreshContext()
   ui.emptyState.hidden = true
-  requireElement(app, '#save-state', HTMLElement).textContent = 'Autosave on'
+  setSaveLabel('Autosave on')
   navigator.select(file.path)
   if (focusReview) openComparison(card, comparison)
   else {
@@ -1690,7 +1690,7 @@ function renderDocument(card, document) {
       card.pendingMatch = null
       card.previewRaw = false
     }
-    requireElement(app, '#save-state', HTMLElement).textContent = 'Read only'
+    setSaveLabel('Read only')
     releaseEditor(card)
     howmany?.clearFile(card)
     const outline = ui.navigator.querySelector('.navigator-outline .symbol-list')
@@ -1724,7 +1724,7 @@ function renderDocument(card, document) {
   if (reading) {
     releaseEditor(card)
     howmany?.clearFile(card)
-    requireElement(app, '#save-state', HTMLElement).textContent = 'Read only'
+    setSaveLabel('Read only')
     const words = text.trim().split(/\s+/).filter(Boolean).length
     card.lines.textContent = `${words.toLocaleString()} words · ${Math.max(1, Math.ceil(words / 220))} min read`
     card.language.textContent = 'Markdown'
@@ -2031,6 +2031,13 @@ function revealContentMatch(card) {
   if (!globalThis.document.querySelector('dialog[open]')) card.editor.focus()
 }
 
+/** @param {string} label @param {string} [state] */
+function setSaveLabel(label, state = '') {
+  const indicator = requireElement(app, '#save-state', HTMLElement)
+  indicator.textContent = label
+  indicator.dataset.state = state
+}
+
 /** @param {Card} card */
 function updateSaveLabel(card) {
   /** @type {Record<string, string>} */
@@ -2039,9 +2046,10 @@ function updateSaveLabel(card) {
     error: `Save failed · ${shortcutLabel('save')} to retry`,
     saved: 'Saved',
   }
-  const label = labels[card.saveStatus ?? '']
-  requireElement(app, '#save-state', HTMLElement).textContent =
-    label && card.autosave?.pending ? label : card.document?.editable ? (label ?? 'Autosave on') : 'Read only'
+  const state = card.saveStatus ?? ''
+  const label = labels[state]
+  if (label && (card.autosave?.pending || card.document?.editable)) setSaveLabel(label, state)
+  else setSaveLabel(card.document?.editable ? 'Autosave on' : 'Read only')
 }
 
 /** @param {Card} card @param {string} text */

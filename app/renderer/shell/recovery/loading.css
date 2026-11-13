@@ -1,7 +1,7 @@
 [data-loading-status]::before,
 .placeholder-line {
   background: linear-gradient(90deg, transparent 42%, var(--loading-highlight, currentColor) 50%, transparent 58%) 100%
-    50% / 240% 100% no-repeat var(--loading-track, color-mix(in srgb, currentColor 28%, transparent));
+    50% / 240% 100% no-repeat var(--loading-track, color-mix(in oklab, currentColor 28%, transparent));
 }
 
 [data-loading-status]::before {
@@ -12,7 +12,7 @@
   margin-inline-end: var(--loading-gap, 0.55em);
   vertical-align: 0.18em;
   color: var(--loading-accent, var(--accent));
-  mask: repeating-linear-gradient(90deg, #000 0 calc(100% / 3 - 1px), transparent 0 calc(100% / 3));
+  mask: repeating-linear-gradient(90deg, currentColor 0 calc(100% / 3 - 1px), transparent 0 calc(100% / 3));
   content: '' / '';
 }
 
