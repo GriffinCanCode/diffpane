@@ -1,5 +1,15 @@
 import { packager } from '@electron/packager';
-import { cp, mkdir, mkdtemp, writeFile, rename, readFile, rm } from 'node:fs/promises';
+import {
+  cp,
+  mkdir,
+  mkdtemp,
+  writeFile,
+  rename,
+  readFile,
+  readlink,
+  rm,
+  symlink,
+} from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -98,6 +108,13 @@ await cp(app, destination, {
   mode: constants.COPYFILE_FICLONE,
 });
 execFileSync('codesign', ['--force', '--deep', '--sign', '-', destination], { stdio: 'inherit' });
-await mkdir(path.join(userDirectory, '.local/bin'), { recursive: true });
-await writeFile(path.join(userDirectory, '.local/bin/diffpane'), launcher, { mode: 0o755 });
-console.log(`Installed ${destination}\nRun diffpane in a Git working directory.`);
+const bin = path.join(userDirectory, '.local/bin');
+await mkdir(bin, { recursive: true });
+await writeFile(path.join(bin, 'diffpane'), launcher, { mode: 0o755 });
+const shortLauncher = path.join(bin, 'dp');
+try {
+  await symlink('diffpane', shortLauncher);
+} catch (error) {
+  if ((await readlink(shortLauncher).catch(() => null)) !== 'diffpane') throw error;
+}
+console.log(`Installed ${destination}\nRun dp or diffpane to open Diffpane.`);

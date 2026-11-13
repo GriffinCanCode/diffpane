@@ -38,7 +38,7 @@ Diffpane is a desktop file browser and editor for reading code while an agent wo
 
 An agent's chat window doesn't always give you a way to browse the project. Opening another IDE just to read files adds another app, more memory use, and sometimes another subscription. This is a separate window for that part of the work.
 
-Run your agent as usual, then run `diffpane` in your project folder. The file explorer shows the project, and the editor shows the full file. Files update when the agent saves changes, so you can follow along without reopening them.
+Run your agent as usual, then run `dp` in your project folder. The file explorer shows the project, and the editor shows the full file. Files update when the agent saves changes, so you can follow along without reopening them.
 
 Git changes are marked beside the line numbers. You can compare files against HEAD. Edit files yourself; edits save automatically.
 
@@ -74,12 +74,12 @@ make install
 Then, from any project folder:
 
 ```sh
-diffpane
+dp
 ```
 
-The app goes in `~/Applications`. The command goes in `~/.local/bin`, which needs to be on your PATH. A path is optional: `diffpane ~/Projects/your-project` opens another folder.
+The app goes in `~/Applications`. The `dp` and `diffpane` commands go in `~/.local/bin`, which needs to be on your PATH. Use `dp ~/Projects/your-project` to open another folder.
 
-Opening Diffpane from Finder or the Dock shows a welcome screen. Choose Open Folder or Open File to browse a Git working tree, or reopen a recent file or folder. The terminal command opens the current directory by default.
+The terminal command opens the current directory when it belongs to a Git working tree. Running it outside Git or opening Diffpane from Finder or the Dock shows the welcome screen. Choose Open Folder or Open File to browse a Git working tree, or reopen a recent file or folder.
 
 ⌘N opens a new welcome window and ⌘O opens the folder picker. ⌘P finds files, ⌘F searches a file, and ⌘B shows or hides the explorer.
 
