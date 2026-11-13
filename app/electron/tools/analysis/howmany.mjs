@@ -181,6 +181,10 @@ export class HowManyRuntime {
   timer
   /** @type {Promise<AnalysisState> | null} */
   analysis = null
+  /** @type {Set<Promise<void>>} */
+  retiringLanguages = new Set()
+  /** @type {Promise<void> | undefined} */
+  shutdown
   /** @type {number | undefined} */
   analyzedGeneration
   /** @type {string | undefined} */
@@ -416,7 +420,13 @@ export class HowManyRuntime {
     this.version = undefined
     const previous = this.languages
     this.languages = this.createLanguages()
-    await previous.dispose()
+    const retiring = previous.dispose()
+    this.retiringLanguages.add(retiring)
+    try {
+      await retiring
+    } finally {
+      this.retiringLanguages.delete(retiring)
+    }
   }
 
   /**
@@ -476,25 +486,29 @@ export class HowManyRuntime {
         const result = await languages.open(
           { path: relative, language: 'howmany', languageId: 'howmany', text, version },
           undefined,
+          signal,
         )
         if (signal.aborted) return null
-        if (!result.available) throw new Error('HowMany live counts unavailable')
-        /** @type {unknown} */
-        const lenses = await languages.request({
-          path: relative,
-          language: 'howmany',
-          method: 'textDocument/codeLens',
-          version,
-          signal,
-          text: undefined,
-          requestId: undefined,
-        })
-        if (signal.aborted) return null
-        /** @type {unknown} */
-        const lens = Array.isArray(lenses) ? lenses[0] : undefined
-        const command = isRecord(lens) ? lens.command : undefined
-        const title = isRecord(command) && typeof command.title === 'string' ? command.title : ''
-        return { path: relative, title, live: true }
+        if (result.available) {
+          /** @type {unknown} */
+          const lenses = await languages.request({
+            path: relative,
+            language: 'howmany',
+            method: 'textDocument/codeLens',
+            version,
+            signal,
+            text: undefined,
+            requestId: undefined,
+          })
+          if (signal.aborted) return null
+          /** @type {unknown} */
+          const lens = Array.isArray(lenses) ? lenses[0] : undefined
+          const command = isRecord(lens) ? lens.command : undefined
+          const title = isRecord(command) && typeof command.title === 'string' ? command.title : ''
+          return { path: relative, title, live: true }
+        }
+        this.liveFile = null
+        languages.close(relative)
       }
       const report = validateReport(JSON.parse(await this.run([absolute, ...ANALYSIS_ARGS], signal)), false)
       if (signal.aborted) return null
@@ -521,10 +535,17 @@ export class HowManyRuntime {
   }
 
   async dispose() {
+    if (this.disposed) return this.shutdown
     this.disposed = true
     clearTimeout(this.timer)
     this.closeFile()
     for (const child of this.processes) this.kill(child)
-    await Promise.allSettled([this.analysis, ...this.work, this.languages.dispose()])
+    this.shutdown = Promise.allSettled([
+      this.analysis,
+      ...this.work,
+      ...this.retiringLanguages,
+      this.languages.dispose(),
+    ]).then(() => undefined)
+    return this.shutdown
   }
 }

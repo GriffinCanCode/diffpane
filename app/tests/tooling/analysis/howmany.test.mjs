@@ -148,6 +148,15 @@ test('older CLI counts files with literal argument paths and never launches its 
   assert.equal(runtime.languages.servers.size, 0)
 })
 
+test('file counts fall back to the CLI when an advertised live server cannot start', async t => {
+  const { runtime } = await fixture(t)
+  const result = await runtime.file('name with spaces;echo.js', async () => '', 'failed-server')
+
+  assert.equal(result?.live, false)
+  assert.equal(result?.title, '4 lines · 2 code · 1 comment · 1 blank')
+  assert.equal(runtime.languages.documents.size, 0)
+})
+
 test('workspace reports require source totals instead of relabeling older all-content totals', async t => {
   const { runtime } = await fixture(t, { version: '3.0.0' })
   const state = await runtime.analyze()
@@ -260,6 +269,28 @@ test('timeouts and disposal terminate owned analysis processes', async t => {
     events.filter(event => event.type === 'process' && event.status === 'started').length,
     events.filter(event => event.type === 'process' && event.status === 'stopped').length,
   )
+})
+
+test('shutdown waits for a language runtime being replaced by a config reload', async t => {
+  const { runtime } = await fixture(t)
+  /** @type {PromiseWithResolvers<void>} */
+  const retired = Promise.withResolvers()
+  const previous = runtime.languages
+  vi.spyOn(previous, 'dispose').mockReturnValueOnce(retired.promise)
+  const configuration = runtime.configure(new AbortController().signal)
+  await vi.waitFor(() => assert.notEqual(runtime.languages, previous))
+
+  const shutdown = runtime.dispose()
+  const repeated = runtime.dispose()
+  const firstFinished = vi.fn()
+  const secondFinished = vi.fn()
+  const observed = [shutdown.then(firstFinished), repeated.then(secondFinished)]
+  await delay(0)
+  const finishedEarly = [firstFinished.mock.calls.length, secondFinished.mock.calls.length]
+  retired.resolve()
+  await Promise.all([configuration, ...observed])
+
+  assert.deepEqual(finishedEarly, [0, 0])
 })
 
 test('bundling rejects a changed source archive before compilation', () => {
