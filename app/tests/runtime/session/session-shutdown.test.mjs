@@ -14,7 +14,7 @@ import { postWorkerMessage, sessionResponse, workerFailure, workerMessage } from
 /** @import { WorkerMessage, TestedMethod, SessionResponse } from './session-fixture.ts' */
 
 /** @param {TestContext} t */
-async function fixture(t, { holdSnapshot = false } = {}) {
+async function fixture(t, { holdSnapshot = false, failUnsubscribe = false } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'diffpane-session-shutdown-'))
   execFileSync('git', ['init', '-q', root], {
     env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' },
@@ -26,6 +26,7 @@ async function fixture(t, { holdSnapshot = false } = {}) {
       `data:text/javascript,${encodeURIComponent(`
         import watcher from ${JSON.stringify(import.meta.resolve('@parcel/watcher'))};
         import { Repository } from ${JSON.stringify(new URL('../../../electron/workspace/repository/repository.mjs', import.meta.url).href)};
+        import { DiffRuntime } from ${JSON.stringify(new URL('../../../electron/workspace/comparison/diff-runtime.ts', import.meta.url).href)};
         import { parentPort, workerData } from 'node:worker_threads';
         const gates = new Map();
         const pause = name => new Promise(resolve => gates.set(name, resolve));
@@ -39,6 +40,11 @@ async function fixture(t, { holdSnapshot = false } = {}) {
           if (method === 'language-dispose') notice('dispose-requested');
         });
         let subscriptions = 0;
+        const dispose = DiffRuntime.prototype.dispose;
+        DiffRuntime.prototype.dispose = async function () {
+          await dispose.call(this);
+          notice('diff-disposed');
+        };
         watcher.subscribe = async () => {
           const pending = pause('subscribe');
           notice('subscribe-started', ++subscriptions);
@@ -50,6 +56,7 @@ async function fixture(t, { holdSnapshot = false } = {}) {
               notice('unsubscribe-started');
               await pending;
               notice('unsubscribe-finished');
+              if (${JSON.stringify(failUnsubscribe)}) throw new Error('unsubscribe failed');
             },
           };
         };
@@ -204,5 +211,22 @@ test.for([
     session.messages.findIndex(message => message.event === 'test-unsubscribe-finished') <
       session.messages.findIndex(message => message.id === disposal.id),
     'the disposal acknowledgement follows completed watcher cleanup',
+  )
+})
+
+test('disposal rejects new requests, releases tools and exits after a watcher cleanup failure', async t => {
+  const session = await fixture(t, { failUnsubscribe: true })
+  const disposal = session.request('language-dispose')
+  await session.notice('dispose-requested')
+  await assert.rejects(session.request('snapshot').response, { code: 'WINDOW_UNAVAILABLE' })
+  session.signal('subscribe')
+  await session.notice('unsubscribe-started')
+  session.signal('unsubscribe')
+  await session.notice('diff-disposed')
+  await assert.rejects(disposal.response, /unsubscribe failed/u)
+  assert.equal(await session.waitForExit(), 0)
+  assert.equal(
+    session.messages.some(message => message.event === 'test-snapshot-call'),
+    false,
   )
 })

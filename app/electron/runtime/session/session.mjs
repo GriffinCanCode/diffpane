@@ -95,6 +95,8 @@ let externalReviewTimer
 /** @type {Stamps} */
 let externalReviewPaths = new Map()
 let shuttingDown = false
+/** @type {Set<Promise<void>>} */
+const activeRequests = new Set()
 /** @type {AbortController | undefined} */
 let contentSearchController
 let directoryChanges = Promise.resolve()
@@ -770,13 +772,41 @@ port.on('message', (/** @type {unknown} */ message) => {
     respondError(request.id, request.failure, 'workspace-message')
     return
   }
-  receive(request).catch((/** @type {unknown} */ cause) => reportUpdateError(cause, 'workspace-message'))
+  if (shuttingDown) {
+    respondError(request.id, appError('The workspace is closing.', { code: 'WINDOW_UNAVAILABLE' }), request.method)
+    return
+  }
+  const pendingRequest = receive(request)
+  if (request.method !== 'language-dispose') activeRequests.add(pendingRequest)
+  pendingRequest
+    .finally(() => activeRequests.delete(pendingRequest))
+    .catch((/** @type {unknown} */ cause) => reportUpdateError(cause, 'workspace-message'))
 })
 
 /** @param {number} id @param {unknown} cause @param {string} operation */
 function respondError(id, cause, operation) {
   const failure = serializeAppError(cause, { operation })
   port.postMessage({ id, error: failure.message, failure })
+}
+
+async function dispose() {
+  shuttingDown = true
+  contentSearchController?.abort()
+  clearTimeout(timer)
+  clearTimeout(fallbackTimer)
+  clearTimeout(externalReviewTimer)
+  documents.dispose()
+  await watchSetup
+  // A renderer can request its first snapshot while native subscriptions are
+  // still starting. Join it before releasing the tools that consume snapshots.
+  const [unsubscribed] = await Promise.all([
+    Promise.allSettled(subscriptions.map(async subscription => subscription.unsubscribe())),
+    Promise.allSettled([checkpointCapture, currentRefresh]),
+  ])
+  const stopped = await Promise.allSettled([languages.dispose(), diffs.dispose(), howmany.dispose()])
+  await Promise.allSettled(activeRequests)
+  const failure = [...unsubscribed, ...stopped].find(result => result.status === 'rejected')
+  if (failure) throw appError(failure.reason)
 }
 
 /** @param {import('./session-protocol.ts').SessionRequest} request */
@@ -921,19 +951,7 @@ async function receive({ id, method, args }) {
       value = null
     } else if (method === 'language-status') value = languages.status()
     else if (method === 'language-dispose') {
-      shuttingDown = true
-      contentSearchController?.abort()
-      clearTimeout(timer)
-      clearTimeout(fallbackTimer)
-      clearTimeout(externalReviewTimer)
-      documents.dispose()
-      // A renderer can request its first snapshot while native subscriptions
-      // are still starting. Let that work finish before tearing down its isolate.
-      await watchSetup
-      await Promise.all(subscriptions.map(subscription => subscription.unsubscribe()))
-      await checkpointCapture?.catch(() => {})
-      await currentRefresh?.catch(() => {})
-      await Promise.all([languages.dispose(), diffs.dispose(), howmany.dispose()])
+      await dispose()
       value = null
     } else if (method === 'refresh') {
       force = true
@@ -943,9 +961,10 @@ async function receive({ id, method, args }) {
       value = { documents: documents.stats(), inventoryRevision: catalogRevision, revision }
     else throw new Error('Unknown request')
     port.postMessage({ id, value })
-    if (method === 'language-dispose') port.close()
   } catch (error) {
     respondError(id, error, method)
+  } finally {
+    if (method === 'language-dispose') port.close()
   }
 }
 
@@ -1009,11 +1028,8 @@ const watchSetup = (async () => {
         if (force || livePaths.size) port.postMessage({ event: 'paths', value: force ? ['*'] : [...livePaths] })
         if (force || changes.size) schedule()
       })
-      if (shuttingDown) {
-        // oxlint-disable-next-line eslint/no-await-in-loop -- Join a subscription that finished during shutdown.
-        await subscription.unsubscribe()
-        break
-      }
+      // Disposal joins setup before unsubscribing, including a subscription
+      // returned after shutdown began.
       subscriptions.push(subscription)
     } catch (error) {
       if (!shuttingDown) watchFailed(`Live watcher unavailable: ${appError(error).message}`)
