@@ -53,7 +53,8 @@ protocol.registerSchemesAsPrivileged([
 ])
 let nextRequest = 0
 let nextFlush = 0
-let quitting = false
+/** @type {'running' | 'flushing' | 'draining' | 'quitting'} */
+let quitPhase = 'running'
 /** @type {Set<Promise<void>>} */
 const shutdowns = new Set()
 /** @type {string[]} */
@@ -65,29 +66,29 @@ const shortcutPreferences = new ShortcutPreferences(localState, path.join(userDa
 /** @type {ShortcutOverrides} */
 let shortcutOverrides = {}
 let shortcutUpdates = Promise.resolve()
-let updatingShortcuts = false
 const claudeCredentials = new ClaudeCredentials(path.join(userData, 'claude-key'))
 const ideaStore = new IdeaStore(localState, path.join(userData, 'ideas.sqlite'))
 const reviewNotes = new ReviewNotesStore(localState, path.join(userData, 'review-notes', 'notes.sqlite'))
 let reviewNoteUpdates = Promise.resolve()
-let updatingReviewNotes = false
 const recentTargets = new RecentTargets(localState, path.join(userData, 'recent-targets.json'), error =>
   logError(error, 'recent-targets-storage'),
 )
 let recentUpdates = Promise.resolve()
-let updatingRecents = false
 let preferenceUpdates = Promise.resolve()
 let preferenceRevision = 0
 /** @type {Set<Promise<unknown>>} */
 const storageOperations = new Set()
 
-/** @template T @param {Promise<T>} pending */
-async function drainStorageOnQuit(pending) {
-  storageOperations.add(pending)
+/** @type {Set<Promise<unknown>>} */
+const mutationOperations = new Set()
+
+/** @template T @param {Set<Promise<unknown>>} operations @param {Promise<T>} pending */
+async function trackOperation(operations, pending) {
+  operations.add(pending)
   try {
     return await pending
   } finally {
-    storageOperations.delete(pending)
+    operations.delete(pending)
   }
 }
 
@@ -162,9 +163,16 @@ function workspaceMedia(value) {
 function handle(channel, listener) {
   ipcMain.handle(channel, async (event, ...args) => {
     const input = /** @type {unknown[]} */ (args)
-    const result = await attemptAsync(() => listener(sessionFor(event), event, ...input), {
-      operation: channel,
-    })
+    const result = await attemptAsync(
+      () => {
+        if (quitPhase === 'draining' || quitPhase === 'quitting')
+          throw appError('Diffpane is closing.', { code: 'WINDOW_UNAVAILABLE' })
+        return listener(sessionFor(event), event, ...input)
+      },
+      {
+        operation: channel,
+      },
+    )
     if (result.ok) return result
     if (result.error.code === 'UNEXPECTED') logError(result.error, channel)
     return { ok: false, error: serializeAppError(result.error) }
@@ -182,42 +190,39 @@ function onRenderer(channel, listener) {
 
 /** @param {string} operation @param {() => unknown} run */
 function windowAction(operation, run) {
+  if (quitPhase !== 'running') return
   runBackground(operation, run, error => dialog.showErrorBox('Diffpane could not complete that action', error.message))
 }
 
 /** @param {string} target */
 function rememberTarget(target) {
-  updatingRecents = true
-  const update = (recentUpdates = recentUpdates.then(() =>
-    background('record-recent-target', () => recentTargets.record(target)),
-  ))
-  runBackground('record-recent-target', async () => {
-    try {
-      await update
-    } finally {
-      if (recentUpdates === update) updatingRecents = false
-    }
-  })
+  if (quitPhase === 'draining' || quitPhase === 'quitting') return
+  recentUpdates = recentUpdates.then(() => background('record-recent-target', () => recentTargets.record(target)))
+  runBackground('record-recent-target', () => trackOperation(storageOperations, recentUpdates))
 }
 
 /** @template T @param {WindowSession} session @param {readonly string[]} files @param {() => Promise<T>} change */
-async function changeFiles(session, files, change) {
-  const root = await session.root()
-  const keys = [...new Set(files.map(file => path.resolve(root, file)))]
-  const previous = keys.flatMap(key => {
-    const operation = fileChanges.get(key)
-    return operation ? [operation] : []
-  })
-  const pending = (async () => {
-    await Promise.allSettled(previous)
-    return change()
-  })()
-  for (const key of keys) fileChanges.set(key, pending)
-  try {
-    return await pending
-  } finally {
-    for (const key of keys) if (fileChanges.get(key) === pending) fileChanges.delete(key)
-  }
+function changeFiles(session, files, change) {
+  return trackOperation(
+    mutationOperations,
+    session.root().then(async root => {
+      const keys = [...new Set(files.map(file => path.resolve(root, file)))]
+      const previous = keys.flatMap(key => {
+        const operation = fileChanges.get(key)
+        return operation ? [operation] : []
+      })
+      const pending = (async () => {
+        await Promise.allSettled(previous)
+        return change()
+      })()
+      for (const key of keys) fileChanges.set(key, pending)
+      try {
+        return await pending
+      } finally {
+        for (const key of keys) if (fileChanges.get(key) === pending) fileChanges.delete(key)
+      }
+    }),
+  )
 }
 
 /** @param {string | null} [directory] */
@@ -479,11 +484,16 @@ function createWindow(directory = null) {
         let timer
         let graceful = false
         try {
-          if (!fatal)
+          if (!fatal) {
+            const disposed = this.call('language-dispose').then(
+              () => workerExited,
+              async (/** @type {unknown} */ error) => {
+                if (!fatal) logError(error, 'dispose-workspace')
+                await workerExited
+              },
+            )
             graceful = await Promise.race([
-              this.call('language-dispose')
-                .then(() => workerExited)
-                .then(() => true),
+              disposed.then(() => true),
               new Promise(
                 /** @type {(resolve: (success: boolean) => void) => void} */ (
                   resolve => {
@@ -492,6 +502,7 @@ function createWindow(directory = null) {
                 ),
               ),
             ])
+          }
         } catch (error) {
           if (!fatal) logError(error, 'dispose-workspace')
         } finally {
@@ -522,17 +533,22 @@ function createWindow(directory = null) {
   if (directory) startWorker()
   let allowClose = false
   window.on('close', event => {
-    if (quitting || allowClose) return
+    if (quitPhase === 'quitting' || allowClose) return
     event.preventDefault()
+    if (quitPhase !== 'running') return
     runBackground(
       'close-window',
       async () => {
-        if ((await session.flush()) && !window.isDestroyed()) {
+        const flushed = await session.flush()
+        if (quitPhase !== 'running') return
+        if (flushed && !window.isDestroyed()) {
           allowClose = true
           window.close()
         } else send(session.contents, 'resume-editing')
       },
-      () => send(session.contents, 'resume-editing'),
+      () => {
+        if (quitPhase === 'running') send(session.contents, 'resume-editing')
+      },
     )
   })
   window.on('closed', () => {
@@ -558,7 +574,7 @@ function createWindow(directory = null) {
     // An exited renderer has no buffers left to flush. Keep the flag for the warning.
     session.hasPendingSaves = false
     runBackground('detach-renderer', detachRenderer)
-    if (!quitting && details.reason !== 'clean-exit') {
+    if (quitPhase === 'running' && details.reason !== 'clean-exit') {
       const error = appError(`The window stopped responding (${details.reason}).`, {
         code: 'RENDERER_UNAVAILABLE',
         operation: 'render-window',
@@ -629,7 +645,6 @@ function openSettings() {
 
 /** @param {() => Promise<ShortcutOverrides>} read */
 function updateShortcuts(read) {
-  updatingShortcuts = true
   const result = shortcutUpdates.then(async () => {
     const overrides = await read()
     const changed = Object.keys(shortcuts)
@@ -644,15 +659,11 @@ function updateShortcuts(read) {
     }
     return overrides
   })
-  const pending = (shortcutUpdates = result.then(
+  shortcutUpdates = result.then(
     () => undefined,
     () => undefined,
-  ))
-  runBackground('settle-shortcuts', async () => {
-    await pending
-    if (shortcutUpdates === pending) updatingShortcuts = false
-  })
-  return result
+  )
+  return trackOperation(storageOperations, result)
 }
 
 function refreshShortcuts() {
@@ -667,7 +678,7 @@ async function chooseTarget(window, kind) {
     title: kind === 'file' ? 'Open a file' : 'Open a folder',
   }
   const result = await (window ? dialog.showOpenDialog(window, options) : dialog.showOpenDialog(options))
-  if (result.canceled || !result.filePaths[0]) return false
+  if (result.canceled || !result.filePaths[0] || quitPhase !== 'running') return false
   openTarget(result.filePaths[0], window)
   return true
 }
@@ -753,7 +764,7 @@ const claudeHandlers = {
         changeFiles(session, [filename], () => session.call('claude-save', [filename, text, expected])),
       saveIdea: async (idea, expected) => {
         const root = await session.root()
-        const saved = await drainStorageOnQuit(ideaStore.applyDraft(root, idea, expected))
+        const saved = await ideaStore.applyDraft(root, idea, expected)
         broadcastIdeaChange(root, null, { type: 'upsert', idea: saved })
         return saved
       },
@@ -776,7 +787,12 @@ function resetClaudeSessions(status) {
 }
 
 for (const [method, handler] of Object.entries(claudeHandlers)) {
-  handle(`claude-${method}`, (session, _event, input) => handler(session, input))
+  handle(`claude-${method}`, (session, _event, input) => {
+    if (method === 'apply') return trackOperation(mutationOperations, Promise.resolve(handler(session, input)))
+    if (method === 'save-key' || method === 'remove-key')
+      return trackOperation(storageOperations, Promise.resolve(handler(session, input)))
+    return handler(session, input)
+  })
 }
 
 /** @type {Record<string, (store: IdeaStore, root: string, input: unknown, sender: WebContents) => unknown>} */
@@ -802,15 +818,17 @@ function broadcastIdeaChange(root, sender, change) {
 
 for (const [method, handler] of Object.entries(ideaHandlers)) {
   handle(`ideas-${method}`, (session, event, input) =>
-    drainStorageOnQuit(session.root().then(root => handler(ideaStore, root, input, event.sender))),
+    trackOperation(
+      storageOperations,
+      session.root().then(root => handler(ideaStore, root, input, event.sender)),
+    ),
   )
 }
 
 for (const method of ['list', 'change', 'copy']) {
-  handle(`review-notes-${method}`, async (session, _event, input) => {
+  const updateNotes = async (/** @type {WindowSession} */ session, /** @type {unknown} */ input) => {
     const { root, scope } = await session.reviewWorkspace()
     if (method === 'change') {
-      updatingReviewNotes = true
       const result = reviewNoteUpdates.then(async () => {
         const notes = await reviewNotes.change(root, scope, input)
         const scopes = new Map([[scope, Promise.resolve(notes)]])
@@ -832,14 +850,10 @@ for (const method of ['list', 'change', 'copy']) {
         }
         return notes
       })
-      const update = (reviewNoteUpdates = result.then(
+      reviewNoteUpdates = result.then(
         () => undefined,
         () => undefined,
-      ))
-      runBackground('settle-review-notes', async () => {
-        await update
-        if (reviewNoteUpdates === update) updatingReviewNotes = false
-      })
+      )
       return result
     }
     await reviewNoteUpdates
@@ -848,7 +862,10 @@ for (const method of ['list', 'change', 'copy']) {
     const { count, text } = formatReviewHandoff(notes)
     if (count) await clipboard.writeText(text)
     return count
-  })
+  }
+  handle(`review-notes-${method}`, (session, _event, input) =>
+    trackOperation(storageOperations, updateNotes(session, input)),
+  )
 }
 
 handle('restart-workspace', session => session.restart())
@@ -934,7 +951,7 @@ function queuePreferenceUpdate(update) {
     () => undefined,
     () => undefined,
   )
-  return drainStorageOnQuit(result)
+  return trackOperation(storageOperations, result)
 }
 
 const uiPreferenceCollection = 'ui-preferences'
@@ -985,24 +1002,31 @@ handle('preferences-set', (_session, _event, key, input) =>
 
 for (const kind of /** @type {const} */ (['folder', 'file']))
   handle(`open-${kind}`, (_session, event) => chooseTarget(BrowserWindow.fromWebContents(event.sender), kind))
-handle('recent-targets', async () => {
-  await recentUpdates
-  return recentTargets.list()
-})
-handle('open-recent', async (_session, event, target) => {
-  await recentUpdates
-  const recent = (await recentTargets.list()).find(entry => entry.path === target)
-  if (!recent) return false
-  const metadata = await attemptAsync(() => stat(recent.path))
-  if (!metadata.ok && !['ENOENT', 'ENOTDIR'].includes(metadata.error.code)) throw metadata.error
-  const info = metadata.ok ? metadata.value : null
-  if (!info || (recent.kind === 'file' ? !info.isFile() : !info.isDirectory())) {
-    await recentTargets.remove(recent.path)
-    return false
-  }
-  openTarget(recent.path, BrowserWindow.fromWebContents(event.sender))
-  return true
-})
+handle('recent-targets', () =>
+  trackOperation(
+    storageOperations,
+    recentUpdates.then(() => recentTargets.list()),
+  ),
+)
+handle('open-recent', (_session, event, target) =>
+  trackOperation(
+    storageOperations,
+    recentUpdates.then(async () => {
+      const recent = (await recentTargets.list()).find(entry => entry.path === target)
+      if (!recent) return false
+      const metadata = await attemptAsync(() => stat(recent.path))
+      if (!metadata.ok && !['ENOENT', 'ENOTDIR'].includes(metadata.error.code)) throw metadata.error
+      const info = metadata.ok ? metadata.value : null
+      if (!info || (recent.kind === 'file' ? !info.isFile() : !info.isDirectory())) {
+        await recentTargets.remove(recent.path)
+        return false
+      }
+      if (quitPhase !== 'running') return false
+      openTarget(recent.path, BrowserWindow.fromWebContents(event.sender))
+      return true
+    }),
+  ),
+)
 handle('howmany-export', async (session, event) => {
   const analysis = await session.call('howmany-analyze')
   if (typeof analysis !== 'object' || analysis === null || !('report' in analysis) || !analysis.report)
@@ -1106,7 +1130,8 @@ runBackground(
     setApplicationMenu()
     runBackground('load-shortcuts', refreshShortcuts)
     runBackground('migrate-local-state', () =>
-      drainStorageOnQuit(
+      trackOperation(
+        storageOperations,
         Promise.all([
           background('migrate-ideas', () => ideaStore.initialize()),
           background('migrate-review-notes', () => reviewNotes.initialize()),
@@ -1114,7 +1139,9 @@ runBackground(
         ]),
       ),
     )
-    app.on('browser-window-focus', () => runBackground('load-shortcuts', refreshShortcuts))
+    app.on('browser-window-focus', () => {
+      if (quitPhase === 'running') runBackground('load-shortcuts', refreshShortcuts)
+    })
     const args = process.argv.slice(1).filter(argument => !argument.startsWith('-'))
     if (!app.isPackaged) args.shift()
     const targets = new Set(pendingOpenPaths.splice(0))
@@ -1130,24 +1157,22 @@ runBackground(
     app.exit(1)
   },
 )
-let preparingQuit = false
 function resumeEditing() {
   for (const session of sessions.values()) send(session.contents, 'resume-editing')
 }
 app.on('before-quit', event => {
+  if (quitPhase === 'quitting') return
   if (
-    quitting ||
-    (!sessions.size &&
-      !shutdowns.size &&
-      !updatingRecents &&
-      !updatingReviewNotes &&
-      !updatingShortcuts &&
-      !storageOperations.size)
+    quitPhase === 'running' &&
+    !sessions.size &&
+    !shutdowns.size &&
+    !storageOperations.size &&
+    !mutationOperations.size
   )
     return
   event.preventDefault()
-  if (preparingQuit) return
-  preparingQuit = true
+  if (quitPhase !== 'running') return
+  quitPhase = 'flushing'
   runBackground(
     'quit-app',
     async () => {
@@ -1157,20 +1182,14 @@ app.on('before-quit', event => {
           resumeEditing()
           return
         }
+        quitPhase = 'draining'
+        await Promise.allSettled(mutationOperations)
         const pending = [...sessions.values()].map(session => session.stop())
-        await Promise.allSettled([
-          ...pending,
-          ...shutdowns,
-          ...fileChanges.values(),
-          ...storageOperations,
-          recentUpdates,
-          reviewNoteUpdates,
-          shortcutUpdates,
-        ])
-        quitting = true
+        await Promise.allSettled([...pending, ...shutdowns, ...storageOperations])
+        quitPhase = 'quitting'
         app.quit()
       } finally {
-        preparingQuit = false
+        if (quitPhase !== 'quitting') quitPhase = 'running'
       }
     },
     resumeEditing,
