@@ -592,7 +592,14 @@ export function createWorkspaceLayout(workspace: HTMLElement, preferences: UiPre
     },
     { ...options, capture: true },
   )
-  window.addEventListener('blur', stopDock, options)
+  window.addEventListener(
+    'blur',
+    () => {
+      stopDrag(false)
+      stopDock()
+    },
+    options,
+  )
 
   refresh()
   const unsubscribe = preferences.onChange('layout', applyPreferences)
