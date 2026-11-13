@@ -19,28 +19,23 @@
   <body>
     <section class="workspace-opening" id="workspace-opening" aria-labelledby="workspace-opening-title">
       <div class="workspace-opening__field" aria-hidden="true">
-        <span class="workspace-opening__piece workspace-opening__glyph--code">
-          <span class="workspace-opening__glyph">&lt;/&gt;</span>
-        </span>
-        <span class="workspace-opening__piece workspace-opening__glyph--file">
-          <span class="workspace-opening__glyph"></span>
-        </span>
-        <span class="workspace-opening__piece workspace-opening__glyph--diff">
-          <span class="workspace-opening__glyph"><span>+</span><span>−</span></span>
-        </span>
-        <span class="workspace-opening__piece workspace-opening__glyph--branch">
-          <span class="workspace-opening__glyph"></span>
-        </span>
-        <span class="workspace-opening__piece workspace-opening__glyph--prompt">
-          <span class="workspace-opening__glyph">›_</span>
-        </span>
-        <span class="workspace-opening__piece workspace-opening__glyph--commit">
-          <span class="workspace-opening__glyph"></span>
-        </span>
-        <span class="workspace-opening__spark workspace-opening__spark--field-top"></span>
-        <span class="workspace-opening__spark workspace-opening__spark--field-right"></span>
-        <span class="workspace-opening__spark workspace-opening__spark--field-bottom"></span>
-        <span class="workspace-opening__spark workspace-opening__spark--field-left"></span>
+        <div class="workspace-opening__graph">
+          <span class="workspace-opening__trace workspace-opening__trace--main"></span>
+          <span class="workspace-opening__trace workspace-opening__trace--added"></span>
+          <span class="workspace-opening__trace workspace-opening__trace--removed"></span>
+          <span class="workspace-opening__piece workspace-opening__commit workspace-opening__commit--main-start"></span>
+          <span class="workspace-opening__piece workspace-opening__commit workspace-opening__commit--main-end"></span>
+          <span
+            class="workspace-opening__piece workspace-opening__commit workspace-opening__commit--added-start"
+          ></span>
+          <span class="workspace-opening__piece workspace-opening__commit workspace-opening__commit--added-end"></span>
+          <span
+            class="workspace-opening__piece workspace-opening__commit workspace-opening__commit--removed-start"
+          ></span>
+          <span
+            class="workspace-opening__piece workspace-opening__commit workspace-opening__commit--removed-end"
+          ></span>
+        </div>
       </div>
       <div class="workspace-opening__card">
         <div class="workspace-opening__scene" aria-hidden="true">

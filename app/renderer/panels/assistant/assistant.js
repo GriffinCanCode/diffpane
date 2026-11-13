@@ -97,8 +97,15 @@ export function createAssistant(
       <div class="claude-conversation" role="log" aria-live="off" aria-label="Conversation" tabindex="0">
         <div class="claude-empty">
           <div class="claude-empty-scene" aria-hidden="true">
-            <span class="claude-empty-file">${icon('file')}</span>
-            <span class="claude-empty-mark">${creatureGlyph}</span>
+            <svg viewBox="0 0 110 65" fill="none" stroke-linecap="round" stroke-linejoin="round">
+              <path class="claude-scene-paper" d="m54 20 24-8 14 7 8 27a3 3 0 0 1-2 4L69 59a3 3 0 0 1-4-2Z"/>
+              <path class="claude-scene-paper" d="m78 12 3 11 11-4"/>
+              <path class="claude-scene-lines" d="m70 34 17-5m-15 12 17-5m-15 12 10-3"/>
+              <path class="claude-scene-creature" d="M9 37c0-6 3-11 7-14l-2-11 12 7a26 26 0 0 1 12 0l12-7-2 11c4 3 7 8 7 14 0 11-10 17-23 17S9 48 9 37Z"/>
+              <path class="claude-scene-highlight" d="M14 35c1-4 3-7 6-9m-1-7 2 5m25-6-1 6"/>
+              <path d="M23 35h.1m18 0h.1" stroke="currentColor" stroke-width="4"/>
+              <path d="M28.5 43q3.5 3.5 7 0" stroke="currentColor" stroke-width="1.8"/>
+            </svg>
           </div>
           <h3></h3>
           <p></p>
