@@ -64,7 +64,14 @@ export function createContentSearch(api: SearchApi, onSelect: (match: ContentMat
       <div class="content-search-results search-dialog-list" id="content-search-results" role="listbox" aria-label="Matching lines" hidden></div>
       <div class="content-search-empty search-dialog-empty" hidden>
         <span class="search-illustration" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round"><path d="M10 5H4m8 5H4m4 5H4"/><circle cx="15.5" cy="13.5" r="4.5"/><path d="m19 17 3 3"/></svg>
+          <svg viewBox="0 0 96 60" fill="none" stroke-linecap="round">
+            <path class="search-art-context" d="M13 14h27M13 24h45M13 34h31M13 44h35"/>
+            <path d="m67 39 13 13" stroke="currentColor" stroke-width="6"/>
+            <path d="m70 42 9 9" stroke="var(--illustration-light)" stroke-width="1.2"/>
+            <circle cx="56" cy="28" r="16" fill="var(--illustration-fill)" stroke="currentColor" stroke-width="2.6"/>
+            <path d="M46 25a11 11 0 0 1 8-7" stroke="var(--illustration-light)" stroke-width="1.4"/>
+            <path d="M46 31h20" stroke="currentColor" stroke-width="3.6"/>
+          </svg>
         </span>
         <p></p>
       </div>

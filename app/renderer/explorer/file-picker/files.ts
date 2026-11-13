@@ -80,7 +80,13 @@ export function createFilePicker(
       <div id="file-list" class="picker-list search-dialog-list" role="listbox" aria-label="Project files" hidden><div class="picker-rows"></div></div>
       <div class="picker-empty search-dialog-empty" hidden>
         <span class="search-illustration" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 19.5v-13a1 1 0 0 1 1-1h5l2 2h8a1 1 0 0 1 1 1V10M3.5 19.5l2.3-7.6a1 1 0 0 1 1-.7h13.6a1 1 0 0 1 .9 1.3l-2.2 6.3a1 1 0 0 1-1 .7H3.5Z"/></svg>
+          <svg viewBox="0 0 96 60" fill="none" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 45V19a3 3 0 0 1 3-3h13l5 5h25a3 3 0 0 1 3 3v21" fill="var(--illustration-fill)" stroke="currentColor" stroke-width="1.5"/>
+            <path d="M35 37V15l22-5 9 8v21" fill="var(--surface-raised)" stroke="var(--illustration-light)" stroke-width="1.3"/>
+            <path d="M57 10v10l9-2m-24 7 13-3" stroke="var(--illustration-light)" stroke-width="1.3"/>
+            <path d="m21 45 6-15a4 4 0 0 1 3.7-2.5h41.5a3 3 0 0 1 2.8 4l-5.8 15a4 4 0 0 1-3.7 2.5H24a3 3 0 0 1-3-4Z" fill="var(--illustration-face)" stroke="currentColor" stroke-width="1.5"/>
+            <path d="M31 31h37" stroke="var(--illustration-light)" stroke-width="1.2"/>
+          </svg>
         </span>
         <strong></strong><p></p>
         <button type="button" class="open-button picker-retry" hidden>Try again</button>
