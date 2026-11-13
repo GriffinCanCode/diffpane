@@ -193,30 +193,26 @@
   display: flex;
   flex: none;
   align-items: end;
-  gap: 3px;
-  padding: 10px 9px;
-  border: 1px solid color-mix(in oklab, var(--accent) 28%, var(--line));
-  border-radius: 9px;
-  background: linear-gradient(140deg, var(--surface-raised), var(--accent-surface));
-  box-shadow:
-    inset 0 1px color-mix(in oklab, var(--text) 8%, transparent),
-    0 2px 0 color-mix(in oklab, var(--accent) 18%, var(--surface)),
-    0 5px 9px color-mix(in oklab, var(--shadow) 55%, transparent);
-  transform: rotate(-6deg);
+  justify-content: center;
+  gap: 4px;
+  width: 34px;
+  height: 27px;
+  padding-block-end: 3px;
+  border-block-end: 1px solid var(--control-border);
 }
 .howmany-chart-glyph i {
-  width: 4px;
-  height: 9px;
-  border-radius: 2px;
+  width: 5px;
+  height: 10px;
+  border-radius: 1px 1px 0 0;
   background: var(--chart-comments);
   transform-origin: bottom;
 }
 .howmany-chart-glyph i:nth-child(2) {
-  height: 17px;
+  height: 22px;
   background: var(--chart-code);
 }
 .howmany-chart-glyph i:nth-child(3) {
-  height: 12px;
+  height: 15px;
   background: var(--chart-docs);
 }
 .howmany-dialog h2 {

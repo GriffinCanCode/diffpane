@@ -185,38 +185,17 @@
   text-align: center;
 }
 
-.review-notes-empty-icon {
-  position: relative;
-  display: grid;
-  width: 44px;
+.review-notes-empty-art {
+  flex: none;
+  width: 76px;
+  max-width: 100%;
   height: 44px;
   margin-bottom: 14px;
-  place-items: center;
-  border: 1px solid color-mix(in oklab, currentColor 28%, var(--line));
-  border-radius: 10px;
-  background: linear-gradient(145deg, var(--surface-raised), var(--violet-surface));
-  box-shadow:
-    inset 0 1px color-mix(in oklab, var(--text) 10%, transparent),
-    0 2px 0 color-mix(in oklab, currentColor 17%, var(--surface)),
-    0 6px 14px color-mix(in oklab, currentColor 13%, transparent);
   color: var(--violet);
-  transform: rotate(7deg);
 }
 
-.review-notes-empty-icon::after {
-  position: absolute;
-  inset: -5px auto auto -10px;
-  width: 9px;
-  height: 9px;
-  background: currentColor;
-  clip-path: polygon(50% 0, 63% 37%, 100% 50%, 63% 63%, 50% 100%, 37% 63%, 0 50%, 37% 37%);
-  opacity: 0.64;
-  content: '';
-}
-
-.review-notes-empty-icon svg {
-  width: 17px;
-  height: 17px;
+.review-notes-empty-context {
+  color: color-mix(in oklab, var(--muted) 32%, var(--surface));
 }
 
 .review-notes-empty h3 {
@@ -347,8 +326,8 @@
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .review-notes-empty-icon {
-    animation: review-note-settle 320ms cubic-bezier(0.2, 0.8, 0.3, 1) both;
+  .review-notes-empty-art {
+    animation: review-note-appear 220ms ease-out both;
   }
 
   .review-notes-card {
@@ -356,10 +335,10 @@
   }
 }
 
-@keyframes review-note-settle {
+@keyframes review-note-appear {
   from {
     opacity: 0;
-    transform: translateY(5px) rotate(14deg) scale(0.9);
+    transform: translateY(3px);
   }
 }
 

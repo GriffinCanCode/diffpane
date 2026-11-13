@@ -54,9 +54,6 @@ const GLYPHS = {
   undo: 'M6 4 3 7l3 3M3 7h6.5a3 3 0 0 1 0 6H8',
   compare: 'M2 3h12v10H2zM8 3v10M4 6h2m4 4h2',
   checkpoint: 'M3.5 13.5v-11m0 1h8l-2 3 2 3h-8',
-  clean: 'M2.5 9 5 4.5h6L13.5 9v3.5h-11zM2.5 9h3l1 1.5h3l1-1.5h3',
-  reviewed: 'M6 2.5h4l3 3v8H3v-11h3m4 0v3h3M6 8h4m-4 3h3',
-  complete: 'M14 8a6 6 0 1 1-12 0 6 6 0 0 1 12 0zM5 8l2 2 4-4',
 }
 
 /** @type {Readonly<Record<string, string>>} */
@@ -116,7 +113,18 @@ export function createChangeReview(container, { onOpen, onBack, onProgress, onCa
         <div class="change-review-rows" role="presentation"></div>
       </div>
       <div class="change-review-empty" hidden>
-        <span class="change-review-empty-icon" aria-hidden="true"></span>
+        <svg class="change-review-empty-art" viewBox="0 0 76 44" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path class="change-review-empty-context" d="M8 10h18m-15 6h8m-8 12h16m-19 6h11m31-24h18m-16 6h8m-7 12h15m-15 6h11M38 7v7m0 16v7"/>
+          <g class="change-review-empty-aligned">
+            <path d="M16 22h19m6 0h19"/><circle cx="38" cy="22" r="3"/>
+          </g>
+          <g class="change-review-empty-pending">
+            <path d="M16 22h15m18 0h11"/>
+            <path d="M35 22h10" stroke-dasharray="1 4"/>
+          </g>
+          <path class="change-review-empty-complete" d="M16 22h12m5 0 4 4 7-8m4 4h12"/>
+          <path class="change-review-empty-unavailable" d="M16 22h15m14 0h15m-22-5v5m0 4v.1"/>
+        </svg>
         <h3 tabindex="-1"></h3>
         <p></p>
         <button type="button" class="change-review-empty-action"></button>
@@ -151,7 +159,6 @@ export function createChangeReview(container, { onOpen, onBack, onProgress, onCa
   const list = requireElement(container, '.change-review-list', HTMLDivElement)
   const rows = requireElement(container, '.change-review-rows', HTMLDivElement)
   const empty = requireElement(container, '.change-review-empty', HTMLDivElement)
-  const emptyIcon = requireElement(empty, '.change-review-empty-icon', HTMLSpanElement)
   const emptyTitle = requireElement(empty, 'h3', HTMLHeadingElement)
   const emptyDescription = requireElement(empty, 'p', HTMLParagraphElement)
   const emptyAction = requireElement(empty, 'button', HTMLButtonElement)
@@ -424,7 +431,6 @@ export function createChangeReview(container, { onOpen, onBack, onProgress, onCa
     const key = state === 'clean' ? cleanState : state
     if (empty.dataset.state === key) return
     empty.dataset.state = key
-    emptyIcon.innerHTML = icon(GLYPHS[state])
     const [title, description, action] = {
       head: ['Working tree is clean', 'New changes will appear here as they happen.'],
       checkpoint: ['No changes since checkpoint', 'New changes will appear here as they happen.'],

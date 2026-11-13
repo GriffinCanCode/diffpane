@@ -22,8 +22,6 @@ interface Draft {
 }
 
 const ICONS = {
-  notes:
-    '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 2.5h9A1.5 1.5 0 0 1 14 4v6a1.5 1.5 0 0 1-1.5 1.5H7l-3.5 2v-2A1.5 1.5 0 0 1 2 10V4a1.5 1.5 0 0 1 1.5-1.5ZM5 6h6M5 8.5h3.5"/></svg>',
   close:
     '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" aria-hidden="true"><path d="m4.5 4.5 7 7m0-7-7 7"/></svg>',
   add: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" aria-hidden="true"><path d="M8 3.5v9m-4.5-4.5h9"/></svg>',
@@ -103,7 +101,11 @@ export function createReviewNotes(
         </div>
       </form>
       <div class="review-notes-empty" hidden>
-        <span class="review-notes-empty-icon" aria-hidden="true">${ICONS.notes}</span>
+        <svg class="review-notes-empty-art" viewBox="0 0 76 44" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path class="review-notes-empty-context" d="M7 10h23m-18 7h12m-12 14h17m-22 7h15"/>
+          <path d="M12 24h23" stroke-width="6" opacity=".15"/>
+          <path d="M12 24h26a7 7 0 0 0 6-3.5l2-3a6 6 0 0 1 5-2.5h17m-13 7h8"/>
+        </svg>
         <h3></h3>
         <p></p>
         <button type="button" class="review-notes-button" data-review-action="retry" hidden>Retry</button>
